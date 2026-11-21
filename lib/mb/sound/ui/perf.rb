@@ -575,7 +575,7 @@ module MB
             says << "Written #{s[:written_per_s].round} of #{s[:refreshes_per_s].round} refreshes a second: #{idle} had nothing new to draw (a frame is written only when a cell changes#{s[:data_per_s] ? "; new data came #{s[:data_per_s].round} times a second" : ''})."
           end
           if sh && sh[:per_s] < s[:written_per_s] * 0.85
-            says << "#{sh[:describe]}: frames written under #{sh[:kind] == :bulk ? '10 ms' : 'its interval'} apart are shown together, about #{sh[:per_s].round} a second.#{sh[:max_fps] ? " ui.target_fps = 60 shows every frame (up to #{sh[:max_fps]}), or ui.pace :terminal." : ''}"
+            says << "#{sh[:describe]}: frames written under #{sh[:kind] == :bulk ? '10 ms' : 'its interval'} apart are shown together, about #{sh[:per_s].round} a second.#{sh[:max_fps] ? " ui.target_fps = 60 shows every frame (up to #{sh[:max_fps]}), or ui.pace :terminal (the default)." : ''}"
           end
           [rows, says]
         end

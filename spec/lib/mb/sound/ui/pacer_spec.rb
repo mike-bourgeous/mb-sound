@@ -276,13 +276,19 @@ RSpec.describe(MB::Sound::UI::Pacer, :aggregate_failures) do
   # shows frames under 10 ms apart together, about 25 a second
   describe 'min_gap' do
     it 'spaces frames at least the gap apart whatever the target, and keeps the target when it is slower' do
-      p = fake(120)
-      p.min_gap = 0.012
-      starts = []
-      p.run(-> { @t >= 5.0 }) { |now| starts << now; @t += 0.001; 'x' }
-      gaps = starts.each_cons(2).map { |a, b| b - a }
-      expect(gaps.min).to be >= 0.012 - 1e-9
-      expect(starts.length).to be_within(3).of(5.0 / 0.012)
+      # (pace-default-1: whole target periods when within 1.5 gaps, so the
+      # frames stay on the target's grid; else the gap)
+      { 120 => 1 / 60.0, 240 => 1 / 80.0, 144 => 2 / 144.0, 100 => 0.012, 90 => 0.012 }.each do |fps, step|
+        p = fake(fps)
+        p.min_gap = 0.012
+        expect(p.gap_step).to be_within(1e-12).of(step)
+        starts = []
+        p.run(-> { @t >= 5.0 }) { |now| starts << now; @t += 0.001; 'x' }
+        gaps = starts.each_cons(2).map { |a, b| b - a }
+        expect(gaps.min).to be >= 0.012 - 1e-9
+        expect(starts.length).to be_within(3).of(5.0 / step), fps.to_s
+      end
+      expect(fake(60).tap { |p| p.min_gap = 0.012 }.gap_step).to be_nil
       p60 = fake(60)
       p60.min_gap = 0.012
       expect(run_for(p60, 10.0, 0.002)).to be_within(1).of(600)
@@ -312,6 +318,61 @@ RSpec.describe(MB::Sound::UI::Pacer, :aggregate_failures) do
       expect(b[:hold_ms][:max]).to be < 0.001 # (the deadlines are 16.7 ms apart: nothing to hold)
       r = fake(60)
       expect { r.hold_before_write }.not_to(change { @t }) # (no gap: nothing)
+    end
+
+    # pace-default-1 (2026-11-21, the gap is the default on Konsole before
+    # 26.04): a woken frame (a key, the REPL's echo) used to start at once
+    # and hold its write for the gap, which then held the deadline's frame
+    # off the grid (typing with ui.smooth: the scope's shown gaps p95 20.9
+    # -> 37.5 ms).  A woken frame without room now waits for the deadline
+    # it slept toward; one with room (a slow target) still runs at once.
+    def woken_run(fps, wakes, seconds, gap: 0.012)
+      @t = 0.0
+      p = described_class.new(fps, clock: -> { @t }, sleeper: lambda { |s|
+        w = wakes.find { |x| x > @t + 1e-12 && x < @t + s }
+        @t = w || @t + s
+      })
+      p.min_gap = gap
+      starts = []
+      writes = []
+      p.run(-> { @t >= seconds }) do |now|
+        starts << now
+        @t += 0.001
+        p.hold_before_write
+        @t += 0.0002
+        p.wrote_at(@t)
+        writes << @t
+        'x'
+      end
+      [p, starts, writes]
+    end
+
+    it 'keeps woken frames on the grid: a woken frame without room waits for its deadline, nothing is held' do
+      p, starts, writes = woken_run(60, [0.1055, 0.2027, 0.2105, 0.3101, 0.4462], 0.5)
+      expect(starts.length).to eq(31) # (the grid's frames from 0 to 0.5 s only: the wakes went to them)
+      starts.each_with_index { |s, i| expect(s).to be_within(1e-6).of(i / 60.0) }
+      expect(writes.each_cons(2).map { |a, b| b - a }.min).to be >= 0.012 - 1e-9
+      expect(p.breakdown(window: 1.0)[:hold_ms][:max]).to eq(0.0)
+      expect(p.offset).to eq(0.0)
+    end
+
+    it 'runs a woken frame at once when it has room before and after it (a slow target), keeping the next deadline' do
+      _p, starts, writes = woken_run(30, [0.05], 0.2)
+      i = starts.index { |s| (s - 0.05).abs < 1e-9 }
+      expect(i).not_to be_nil
+      expect(starts[i - 1]).to be_within(1e-6).of(1 / 30.0)
+      expect(starts[i + 1]).to be_within(1e-6).of(2 / 30.0)
+      expect(writes.each_cons(2).map { |a, b| b - a }.min).to be >= 0.012 - 1e-9
+      # (a wake 5 ms after a write has no room before it: it waits)
+      _p, starts, _w = woken_run(30, [0.039], 0.2)
+      expect(starts.none? { |s| (s - 0.039).abs < 1e-6 }).to eq(true)
+      expect(starts[2]).to be_within(1e-6).of(2 / 30.0)
+    end
+
+    it 'leaves woken frames alone without a gap (other terminals: as :exact)' do
+      _p, starts, _w = woken_run(60, [0.1055], 0.2, gap: nil)
+      expect(starts).to include(be_within(1e-9).of(0.1055))
+      expect(starts.length).to eq(14) # (13 on the grid, 0 to 0.2 s, and the woken one)
     end
   end
 end

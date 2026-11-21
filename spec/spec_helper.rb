@@ -37,6 +37,14 @@ ENV['GLHTUI'] = '0' # FIXME: still can't run rspec when injecting plotter
 # turn them off; the slow-warning specs turn them back on.
 ENV['MB_SOUND_SPEED_WARNINGS'] ||= '0'
 
+# The UI paces frame writes for the detected terminal by default
+# (pace-default-1, 2026-11-21: Konsole before 26.04 from KONSOLE_VERSION),
+# so specs run from a Konsole would pace their screens differently: specs
+# (and scripts they run) see no terminal identity and the default pacing;
+# specs of the pacing set a UI::TerminalProfile themselves.
+ENV.delete('KONSOLE_VERSION')
+ENV.delete('MB_SOUND_UI_PACE')
+
 require 'mb/util'
 require 'mb/m/rspec_matchers'
 require 'mb/sound'

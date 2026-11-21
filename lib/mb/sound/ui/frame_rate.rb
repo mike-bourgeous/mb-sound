@@ -22,11 +22,16 @@ module MB
         self.snapshot_timed = ENV['MB_SOUND_UI_SNAPSHOT_TIMED'] == '1' || ENV['MB_SOUND_UI_SMOOTH'] == '1'
 
         # The painter's pacing (konsole-pacing, 2026-11-21; `ui.pace`):
-        # :exact (the default) writes frames on the target's deadlines;
-        # :terminal also keeps frame writes at least the detected terminal's
+        # :exact writes frames on the target's deadlines; :terminal also
+        # keeps frame writes at least the detected terminal's
         # TerminalProfile#min_gap apart (Konsole before 26.04: 12 ms), so
-        # every frame written is shown (Pacer#min_gap).
-        # MB_SOUND_UI_PACE=terminal sets :terminal at start.
+        # every frame written is shown (Pacer#min_gap).  On a terminal with
+        # no gap (any other, or none detected) the two are the same.
+        # :terminal is the default (pace-default-1, the maintainer,
+        # 2026-11-21: "Pace by default: On older Konsole keep writes at
+        # least 12 ms apart automatically (at most about 83 a second),
+        # whatever target is typed"); MB_SOUND_UI_PACE=exact turns it off
+        # at start.
         PACES = %i[exact terminal].freeze
 
         class << self
@@ -42,7 +47,7 @@ module MB
           # printed (once a process).
           attr_accessor :pace_noticed
         end
-        self.pace = ENV['MB_SOUND_UI_PACE'] == 'terminal' ? :terminal : :exact
+        self.pace = ENV['MB_SOUND_UI_PACE'] == 'exact' ? :exact : :terminal
         self.pace_noticed = false
 
         # When the newest snapshot's data becomes visible, for
@@ -174,17 +179,26 @@ module MB
         # The pacing in use (FrameRate.pace).
         def pace = FrameRate.pace
 
-        # Once a process: a line when the target writes frames closer
-        # together than the terminal shows them (Konsole before 26.04 shows
-        # frames under 10 ms apart at about 25 a second) and the pacing is
-        # :exact.  Returns the line printed, or nil.
+        # Once a process: a line when the typed target is more than the
+        # terminal shows.  Paced (:terminal, the default) on a terminal
+        # with a gap, above its #max_shown_fps (Konsole before 26.04: about
+        # 83): writes are paced, and target 60 is the smoothest; with
+        # :exact, where the target collapses (above 100 there: about 25
+        # shown a second).  Returns the line printed, or nil.
         def pace_notice(out = $stdout)
           pr = terminal_profile
-          return nil if FrameRate.pace_noticed || FrameRate.pace == :terminal || pr.nil? || !pr.collapses?(1.0 / @target_fps)
-          FrameRate.pace_noticed = true
+          return nil if FrameRate.pace_noticed || pr.nil? || pr.min_gap.nil?
           best = pr.max_shown_fps.floor
-          line = "#{pr.name} shows a frame only #{(pr.short * 1000).round} ms after output stops, so at #{@target_fps.round} fps it shows about " \
-                 "#{pr.collapsed_fps.round} a second: ui.target_fps = 60 (or up to #{best}), or ui.pace :terminal (frames spaced for it)"
+          who = pr.name.start_with?('Konsole') ? 'Konsole before 26.04' : pr.name
+          if FrameRate.pace == :terminal
+            return nil unless @target_fps > best
+            line = "#{who} shows at most about #{best} frames a second: pacing writes; target 60 is the smoothest on a 120 Hz display; ui.pace :exact turns pacing off"
+          else
+            return nil unless pr.collapses?(1.0 / @target_fps)
+            line = "#{pr.name} shows a frame only #{(pr.short * 1000).round} ms after output stops, so at #{@target_fps.round} fps it shows about " \
+                   "#{pr.collapsed_fps.round} a second: ui.target_fps = 60 (or up to #{best}), or ui.pace :terminal (frames spaced for it)"
+          end
+          FrameRate.pace_noticed = true
           out.puts "\e[33m#{line}\e[0m"
           line
         end

@@ -89,35 +89,79 @@ RSpec.describe(MB::Sound::UI::Facade, :aggregate_failures) do
     expect { facade.smooth(:omn) }.to raise_error(ArgumentError, /got :omn; did you mean :on\?/)
     expect(ui::Feed.every_buffer).to eq(false)
     expect { facade.pace(:termnal) }.to raise_error(ArgumentError, /did you mean :terminal\?/)
-    expect(facade.pace).to eq(:exact)
+    expect(facade.pace).to eq(:terminal) # (the default since pace-default-1)
     t, tiles_term = ui_tiles(:tiles)
     allow(facade).to receive(:screen).and_return(t)
-    t.terminal_profile = ui::TerminalProfile.konsole_bulk
     pacer = t.instance_variable_get(:@pacer)
+    expect(pacer.min_gap).to be_nil # (the specs' model terminal: no identity, no gap)
+    t.terminal_profile = ui::TerminalProfile.konsole_bulk
+    expect(pacer.min_gap).to be_within(1e-9).of(0.012)
+    expect(facade.pace(:exact)).to eq(:exact)
     expect(pacer.min_gap).to be_nil
     expect(facade.pace(:terminal)).to eq(:terminal)
     expect(pacer.min_gap).to be_within(1e-9).of(0.012)
     t.terminal_profile = ui::TerminalProfile.konsole_sync # (Konsole 26.04 shows each synchronized frame: no gap)
     expect(pacer.min_gap).to be_nil
-    expect(facade.pace(:exact)).to eq(:exact)
   ensure
-    ui::FrameRate.pace = :exact
+    ui::FrameRate.pace = :terminal
     t&.stop
     tiles_term&.close
   end
 
-  it 'says once when the typed target is faster than the terminal shows, naming 60 (konsole-pacing)' do
+  # pace-default-1 (the maintainer, 2026-11-21: "Pace by default: On older
+  # Konsole keep writes at least 12 ms apart automatically"): the default
+  # paces by the detected terminal; only Konsole before 26.04 has a gap, so
+  # on every other terminal the painter runs exactly as with :exact (the
+  # pacing reaches it only through Pacer#min_gap, nil there).
+  it 'paces by default by the terminal identity: a 12 ms gap on Konsole before 26.04 only, nothing on other terminals' do
+    expect(ui::FrameRate.pace).to eq(:terminal)
+    t, tiles_term = ui_tiles(:tiles)
+    pacer = t.instance_variable_get(:@pacer)
+    {
+      'Konsole 23.08.5' => 0.012, 'Konsole 25.12.0' => 0.012, 'Konsole 26.04.1' => nil,
+      'kitty(0.39.1)' => nil, 'foot(1.16.2)' => nil, 'iTerm2 3.5.10' => nil, 'WezTerm 20240203-110809-5046fc22' => nil,
+      'XTerm(390)' => nil, 'tmux 3.4' => nil, nil => nil,
+    }.each do |answer, gap|
+      t.terminal_profile = ui::TerminalProfile.detect(xtversion: answer, env: {})
+      expect(pacer.min_gap.nil? ? nil : pacer.min_gap.round(6)).to eq(gap), answer.inspect
+    end
+    t.terminal_profile = ui::TerminalProfile.detect(env: { 'KONSOLE_VERSION' => '230805' })
+    expect(pacer.min_gap).to be_within(1e-9).of(0.012)
+    t.terminal_profile = ui::TerminalProfile.detect(env: { 'KONSOLE_VERSION' => '230805', 'TMUX' => '/tmp/tmux-0/default,1,0' })
+    expect(pacer.min_gap).to be_nil # (behind tmux: tmux repaints on its own terms)
+  ensure
+    t&.stop
+    tiles_term&.close
+  end
+
+  it 'says once when the typed target is more than the terminal shows: paced by default, naming 60 and ui.pace :exact (pace-default-1)' do
     t, tiles_term = ui_tiles(:tiles)
     t.terminal_profile = ui::TerminalProfile.konsole_bulk('Konsole 23.08')
     ui::FrameRate.pace_noticed = false
     t.target_fps = 60
+    t.target_fps = 83
     expect($stdout.string).to eq('')
-    t.target_fps = 120
-    expect($stdout.string).to include('Konsole 23.08 shows a frame only 10 ms after output stops, so at 120 fps it shows about 25 a second', 'ui.target_fps = 60', 'ui.pace :terminal')
+    t.target_fps = 90
+    expect($stdout.string).to include('Konsole before 26.04 shows at most about 83 frames a second: pacing writes; target 60 is the smoothest on a 120 Hz display; ui.pace :exact turns pacing off')
     n = $stdout.string.length
     t.target_fps = 240
     expect($stdout.string.length).to eq(n) # (once a process)
+    # (with pacing off, where the target collapses: the konsole-pacing line)
+    ui::FrameRate.pace = :exact
+    ui::FrameRate.pace_noticed = false
+    t.target_fps = 90
+    expect($stdout.string.length).to eq(n)
+    t.target_fps = 120
+    expect($stdout.string).to include('Konsole 23.08 shows a frame only 10 ms after output stops, so at 120 fps it shows about 25 a second', 'ui.target_fps = 60', 'ui.pace :terminal')
+    # (no gap, no line)
+    ui::FrameRate.pace = :terminal
+    ui::FrameRate.pace_noticed = false
+    t.terminal_profile = ui::TerminalProfile.konsole_sync
+    m = $stdout.string.length
+    t.target_fps = 200
+    expect($stdout.string.length).to eq(m)
   ensure
+    ui::FrameRate.pace = :terminal
     ui::FrameRate.pace_noticed = false
     t&.stop
     tiles_term&.close

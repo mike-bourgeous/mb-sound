@@ -1997,10 +1997,14 @@ module MB
         show at once: a snapshot after every buffer, frames timed to them,
         and the console's echo waking the screen.  A terminal may show
         fewer frames than are written: Konsole before 26.04 shows a frame
-        only 10 ms after output stops, so above about 95 frames a second it
-        shows about 25 (keep `ui.target_fps` at 60 there; the report's
-        Rates estimate what it showed).  `ui.pace :terminal` (off by
-        default) spaces frames so that each one shows.
+        only 10 ms after output stops, so frames written closer show
+        together.  The screen paces for it by default (`ui.pace
+        :terminal`, since 2026-11-21): writes stay 12 ms apart, at most
+        about 83 a second whatever target is typed (whole frame periods
+        where they fit: 120 runs at 60, 240 at 80), so each one shows;
+        target 60 is the smoothest on a 120 Hz display (the report's Rates
+        estimate what the terminal showed).  `ui.pace :exact` turns pacing
+        off; other terminals pace the same either way.
 
         `ui.note 'the cutoff turns too slowly'` keeps a note for the next
         UI refinement round with the screen as text, the layout and focused
