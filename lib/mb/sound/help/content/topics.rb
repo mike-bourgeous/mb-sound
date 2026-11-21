@@ -2018,8 +2018,8 @@ module MB
         :drop`), x stops the track, + - > < transpose, L legato, S swing, Q
         quantize, D double, H half, R reverse (`tweak :bass, transpose: 1`),
         u undo; in racks and the knobs pane Up/Down pick a knob and
-        Left/Right turn it (Shift: fine; 0 its default; in knobs Enter types
-        a value; a held key is one `turn :x, 0 => 0.3, 1.n8 => 0.5` line
+        Left/Right turn it (Shift: fine; 0 its default; Enter types a
+        value; a held key is one `turn :x, 0 => 0.3, 1.n8 => 0.5` line
         when you let go: its fitted keyframes; the take keeps the raw
         steps).  In the tracks pane Left/Right set the level a dB a press
         (held: a step every repeat), Space plays a stopped track again

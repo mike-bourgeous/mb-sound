@@ -178,6 +178,19 @@ RSpec.describe('UI round 4 panes', :aggregate_failures) do
     ensure
       ui::Panes::Racks.clock = nil
     end
+
+    it 'types a knob\'s value with Enter (the knobs pane\'s prompt): one turn line, a refused value\'s words' do
+      pk = ui::PaneKeys
+      st = { mode: true }
+      draw(:racks, snap, st)
+      key(:racks, st, :pick, 1)
+      expect(key(:racks, st, :ask)).to eq([pk::Ask['turn :"bass/dub/tone", ', 1800, :typed, select: true]])
+      expect(key(:racks, st, :typed, '3000.hz')).to eq(pk::Turn['turn :"bass/dub/tone", 3000.hz', 'bass/dub/tone 3000.hz'])
+      expect(key(:racks, st, :typed, '3000.hzz')).to match(/numbers have no \.hzz \(did you mean \.hz\?\)/)
+      expect(key(:racks, st, :typed, '  ')).to eq('nothing typed')
+      expect(key(:racks, { snap: ui_fake_snapshot.with(slow: ui_fake_slow.with(racks: [].freeze)) }, :ask)).to include('no knob')
+      expect(ui::Panes::Racks.mode_keymap.entries.map { |b| [b.chord[0], b.action] }).to include([:enter, :ask])
+    end
   end
 
   describe 'buses' do

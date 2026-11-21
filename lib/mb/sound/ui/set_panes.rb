@@ -382,6 +382,9 @@ module MB
         # the Session (`turn :"bass/dub/space", 0.42` for one press, else
         # its fitted keyframes, `turn :"bass/dub/space", 0 => 0.32, 1.n4 =>
         # 0.48`), journaled at its first step with the raw steps takes replay.
+        # 0 sets the picked knob's default and Enter types its value (the
+        # knobs pane's and the inspector's prompt, UI::KnobTurns#key_ask:
+        # one `turn` line; knobs-pane-keys-1, the maintainer's 2026-11-21).
         #
         # Data: Snapshot#racks (Rack::RackInfo per instance), knob values
         # from Snapshot#knobs.
@@ -408,6 +411,7 @@ module MB
             on ['L'], :turn, FINE, help: 'turn up, fine'
             on ['H'], :turn, -FINE, help: 'turn down, fine'
             on '0', :reset, help: "the knob's default"
+            on :enter, :ask, help: 'type a value (turn :"bass/dub/tone", 3000.hz)', label: 'Enter'
           end
 
           keys do
