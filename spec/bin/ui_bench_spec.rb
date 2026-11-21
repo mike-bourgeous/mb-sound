@@ -46,14 +46,23 @@ RSpec.describe('bin/ui_bench.rb, the dropout scenario') do
     expect(r['holders']['buffers']['period_ms']).to be_within(0.01).of(5.333)
   end
 
-  it 'opens ui :wall at the asked frame rate and types --during lines into its REPL' do
+  # (konsole-pacing, 2026-11-21: --present models when Konsole shows the
+  # frames, --pace terminal spaces the writes for it)
+  it 'opens ui :wall at the asked frame rate, types --during lines into its REPL, and models when Konsole shows frames paced for it' do
     json = tmp_path('bench.json')
-    text = `OUTPUT_TYPE=null timeout 180 bin/ui_bench.rb -S wall --size 63x236 --fps 122 -s 1.5 --warm 0.5 --during 'level :drums, -1.db' -j #{json} 2>&1`
+    text = `OUTPUT_TYPE=null timeout 180 bin/ui_bench.rb -S wall --size 63x236 --fps 122 -s 1.5 --warm 0.5 --during 'level :drums, -1.db' --present konsole+konsole26 --vsync 120 --pace terminal -j #{json} 2>&1`
     expect($?).to be_success, text
-    expect(text).to include('== wall', 'ui_bench --during at')
+    expect(text).to include('== wall', 'ui_bench --during at', 'terminal model Konsole:', 'terminal model Konsole on a 120 Hz display:')
     r = JSON.parse(File.read(json))[0]
     expect(r['fps']).to eq(122)
     expect(r['sink_report']['panes'].keys).to include('keyboard', 'spectrum', 'messages')
     expect(r['cpu_share_pct']['painter']).to be > 0
+    expect(r['pace']).to eq('terminal')
+    k, kv, k26, = r['presents']
+    expect([k['model'], kv['vsync'], k26['model']]).to eq(['Konsole', 120.0, 'Konsole 26.04'])
+    expect(k['written_per_s']).to be < 90 # (12 ms apart at least, though 122 was asked)
+    expect(k['updates_per_s']).to be > k['written_per_s'] * 0.9 # (each frame shown)
+    expect(k['close_per_s']).to eq(0.0)
+    expect(k['delay_ms']['p50']).to be_within(1.5).of(10.0)
   end
 end

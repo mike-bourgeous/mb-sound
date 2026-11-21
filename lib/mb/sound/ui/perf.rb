@@ -80,13 +80,15 @@ module MB
         # +clock+ the screen's clock (seconds); +ack+ :da1, :dsr, or nil
         # (no queries: a band, whose input Reline owns, or a terminal that
         # doesn't answer); +ring+ frames kept.
-        def initialize(clock: -> { MB::U.clock_now }, ack: :da1, ack_every: ACK_EVERY, ring: RING, label: nil)
+        # +target+ the painter's target rate (for the report's rates).
+        def initialize(clock: -> { MB::U.clock_now }, ack: :da1, ack_every: ACK_EVERY, ring: RING, label: nil, target: nil)
           raise ArgumentError, "ack is :da1, :dsr, or nil (got #{ack.inspect})" unless ack.nil? || ACK_QUERIES.key?(ack)
           @clock = clock
           @ack_kind = ack
           @ack_every = ack_every
           @ring = ring
           @label = label
+          @target = target
           @cols = FIELDS.to_h { |f| [f, Array.new(ring, 0.0)] }
           @count = 0
           @started_at = @clock.call
@@ -151,6 +153,11 @@ module MB
         end
 
         def running? = @stopped_at.nil?
+
+        # One line (konsole-pacing, 2026-11-21: Pry printed a Perf's rings,
+        # 209 000 lines, after `ui.perf :stop`).
+        def inspect = "#<#{self.class.name} #{running? ? 'recording' : 'stopped'}, #{@count} frames#{@label ? ", #{@label}" : ''}>"
+        def pretty_print(q) = q.text(inspect)
 
         # Ends recording (the rings stay for the report).
         def stop
@@ -504,6 +511,8 @@ module MB
             refreshes_per_s: (@count / secs).round(1),
             written_per_s: (written.length / secs).round(1),
             data_per_s: @data ? (((@data1 || @data.published) - @data0) / secs).round(1) : nil,
+            target_fps: @target,
+            shown: shown_estimate(secs),
             late_ms: Perf.stats(values(:late)),
             paint_ms: Perf.stats(values(:paint)),
             write_ms: Perf.stats(values(:write)),
@@ -523,6 +532,52 @@ module MB
             audio: audio_summary,
             identity: @identity,
           }
+        end
+
+        # The terminal's profile (TerminalProfile.detect from the XTVERSION
+        # answer, else the environment recorded), or nil.
+        def terminal_profile
+          TerminalProfile.detect(xtversion: @identity[:xtversion], env: @identity[:env] || {})
+        end
+
+        # Frames a second the terminal showed, estimated from the written
+        # frames' write times by its profile's rule ({model:, per_s:}), or
+        # nil (no profile).
+        private def shown_estimate(secs)
+          pr = terminal_profile or return nil
+          at = values(:at)
+          paint = values(:paint)
+          write = values(:write)
+          bytes = values(:bytes)
+          times = at.each_index.filter_map { |i| at[i] + paint[i] + write[i] if bytes[i] > 0 }
+          return nil if times.empty?
+          { model: pr.name, kind: pr.kind, per_s: (pr.presents(times).length / secs).round(1), describe: pr.describe, collapsed_fps: pr.collapsed_fps, max_fps: pr.max_shown_fps&.floor }
+        end
+
+        # The rates in his terms, one per line, and a plain sentence where
+        # two differ a lot (konsole-pacing: "the report says it drew 80-odd
+        # per second" at a 120 target).
+        def rate_lines(s = summary)
+          rows = []
+          rows << ['target', s[:target_fps].to_s] if s[:target_fps]
+          rows << ['refreshes', s[:refreshes_per_s].to_s]
+          rows << ['written', s[:written_per_s].to_s]
+          rows << ['new data', "#{s[:data_per_s]}  (snapshots: the most the scope and meters can change)"] if s[:data_per_s]
+          sh = s[:shown]
+          rows << ['shown (est.)', "#{sh[:per_s]}  (#{sh[:model]}, estimated from the write times)"] if sh
+          says = []
+          t = s[:target_fps]
+          if t && s[:refreshes_per_s] < t * 0.9
+            says << "The painter ran short of the target #{t}: #{s[:skipped]} deadlines skipped, paint p99 #{s[:paint_ms][:p99]} ms, worst stall #{s[:worst_start_gap][:ms]} ms (a long command's output or a GC holds it)."
+          end
+          if s[:written_per_s] < s[:refreshes_per_s] * 0.85
+            idle = (s[:refreshes_per_s] - s[:written_per_s]).round
+            says << "Written #{s[:written_per_s].round} of #{s[:refreshes_per_s].round} refreshes a second: #{idle} had nothing new to draw (a frame is written only when a cell changes#{s[:data_per_s] ? "; new data came #{s[:data_per_s].round} times a second" : ''})."
+          end
+          if sh && sh[:per_s] < s[:written_per_s] * 0.85
+            says << "#{sh[:describe]}: frames written under #{sh[:kind] == :bulk ? '10 ms' : 'its interval'} apart are shown together, about #{sh[:per_s].round} a second.#{sh[:max_fps] ? " ui.target_fps = 60 shows every frame (up to #{sh[:max_fps]}), or ui.pace :terminal." : ''}"
+          end
+          [rows, says]
         end
 
         private def audio_summary
@@ -570,6 +625,10 @@ module MB
           d.para "#{s[:seconds]} s, #{s[:frames]} refreshes (#{s[:refreshes_per_s]}/s), #{s[:written_per_s]} written/s#{data}, " \
                  "#{s[:kb_per_s]} kB/s.  Times in ms.  An answer to the terminal query bounds its parse time, not its paint."
           d.lines headline(s).map { |l| "  #{l}" }
+          rows, says = rate_lines(s)
+          d.heading 'Rates (a second)'
+          d.rows rows, max_label: 12
+          d.lines(says.map { |l| "  #{l}" }) unless says.empty?
           d.heading 'Frames'
           rows = [
             ['lateness', fmt(s[:late_ms])], ['paint', fmt(s[:paint_ms])], ['write', "#{fmt(s[:write_ms])}  (#{s[:writes_over_2ms]} over 2 ms)"],

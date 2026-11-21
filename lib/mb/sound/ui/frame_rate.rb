@@ -21,6 +21,30 @@ module MB
         end
         self.snapshot_timed = ENV['MB_SOUND_UI_SNAPSHOT_TIMED'] == '1' || ENV['MB_SOUND_UI_SMOOTH'] == '1'
 
+        # The painter's pacing (konsole-pacing, 2026-11-21; `ui.pace`):
+        # :exact (the default) writes frames on the target's deadlines;
+        # :terminal also keeps frame writes at least the detected terminal's
+        # TerminalProfile#min_gap apart (Konsole before 26.04: 12 ms), so
+        # every frame written is shown (Pacer#min_gap).
+        # MB_SOUND_UI_PACE=terminal sets :terminal at start.
+        PACES = %i[exact terminal].freeze
+
+        class << self
+          # :exact or :terminal (see PACES), for every screen.
+          attr_reader :pace
+
+          def pace=(mode)
+            raise ArgumentError, "pace is one of #{PACES.map(&:inspect).join(', ')} (got #{mode.inspect})" unless PACES.include?(mode)
+            @pace = mode
+          end
+
+          # True once the "this terminal can't show that rate" notice has
+          # printed (once a process).
+          attr_accessor :pace_noticed
+        end
+        self.pace = ENV['MB_SOUND_UI_PACE'] == 'terminal' ? :terminal : :exact
+        self.pace_noticed = false
+
         # When the newest snapshot's data becomes visible, for
         # Pacer#timing, read on the painter thread from the Feed's newest
         # snapshot alone (the render thread does nothing more): snapshots
@@ -129,6 +153,40 @@ module MB
           @target_fps = rate
           @pacer.fps = rate
           @rates.fps = rate
+          pace_notice
+        end
+
+        # The terminal's TerminalProfile (when it shows what is written),
+        # detected from the environment (KONSOLE_VERSION) unless set; nil
+        # when unknown.
+        def terminal_profile
+          return @terminal_profile if defined?(@terminal_profile)
+          @terminal_profile = TerminalProfile.detect
+        end
+
+        # Sets the profile (a TerminalProfile or nil; the bench's model
+        # terminal), and applies the pacing again.
+        def terminal_profile=(profile)
+          @terminal_profile = profile
+          apply_timing
+        end
+
+        # The pacing in use (FrameRate.pace).
+        def pace = FrameRate.pace
+
+        # Once a process: a line when the target writes frames closer
+        # together than the terminal shows them (Konsole before 26.04 shows
+        # frames under 10 ms apart at about 25 a second) and the pacing is
+        # :exact.  Returns the line printed, or nil.
+        def pace_notice(out = $stdout)
+          pr = terminal_profile
+          return nil if FrameRate.pace_noticed || FrameRate.pace == :terminal || pr.nil? || !pr.collapses?(1.0 / @target_fps)
+          FrameRate.pace_noticed = true
+          best = pr.max_shown_fps.floor
+          line = "#{pr.name} shows a frame only #{(pr.short * 1000).round} ms after output stops, so at #{@target_fps.round} fps it shows about " \
+                 "#{pr.collapsed_fps.round} a second: ui.target_fps = 60 (or up to #{best}), or ui.pace :terminal (frames spaced for it)"
+          out.puts "\e[33m#{line}\e[0m"
+          line
         end
 
         # The painter's pacing (UI::Pacer): deadlines, and each frame's
@@ -175,7 +233,7 @@ module MB
         # #perf_ack).  Returns it.
         def start_perf(**opts)
           stop_perf
-          p = Perf.new(clock: @clock, ack: perf_ack, **opts)
+          p = Perf.new(clock: @clock, ack: perf_ack, target: @target_fps, **opts)
           p.count_data(feed) if respond_to?(:feed) && feed.respond_to?(:published)
           perf_identify(p)
           @pacer.perf = p
@@ -230,6 +288,7 @@ module MB
         # Times frames to snapshots or not, as FrameRate.snapshot_timed says
         # now (at start, and from `ui.smooth` while the screen runs).
         def apply_timing
+          @pacer.min_gap = FrameRate.pace == :terminal ? terminal_profile&.min_gap : nil
           if FrameRate.snapshot_timed
             @pacer.timing ||= SnapshotTiming.new(-> { @feed }, @pacer)
             # (timed frames come up to the window early: panes at the
@@ -336,12 +395,16 @@ module MB
         end
 
         # Times a terminal write for the Pacer's breakdown.
+        # (with `ui.pace :terminal` the write first waits out the
+        # terminal's least gap since the last one: Pacer#hold_before_write)
         def timed_write
+          @pacer.hold_before_write
           t = @clock.call
           yield
         ensure
           t1 = @clock.call
           @pacer.note_write(t1 - t)
+          @pacer.wrote_at(t1)
           @pacer.perf&.wrote(t, t1)
         end
 
