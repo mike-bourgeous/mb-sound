@@ -517,7 +517,9 @@ module MB
         elsif !block.nil? && effects != :show
           raise ArgumentError, 'Pass a block for master effects, or nil to remove them, not both'
         elsif block.nil? && effects
-          raise ArgumentError, "Pass a block for master effects, a mastering preset (#{Mastering.names.map(&:inspect).join(', ')}), or nil to remove them (got #{effects.inspect})"
+          # (ux-friction-1 round 2: the maintainer's `master -30.db`)
+          level = effects.is_a?(Numeric) ? "; the master level is master_gain #{effects.inspect}" : ''
+          raise ArgumentError, "Pass a block for master effects, a mastering preset (#{Mastering.names.map(&:inspect).join(', ')}), or nil to remove them (got #{effects.inspect})#{level}"
         end
 
         label = preset ? "master #{preset.call_ruby}" : block ? 'master' : 'master nil'

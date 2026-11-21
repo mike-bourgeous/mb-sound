@@ -948,6 +948,21 @@ RSpec.describe MB::Sound::Help do
       expect(text(MB::Sound.help(:dry))).to include('beat.blend(0.4) { |s|')
     end
 
+    # (ux-friction-1 round 2, the maintainer's note "how do I show the
+    # .unison method help from the unison help?": `help .unison` and
+    # `help '.unison'` showed the topic again or searched)
+    it 'opens a .name method page from a topic, and the topic says how' do
+      cb = MB::Sound.module_eval('binding')
+      ['.unison', "'.unison'", ':".unison"'].each do |q|
+        expect(text(MB::Sound::Help.page_for_text(q, cb)).lines.first).to start_with('unison(count = '), q
+      end
+      expect(text(MB::Sound.help('.unison')).lines.first).to start_with('unison(count = ')
+      expect(text(MB::Sound.help(:unison))).to include("Each one's page (arguments, examples): help .unison")
+      expect(text(MB::Sound.help(:knobs))).to include("Each one's page (arguments, examples): help :knob")
+      expect(text(MB::Sound.help(:unison)).lines.first).to start_with('Unison and supersaws')
+      expect(MB::Sound::Help.page_for_text('.no_such_method_here', cb)).to be_a(MB::Sound::Help::SearchPage)
+    end
+
     # (fixes-15, the maintainer's `help Clip#ghost_chords`: the # read as
     # a Ruby comment, so the page was a search for "clip" and the name)
     it 'shows the method page for Owner#method and Owner.method, with suggestions for a missing one' do

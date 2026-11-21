@@ -57,7 +57,7 @@ module MB
           # (Ruby's spelling suggestions for these, write and collect, lead
           # nowhere)
           suggestions.replace([hint.call(*e.args.first(1))])
-        elsif e.is_a?(NoMethodError) && (hint = node_guess(e) || entry_guess(e))
+        elsif e.is_a?(NoMethodError) && (hint = node_guess(e) || entry_guess(e) || value_guess(e))
           suggestions.replace([hint])
         end
         message = message.sub(/ for module MB::Sound\z/, '').sub(/ for module MB::Sound(?=\n)/, '')
@@ -95,6 +95,17 @@ module MB
         cumsum: SUM, running_sum: SUM, accum: SUM, sum: SUM, integ: SUM,
         # (ux-friction-1: the maintainer's `fx :pluck, ->{ it.echo }`)
         echo: 'delay(0.375, feedback: 0.4) (an echo; also tape_echo, ping_pong, dual_delay, or the library\'s L.fx.dub_echo)',
+        # (ux-friction-1 round 2: the maintainer's `2.bars.lfo.ramp.exp`
+        # for a cutoff sweep, his note "exponential lfo?", then
+        # `.unipolar` and `.freerun` on the same LFO)
+        exp: EXP_SWEEP = 'at(D3.number..B6.number).freq (an LFO swept in notes, even steps in pitch, as a filter sweep wants) ' \
+                         'or 150 * 2 ** lfo.at(0..Math.log2(2000 / 150.0)) (150 to 2000 Hz, exponential)',
+        exponential: EXP_SWEEP, expo: EXP_SWEEP,
+        unipolar: UNIPOLAR = 'at(150..2000) (it maps the whole -1..1 swing onto 150..2000, so no unipolar step is needed; .at(0..1) for 0 to 1)',
+        bipolar: UNIPOLAR,
+        freerun: FREERUN = 'freewheel (a bar-synced LFO running free of the timeline: 2.bars.lfo.freewheel; ' \
+                           'a Hz LFO like 0.2.hz.lfo already runs free, and free only stops synth voices key-syncing a tone)',
+        free_run: FREERUN, freerunning: FREERUN, free_running: FREERUN,
         transpose: ->(node) {
           next nil unless node.is_a?(Tone)
 
@@ -133,6 +144,28 @@ module MB
         nil
       end
 
+      # Mode names and wave shapes tried as methods on values (ux-friction-1
+      # round 2: the maintainer's `scale.phrygian`, `A2.minor`, and
+      # `1.beat.ramp.lfo`), and what they meant, or nil.
+      def value_guess(e)
+        r = e.receiver
+        name = e.name
+        if r.is_a?(Scale) && Scale.names.include?(name)
+          "scale(#{name.inspect}) (a mode by name; scale(#{name.inspect}, :a) on A)"
+        elsif r.is_a?(Note) && Scale.names.include?(name)
+          "scale(#{name.inspect}, #{r.name}) (the mode first, then the root)"
+        elsif r.is_a?(Sequence::Duration) && Tone::WAVE_TYPES.include?(name)
+          d = RubyValue.to_ruby(r)
+          "#{d}.lfo.#{name} (the shape comes after .lfo; #{d}.hz.#{name} is a tone at that rate)"
+        elsif (r.is_a?(UI::Facade) || r.is_a?(UI::Pending)) && %i[warn warning warnings].include?(name)
+          # (his `ui.warn`, looking for where warnings show with a screen up)
+          'ui.messages (the messages pane, NAV m: warnings from players and threads; the console\'s own commands warn in the REPL) ' \
+            'or ui.message 1 (the newest in full)'
+        end
+      rescue StandardError
+        nil
+      end
+
       # For a bare word the console doesn't know that names something in
       # the current Session (a track, scene, or knob), the Symbol to write
       # (`design bowl` for `design :bowl`; ux-notes-1), else nil.
@@ -161,6 +194,14 @@ module MB
       def short?(e)
         return true if NOT_BUGS.any? { |c| e.is_a?(c) }
         return true unless BUG_CLASSES.any? { |c| e.is_a?(c) }
+        # A constant typed at the prompt that isn't a note name reaches
+        # MB::Sound.const_missing's super inside lib/ (ux-friction-1 round
+        # 2: the maintainer's `motifs(III, ...)` printed a backtrace)
+        return true if e.instance_of?(NameError) && e.backtrace_locations&.first&.label.to_s.end_with?('MB::Sound.const_missing')
+        # A proxy's method_missing passing an unknown name to super (`ui.warn`,
+        # `ui.foo`: UI::Facade) raises from inside lib/ for a typo at the
+        # prompt (ux-friction-1 round 2)
+        return true if e.is_a?(NoMethodError) && e.backtrace_locations&.first&.label.to_s.end_with?('#method_missing')
 
         !raised_inside?(e)
       end
@@ -189,6 +230,15 @@ module MB
         text
       end
 
+      # Keywords people guess for recorded DSL methods, and the keyword
+      # they meant (ux-friction-1 round 2: the maintainer's
+      # `unison(5, pan: 0..1)` and `motifs(..., length: 1.n8)`):
+      # method name => { guess => keyword }.
+      KEYWORD_GUESSES = {
+        unison: { pan: :spread, width: :spread, stereo: :spread, amount: :detune, cents: :detune },
+        motifs: { length: :legato, gate: :legato, note_length: :legato, steps: :step, division: :step, scale: :range },
+      }.freeze
+
       # Ruby's own argument errors (arity and keywords), which
       # #argument_help rewrites.
       ARGUMENT_ERROR = /\A(?:wrong number of arguments \(.+\)|unknown keywords?: .+|missing keywords?: .+)\z/
@@ -213,6 +263,7 @@ module MB
         meth = method || raising_method(e, receiver, name) or return nil
 
         keys = (keywords_of(meth) + keys.to_a).uniq
+        hints ||= KEYWORD_GUESSES[name.to_sym]
         text = "#{name}: #{e.message}"
         found = []
         if (m = e.message.match(/\Aunknown keywords?: (.+)\z/))

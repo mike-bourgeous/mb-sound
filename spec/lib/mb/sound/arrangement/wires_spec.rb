@@ -209,6 +209,10 @@ RSpec.describe(MB::Sound::Arrangement::Wires) do
         expect { b.eval('connect :lead, riff') }.to raise_error(ArgumentError, /swap :lead, clip/)
         expect { b.eval('wire :lead, :keys') }.to raise_error(ArgumentError, /arm :lead, input: :keys/)
         expect { b.eval('wire :lead') }.to raise_error(ArgumentError, /give the stream/)
+        # (ux-friction-1 round 2: his `wire`, `wire 2`, `wire 2, :keys` for the keyboard pane)
+        ['wire', 'wire 2', 'wire 2, :keys'].each do |line|
+          expect { b.eval(line) }.to raise_error(ArgumentError, /the keyboard pane plays armed tracks: arm :x .*a numbered player plays no notes/), line
+        end
         expect { b.eval('wire :lead, echo(1.n8, 3)') }.to raise_error(ArgumentError, /midi\.through\(echo/)
         expect { b.eval('wire :leed, riff.stream') }.to raise_error(ArgumentError, /No track :leed to wire \(tracks: :lead\).*:lead/m)
         expect { b.eval('unwire :lead') }.to raise_error(ArgumentError, /No stream is wired into :lead \(nothing is wired\)/)

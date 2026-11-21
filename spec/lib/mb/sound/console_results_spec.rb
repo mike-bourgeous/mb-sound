@@ -91,6 +91,24 @@ RSpec.describe('console command results') do
       within { MB::Sound.feed(:pad, :hall, 0.5) }
       expect { within { MB::Sound.level(:hall, -80.db) } }.to raise_error(ArgumentError, /level :hall: a bus has no level of its own .* mute :hall silences it, feed :pad, :hall, 0 closes one send \(sending: :pad\)/)
       expect(session.knobs.key?(:"hall/level")).to eq(false)
+
+      # A level without a name, and a master given a level (ux-friction-1
+      # round 2: his `level -30.db` and `master -30.db`), name master_gain
+      expect { within { MB::Sound.level(-30.db) } }.to raise_error(ArgumentError,
+        'level takes a name first: level :drums, -30.db (a player\'s number: level 2, -30.db); the whole mix is master_gain -30.db')
+      expect { within { MB::Sound.master(-30.db) } }.to raise_error(ArgumentError, /\(got -30.db\); the master level is master_gain -30.db\z/)
+    end
+  end
+
+  describe '#track on a track that is not playing' do
+    it "says live that the new sound plays from its next launch (ux-friction-1 round 2)" do
+      allow(MB::Sound).to receive(:live?).and_return(true)
+      expect { within { MB::Sound.track(:t) { |v| v.hz.ramp } } }.to output(/track :t: :t isn't playing, so its new sound plays from its next launch \(bg :t, clip/).to_stdout
+      within { MB::Sound.bg(:t, MB::Sound.seq(MB::Sound::A4).n1.loop) }
+      run(1600)
+      expect { within { MB::Sound.track(:t) { |v| v.hz.saw } } }.not_to output.to_stdout
+      allow(MB::Sound).to receive(:live?).and_return(false)
+      expect { within { MB::Sound.track(:u) { |v| v.hz.ramp } } }.not_to output.to_stdout
     end
   end
 

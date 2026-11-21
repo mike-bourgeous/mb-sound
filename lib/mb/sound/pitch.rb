@@ -363,7 +363,7 @@ module MB
       # its oscillators run free of the timeline (see
       # Sequence::TempoNode#freewheel).
       def freewheel(free = true)
-        raise ArgumentError, 'Only tempo-synced tones (e.g. 4.bars.lfo) can freewheel' unless @source.respond_to?(:freewheel)
+        raise ArgumentError, Tone::FREEWHEEL_ONLY_SYNCED unless @source.respond_to?(:freewheel)
 
         @source.freewheel(free)
         self

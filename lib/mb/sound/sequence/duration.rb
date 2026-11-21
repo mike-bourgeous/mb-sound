@@ -202,7 +202,8 @@ module MB
         # Example (bin/sound.rb):
         #     cutoff = 4.bars.lfo.triangle.at(200..2000)
         #     bg :pad, 110.hz.saw.at(1).filter(:lowpass, cutoff: cutoff, quality: 4)
-        def lfo
+        def lfo(*_options, **_keys)
+          Tone.lfo_takes_no_options(_options, _keys) unless _options.empty? && _keys.empty?
           hz.lfo
         end
 
