@@ -1758,8 +1758,7 @@ module MB
       #
       # Example:
       #     play 220.hz.saw.at(1).filter(:lowpass, cutoff: 0.25.hz.triangle.lfo.at(200..2000), quality: 4)
-      def lfo(*_options, **_keys)
-        Tone.lfo_takes_no_options(_options, _keys) unless _options.empty? && _keys.empty?
+      def lfo
         configure { @lfo = true }
         or_at(1)
       end
@@ -1769,9 +1768,12 @@ module MB
       FREEWHEEL_ONLY_SYNCED = 'Only tempo-synced tones (e.g. 4.bars.lfo) can freewheel; ' \
                               'a Hz LFO (0.2.hz.lfo) already runs free of the timeline'
 
-      # Raises for options given to Tone#lfo, Pitch#lfo, or Duration#lfo,
-      # which take none (ux-friction-1 round 2: the maintainer's
-      # `2.bars.lfo(unipolar: true)` said only "wrong number of arguments").
+      # Raises for options given to Sequence::Duration#lfo, which takes
+      # none (ux-friction-1 round 2: the maintainer's
+      # `2.bars.lfo(unipolar: true)` said only "wrong number of
+      # arguments").  Tone#lfo and Pitch#lfo keep no parameters: the
+      # literal binder reads node methods' parameters (a keyword rest made
+      # it pass `frequency:` to lfo).
       def self.lfo_takes_no_options(args, keys)
         given = [*args.map(&:inspect), *keys.map { |k, v| "#{k}: #{v.inspect}" }].join(', ')
         raise ArgumentError, "lfo takes no options (got #{given}): the rate comes before it (2.bars.lfo, 0.2.hz.lfo), the shape after it (.ramp), " \
