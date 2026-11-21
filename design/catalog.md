@@ -210,7 +210,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 ### Arrange a set
 
 - `:sets` Tracks, scenes, and undo: track tracks untrack clear_set fx scene scenes go launch tweak quant undo redo! changes ...
-- `:flow` Song forms: flow start pause play_form section loop! onward goto skip finish practice seek marker meter
+- `:flow` Song forms: flow start pause play_form section loop! onward goto skip finish practice seek marker meter ...
 - `:long_form` Long forms: markov, lsystem, generate: markov lsystem
 - `:demo` A demo set to explore: demo demos
 - `:genres` Genre templates: genre genres

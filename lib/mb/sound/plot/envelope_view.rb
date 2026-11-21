@@ -127,16 +127,18 @@ module MB
             # consistently"; it stood on the sustain point's breakpoint rule
             # for most of each held note, 401 of 432 frames of an acid line
             # in bin/ui_demo.rb --design).
-            def playhead(tr, live)
+            # +elapsed+ stands for live[:elapsed] (the live wave view passes
+            # it without merging it into a new Hash every frame).
+            def playhead(tr, live, elapsed = live[:elapsed])
               case live[:stage]
               when :sustain
                 note = live[:note]
                 return tr.sustain_at unless note
-                (note.to_f + live[:elapsed].to_f).clamp(tr.sustain_at, [tr.release_start, tr.sustain_at].max)
+                (note.to_f + elapsed.to_f).clamp(tr.sustain_at, [tr.release_start, tr.sustain_at].max)
               when :segment
                 k = live[:segment].to_i
                 return nil unless k.between?(0, tr.starts.length - 1)
-                t = tr.starts[k] + live[:position].to_f + live[:elapsed].to_f
+                t = tr.starts[k] + live[:position].to_f + elapsed.to_f
                 k < tr.release_node ? [t, tr.sustain_at].min : [t, tr.release_end].min
               end
             end

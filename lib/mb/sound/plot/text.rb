@@ -80,6 +80,7 @@ module MB
             @cells_class = cells
             @layouts = 0
             @key = nil
+            @coords = nil
           end
 
           # Renders +figure+ (a Figure or Chart) as an Array of lines.
@@ -100,17 +101,64 @@ module MB
             self
           end
 
+          # +key+ (a layout key from #draw) with the panels' titles left
+          # out where nothing else depends on their text: no legend shares
+          # the title row (legend entries empty), so a title is a header
+          # row of its own text.
+          # The one panel of the last draw and its layout and coordinates,
+          # for Plot::Live's trace (ui-perf-2): [panel, layout, coord], or nil
+          # unless the last draw was a single chart on a kept layout.
+          def single_panel
+            return nil unless @base && @panels&.length == 1 && @coords
+            panel, layout = @panels[0]
+            layout && [panel, layout, @coords[0]]
+          end
+
+          # Draws +trace+'s lines (Plot::Live::Trace, made from the chart
+          # this frame drew last) again from new samples +lines+: the kept
+          # layout, the marks through Panel#retrace.  The cells are what
+          # drawing the same chart with these samples gives (live_spec).
+          def retrace(trace, lines)
+            panel, layout = @panels[0]
+            @cells.copy_from(@base)
+            panel.retrace(layout, trace, lines)
+            self
+          end
+
+          def self.title_key(key)
+            return nil unless key
+            t, r, c, keys = key
+            [t, r, c, keys.map { |k| k[3].empty? ? [k[0].nil?, *k[1..]] : k }]
+          end
+
           private
 
           def new_cells
             @cells_class.new(@width, @height)
           end
 
+          # Draws the changed panel titles into the kept layout (see #draw).
+          def retitle(figure, coords, keys)
+            old = @key[3]
+            @panels.zip(figure.charts, coords, keys, old).each do |(panel, _layout), chart, coord, k, o|
+              panel.retitle(@base, chart, coord) if k[0] != o[0]
+            end
+            @key = [figure.title, figure.rows, figure.columns, keys]
+          end
+
           # Lays out (or reuses the layout) and paints the marks into @cells
           def draw(figure)
             figure = figure.figure
             coords = figure.charts.map(&:coord)
-            key = [figure.title, figure.rows, figure.columns, figure.charts.zip(coords).map { |ch, co| Panel.layout_key(ch, co, @theme) }]
+            @coords = coords
+            keys = figure.charts.zip(coords).map { |ch, co| Panel.layout_key(ch, co, @theme) }
+            key = [figure.title, figure.rows, figure.columns, keys]
+
+            # Only a panel title's text changed (a moving cutoff or
+            # frequency in a live preview's title; ui-wave-perf-1): the
+            # header rows are drawn again, the rest of the layout kept.
+            # The cells are what a new layout draws (live_spec).
+            retitle(figure, coords, keys) if @base && key != @key && Frame.title_key(key) == Frame.title_key(@key)
 
             if @base && key == @key
               @cells.copy_from(@base)
@@ -337,6 +385,20 @@ module MB
             [scale.class, *scale.instance_variables.map { |v| scale.instance_variable_get(v) }]
           end
 
+          # Draws +chart+'s title (and its header row's y axis title) into
+          # +base+ in place of the last one: a chart whose layout key
+          # differs only in its title's text (Frame.title_key).
+          def retitle(base, chart, coord)
+            painted = @cells
+            @cells = base
+            @chart = chart
+            return unless chart.title && @h >= 4
+            @w.times { |i| base.set(@x + i, @y, ' ') }
+            draw_header([], nil, coord, chart.polar ? :none : @look.frame)
+          ensure
+            @cells = painted
+          end
+
           # Draws the chart: #layout, then #paint.
           def draw
             coord = @chart.coord
@@ -484,11 +546,41 @@ module MB
           end
 
           # Turns the surface's dots into characters in the plot area
-          def compose(surface, px, py, pw, ph)
+          public
+
+          # Draws +trace+'s lines from +lines+ on +layout+ (see
+          # Frame#retrace): the lines Mark::Line#draw draws, through the
+          # trace's buffers (Plot::Live::Trace#points).
+          def retrace(layout, trace, lines)
+            surface = layout.surface
+            surface.restore(layout.snapshot)
+            i = 0
+            while i < lines.length
+              trace.points(lines[i], i)
+              surface.polyline(trace.ox[i], trace.oy[i], trace.rgbs[i])
+              i += 1
+            end
+            compose(surface, layout.x, layout.y, layout.w, layout.h, trace)
+          end
+
+          private
+
+          # (+cache+, a Plot::Live::Trace: its packed colors and priorities,
+          # kept while the raster's color table keeps its length; a trace
+          # draws the same colors in the same order every frame)
+          def compose(surface, px, py, pw, ph, cache = nil)
             if @cells.is_a?(NativeCells) && !surface.image_ids
-              colors = Numo::Int32.cast(surface.raster.colors.map { |c| c ? MB::Term::Cells.pack(c) : -1 })
+              n = surface.raster.colors.length
+              if cache.nil? || cache.compose_colors.nil? || cache.compose_count != n
+                colors = Numo::Int32.cast(surface.raster.colors.map { |c| c ? MB::Term::Cells.pack(c) : -1 })
+                prio = surface.priorities
+                cache&.keep_compose(n, colors, prio)
+              else
+                colors = cache.compose_colors
+                prio = cache.compose_prio
+              end
               @cells.compose(surface.raster.dots, Canvas::KINDS.fetch(@look.canvas), @cw, @ch, px, py, pw, ph,
-                surface.priorities, colors, Canvas::TABLES.fetch(@look.canvas))
+                prio, colors, Canvas::TABLES.fetch(@look.canvas))
               return
             end
 

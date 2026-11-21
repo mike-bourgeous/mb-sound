@@ -13,8 +13,12 @@ RSpec.describe('the idle inspector\'s allocations', :aggregate_failures) do
   let(:ui) { MB::Sound::UI }
 
   # Objects per frame, at most.  Measured 2026-11-13 on the Mac container:
-  # 2210 before (master-ai 90e685fc), 443 after.
-  FRAME_BUDGET = 700
+  # 2210 before (master-ai 90e685fc), 443 after; 2026-11-16 (ui-wave-perf-1
+  # round 3, Linux): 430 before, 192 after (the inspector's row tails,
+  # headings, chain, and sections plan kept; frozen literals); ui-perf-2
+  # round 3: 105 before (the zone lookup's imemos, Canvas#fit and #pad,
+  # the rows, the picker, the status line), 17 after.
+  FRAME_BUDGET = 20
 
   before do
     ui::Inspect.target = nil
@@ -46,6 +50,20 @@ RSpec.describe('the idle inspector\'s allocations', :aggregate_failures) do
     @tiles = ui::Tiles.new(layout: ui.tiles_layout_named(:sound), input: @term.slave, output: @term.slave, repl: :none,
                            probe: false, size: [40, 140], clock: -> { 1.0 + frame / 60.0 }, source: -> { snaps[frame % snaps.length] },
                            keyboard: ui::Keyboard.new(out: UIHelpers::NullKeyboardOut.new))
+    # (the picker's KEEP-second library re-read lands in the measured
+    # frames when its process-wide cache, made by an earlier example, turns
+    # KEEP seconds old there: seen once in a loaded parallel run, 43
+    # objects a frame from Library::Index#all_entries; ui-perf-2 round 4).
+    # The detail line's memo (Panes::Picker::DETAILS, a WeakMap: its values
+    # go at any GC, and the measurement starts with GC.start) starts empty
+    # too, so the warm-up keeps the picked entry's head path: one an
+    # earlier example drew kept its line through the warm-up, and its
+    # rebuild in the measured frames read the whole index for the path
+    # (29 objects a frame, seed 42219 of the UI directory).
+    stub_const('MB::Sound::UI::Picker::KEEP', 1e9)
+    ui::Picker.instance_variable_set(:@cache, nil)
+    details = ui::Panes::Picker::DETAILS
+    details.keys.each { |k| details.delete(k) }
     @tiles.start(thread: false)
     @tiles.enter(:inspector)
     expect(@tiles.router.mode).to eq(:pane)

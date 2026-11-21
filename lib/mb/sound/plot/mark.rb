@@ -108,6 +108,9 @@ module MB
         class XY < Base
           attr_reader :x, :y
 
+          # True when x is the index or an even spread (regular decimation).
+          def regular? = @regular
+
           def initialize(y, x: nil, **kwargs)
             super(**kwargs)
             @y = Mark.array(y)
@@ -155,6 +158,9 @@ module MB
         # A connected line (+step+ draws a staircase: each value holds until
         # the next x).
         class Line < XY
+          # True for a staircase.
+          attr_reader :step
+
           def initialize(y, step: false, **kwargs)
             super(y, **kwargs)
             @step = step

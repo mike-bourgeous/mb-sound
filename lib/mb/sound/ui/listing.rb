@@ -52,7 +52,16 @@ module MB
       # class, or :custom for `pane :x do ... end`), +description+, +rate+,
       # +height+ (natural), +min_height+, the built-in +layouts+ that show
       # it, and +open+ (how to show it).
-      PaneEntry = Data.define(:name, :kind, :description, :rate, :height, :min_height, :layouts, :open)
+      PaneEntry = Data.define(:name, :kind, :description, :rate, :height, :min_height, :layouts, :open, :aliases)
+
+      # Other names for panes, the one table (alias => pane name): every
+      # place that takes a pane name (ui.show, ui.jump, ui.enter, ui.close,
+      # ui.focus, layouts' pane and tabs lines, the palette) takes these,
+      # and `ui.panes` lists them beside the name.  The maintainer,
+      # 2026-11-21, after closing the help pager and not finding its name:
+      # ":pager should be an alias".
+      PANE_ALIASES = { pager: :page }.freeze
+      MB::Term::Viewports.pane_aliases = PANE_ALIASES
 
       # Every pane there is (`ui.panes`): built-in, defined with `pane`,
       # and from pane files.  Frozen; prints as a table; one registry feeds
@@ -65,7 +74,7 @@ module MB
         def [](name) = entries.find { |e| e.name == name }
 
         def lines
-          rows = entries.map { |e| [e.name, e.description || '', e.layouts.map(&:inspect).join(' '), e.open] }
+          rows = entries.map { |e| [[e.name, *e.aliases].join(', '), e.description || '', e.layouts.map(&:inspect).join(' '), e.open] }
           Sound::Table.new(rows, header: %w[pane what layouts open], title: "#{entries.length} panes (ui.list: what is on screen)").lines(color: false)
         end
       end
@@ -104,6 +113,21 @@ module MB
                       density: nil, panes: [].freeze, keys: keys_info, messages: messages_info, pacing: nil)
         end
 
+        # +name+ with a pane alias resolved (see PANE_ALIASES).
+        def pane_name(name) = PANE_ALIASES.fetch(name, name)
+
+        # +name+ with an alias resolved, raising ArgumentError with a
+        # did-you-mean (pane names and aliases) unless it names a pane
+        # kind, the REPL, or a pane in +also+ (a layout's own names).
+        def pane_name!(name, also: [])
+          n = pane_name(name)
+          return n if n == :repl || panes.key?(n) || also.include?(n)
+
+          known = (panes.keys + PANE_ALIASES.keys + [:repl]).map(&:to_s)
+          hint = DidYouMean::SpellChecker.new(dictionary: known).correct(name.to_s).first(2)
+          raise ArgumentError, "No pane #{name.inspect}#{hint.empty? ? '' : " (did you mean #{hint.map { |h| ":#{h}" }.join(', ')}?)"} (ui.panes lists them)"
+        end
+
         # Every pane kind (see PaneCatalog; +open+ is how to show one in the
         # tiles: `ui.show :name`, `:show :name` in the palette, or a layout).
         def pane_catalog
@@ -117,7 +141,7 @@ module MB
             open = ON_DEMAND_PANES[p.name] || "ui.show #{p.name.inspect}"
             PaneEntry.new(name: p.name, kind: builtin ? p.class.name.split('::').last.downcase.to_sym : :custom,
                           description: p.description, rate: p.rate, height: p.height, min_height: p.min_height,
-                          layouts: used[p.name].uniq.freeze, open: open)
+                          layouts: used[p.name].uniq.freeze, open: open, aliases: PANE_ALIASES.select { |_, n| n == p.name }.keys.freeze)
           end
           PaneCatalog.new(entries: entries.freeze)
         end

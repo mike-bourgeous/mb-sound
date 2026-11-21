@@ -128,6 +128,10 @@ module MB
         # entries without a builder.
         def call(*args, **kwargs, &block)
           raise ArgumentError, "#{label} holds data only (nothing to build)" unless builder
+          if args.first.is_a?(Entry) && kind == :effect
+            # (ux-friction-1: the maintainer's L.fx.cabinet.call(L.fx.asymmetric))
+            raise ArgumentError, "#{head_path}.call takes a signal, not #{args.first.head_path}: #{Entry.chain_hint(head_path, args.first.head_path)}"
+          end
           Library.index.note_use(self)
           builder.call(*args, **kwargs, &block)
         end
@@ -151,6 +155,22 @@ module MB
           head = HEADS.key(kind)
           same = index.entries(kind: kind).count { |e| e.name == name }
           [*(head ? ['L', head] : ['L.all']), (family if same > 1 && family != :preset), name].compact.join('.')
+        end
+
+        # How to chain effects +a+ then +b+ (head paths), for the errors of
+        # guessed spellings (ErrorFormat::ENTRY_CHAIN, #call, #then).
+        def self.chain_hint(a, b)
+          "fx :track, [#{a}, #{b}] (a list chains effects in order), or in a graph: sig.then(&#{a}).then(&#{b})"
+        end
+
+        # Kernel#then, and an error naming the chain spelling when given an
+        # argument (ux-friction-1: the maintainer's
+        # `L.fx.cabinet.then(L.fx.asymmetric)`; Kernel#then takes a block).
+        def then(*args, &block)
+          return super(&block) if args.empty?
+
+          b = args.first.is_a?(Entry) ? args.first.head_path : 'L.fx.hall'
+          raise ArgumentError, "#{head_path}.then takes a block, not an argument: #{Entry.chain_hint(head_path, b)}"
         end
 
         # A Proc calling the entry (`sig.then(&L.fx.hall)`).

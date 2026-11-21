@@ -28,6 +28,9 @@ default:
   file: 20
   example: 8
 files:
+  spec/bin/ui_bench_spec.rb:
+    file: 30
+    reason: three real bin/ui_bench.rb processes (each 5-7 s of startup, UI and YJIT warm-up, a demo set's load, then 1.5 s recorded), the tiles against a model terminal, the dropout scenario with the device-queue model, and ui :wall with console lines typed; 22.4 s at PARALLEL=8 on the 7950X container under load (x1.07 = 21 reference seconds) against the default 20 (ui-perf-2 round 5, 2026-11-17)
   spec/bin/midi/midi_roll_spec.rb:
     file: 24
     reason: 27 examples running bin/midi/midi_roll.rb (8.0-8.8 s alone in the Mac container); 48.4 s in batch 30's idle PARALLEL=8 suite at x2.34 = 20.7 reference seconds against the default 20. No regression from omnibus19 (alternating runs at 065847ce 8.8/8.5 s vs 2c1bd815 8.0/8.0 s, 2026-11-11), so it sits at the default's edge under contention
@@ -67,6 +70,9 @@ files:
   spec/lib/mb/sound/help_spec.rb:
     file: 33
     reason: every help example played and measured (13 s locally at PARALLEL=4 after test-speed-3's short drum file), every page checked for walls of text (4.4 s), and each lesson's steps checked before and after their code (3.2 s for :design); 47.0-52.0 s in the Mac container's spec:full at PARALLEL=8 over the 2026-10-30 to 2026-11-01 batches, 25.7 reference seconds at the idle calibration x2.02 (fix-batch-1101); lesson-gen-1 added lesson :generative (9 steps, 3.3 s, each step's bar measured like the others) and its lesson-shelf example (1.6 s), 59 s in one loaded process
+  spec/lib/mb/sound/ui/perf_spec.rb:
+    file: 26
+    reason: nine Capture.run examples, each recording both phases (1-4 s of real waits) on a live tiled screen with a Pry REPL, plus two real-screen recordings; 20.7-20.8 s alone and at PARALLEL=8 on the 7950X container (x1.00) against the default 20, after the capture-stops-early round added two examples (ui-perf-2 round 7, 2026-11-21)
   spec/lib/mb/sound/ui/tiles_spec.rb:
     file: 25
     reason: many real Tiles screens with a Pry REPL on a pty, each started and waited for; runner 18 s

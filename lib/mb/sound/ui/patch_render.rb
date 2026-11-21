@@ -134,9 +134,11 @@ module MB
         # (the live graph's nodes by identity, so a copy that shares one is
         # refused), +frames+ (a Proc giving the live session's
         # Session#frames_rendered, or nil: the heavier steps start right
-        # after the render thread finishes a buffer, .slack).
-        Source = Data.define(:track, :synth, :clip, :bpm, :bar_length, :key, :tuning, :channels, :note, :words, :live, :frames) do
-          def initialize(words: nil, live: nil, synth: nil, frames: nil, **rest) = super(words: words, live: live, synth: synth, frames: frames, **rest)
+        # after the render thread finishes a buffer, .slack), +thread+ (a
+        # Proc giving the live session's render thread, or nil: Worker
+        # threads give it the GVL whenever it wants it, Yielding).
+        Source = Data.define(:track, :synth, :clip, :bpm, :bar_length, :key, :tuning, :channels, :note, :words, :live, :frames, :thread) do
+          def initialize(words: nil, live: nil, synth: nil, frames: nil, thread: nil, **rest) = super(words: words, live: live, synth: synth, frames: frames, thread: thread, **rest)
         end
 
         # A drum kit standing in for a Synth in a Source (hand-tune-1: a
@@ -167,8 +169,14 @@ module MB
         Input = Data.define(:note, :velocity, :hold, :kind, :role, :text, :id)
 
         # One render request: +seq+, +key+ (Driver.key_of), +source+,
-        # +input+, +knobs+ (frozen [name, value, Knob::Spec] rows), +seconds+.
-        Job = Data.define(:seq, :key, :source, :input, :knobs, :seconds) do
+        # +input+, +knobs+ (frozen [name, value, Knob::Spec] rows), +seconds+,
+        # +picture+ (nil, or a callable taking the Result and the pace flag
+        # and returning the pane's drawn pictures of it, Result#pictures: the
+        # charts are built and drawn on the worker, so the painter only
+        # copies cells when the result arrives).
+        Job = Data.define(:seq, :key, :source, :input, :knobs, :seconds, :picture) do
+          def initialize(picture: nil, **rest) = super(picture: picture, **rest)
+
           # What decides whether a Copy can render this job: the voice block,
           # the note, the session's settings, and the names of its knobs (the
           # copy's scope has a copy of each, which the copy's knob readers
@@ -193,9 +201,11 @@ module MB
         # -Infinity under 400 ms) of the envelope render; +spectrum+
         # ([frequencies, dB] of the settled sound); +ms+ (the render's time,
         # with the copy's build when it was built for it); +input+ (text);
-        # +error+.
+        # +error+; +pictures+ (what Job#picture made of it, or nil).
         Result = Data.define(:seq, :key, :track, :cycle, :periods, :settled, :frequency, :lo, :hi, :frames, :rate,
-                             :peak, :rms, :lufs, :spectrum, :ms, :input, :error)
+                             :peak, :rms, :lufs, :spectrum, :ms, :input, :error, :pictures) do
+          def initialize(pictures: nil, **rest) = super(pictures: pictures, **rest)
+        end
 
         # A MIDI source a render plays notes into (see MIDI::Source): #play
         # queues a note-on at the stream's position and its note-off after
@@ -274,6 +284,7 @@ module MB
         end
 
         @seconds = SECONDS
+        @hold_sweeps = ENV['MB_SOUND_RENDER_HOLD'] == '1'
         @inline = false
         @clock = nil
         @duty = Float(ENV['MB_SOUND_RENDER_DUTY'] || DUTY)
@@ -282,6 +293,14 @@ module MB
         class << self
           # The length of the envelope view (seconds).
           attr_reader :seconds
+
+          # True: no renders while changes keep coming (a held sweep), one
+          # once they stop for DEBOUNCE (the RENDER pane and the oscillator
+          # preview stand still during a sweep); false (the default, or
+          # MB_SOUND_RENDER_HOLD unset): a render at most every SWEEP while
+          # they come.  The maintainer's question 5 (ui-wave-perf-1), an
+          # option to compare by eye and ear.
+          attr_accessor :hold_sweeps
 
           # True: Drivers render on the calling thread (InlineWorker), for
           # specs and the golden captures.
@@ -351,6 +370,7 @@ module MB
             t0 = now
             src = job.source
             Thread.current[:mb_sound_preview_frames] = pace ? src.frames : nil
+            UI::Yielding.follow(src&.thread&.call) if pace
             slack(src.frames, pace) # (everything from here on in the windows after buffers)
             return failed(job, t0, src.note || 'no voice to copy') if src.synth.nil?
             want = @rate || rate_for(live_cutoffs(job))
@@ -372,7 +392,8 @@ module MB
 
             out = nil
             Internal.strictly { out = play(copy, job, pace) }
-            result_of(job, copy, out, t0, pace: pace)
+            r = result_of(job, copy, out, t0, pace: pace)
+            job.picture ? r.with(pictures: job.picture.call(r, pace)) : r
           rescue Exception => e # rubocop:disable Lint/RescueException (a patch's SystemStackError is its result too)
             raise if e.is_a?(Interrupt) || e.is_a?(SystemExit)
             failed(job, t0, "#{e.class}: #{e.message}".lines.first.chomp)
@@ -1000,7 +1021,8 @@ module MB
         #   idle      change                                  waiting  pending since now
         #   waiting   change                                  waiting  last change now
         #   waiting   tick    quiet DEBOUNCE, or pending       busy     submit
-        #                     SWEEP, or nothing shown yet
+        #                     SWEEP (unless .hold_sweeps), or
+        #                     nothing shown yet
         #   busy      change                                  dirty    pending since now
         #   busy      done                                    idle
         #   dirty     change                                  dirty    last change now
@@ -1038,7 +1060,7 @@ module MB
           # (nothing shown for the track yet).
           def submit?(now, urgent: false)
             return false unless @state == :waiting
-            return false unless urgent || now - @changed_at >= DEBOUNCE || now - @pending_since >= SWEEP
+            return false unless urgent || now - @changed_at >= DEBOUNCE || (!PatchRender.hold_sweeps && now - @pending_since >= SWEEP)
             go(:submit)
             true
           end
@@ -1128,6 +1150,13 @@ module MB
           end
 
           def run
+            UI::Yielding.join
+            run_jobs
+          ensure
+            UI::Yielding.leave
+          end
+
+          def run_jobs
             loop do
               job = @mutex.synchronize {
                 deadline = MB::U.clock_now + IDLE
@@ -1210,11 +1239,20 @@ module MB
             @input = nil
             @input_of = nil
             @job_input = nil
+            @want = nil
+            @picturer = nil
           end
 
           # True: renders play the role's guessed note instead of the clip's
           # first note.
           attr_accessor :guess
+
+          # What draws a Result's pictures on the worker (a callable taking
+          # the Result, the render shown behind it or nil, the pane's want,
+          # and the pace flag; Panes::Render.pictures), and the pane's want
+          # (a frozen description of the plots it draws, nil for none):
+          # renders submitted with both come back with Result#pictures.
+          attr_accessor :picturer, :want
 
           # The key that decides whether a render is current: the track, its
           # voice block by identity, the input (PatchRender.input's id), the
@@ -1258,7 +1296,8 @@ module MB
             if @debounce.submit?(now, urgent: urgent)
               @seq += 1
               rows = @knobs.map { |k| [k.name, k.value, k.spec].freeze }.freeze
-              worker.submit(Job.new(seq: @seq, key: @key, source: @source, input: @job_input, knobs: rows, seconds: PatchRender.seconds))
+              worker.submit(Job.new(seq: @seq, key: @key, source: @source, input: @job_input, knobs: rows, seconds: PatchRender.seconds,
+                                    picture: picture_for(@source)))
               @running_key = @key
               collect
             end
@@ -1291,6 +1330,17 @@ module MB
           def worker = (@worker ||= PatchRender.inline ? InlineWorker.new : Worker.new)
 
           private
+
+          # The Job#picture for a render of +source+ (nil without a picturer
+          # or a want): the render shown behind the result once it arrives
+          # (#collect's rule) is the one shown now.
+          def picture_for(source)
+            pr = @picturer
+            want = @want
+            return nil unless pr && want
+            prev = @shown && @shown.track == source.track ? (@shown.error ? @previous : @shown) : nil
+            ->(r, pace) { pr.call(r, prev, want, pace) }
+          end
 
           # Takes a finished render: kept if it's newer than the shown one
           # and for the track inspected now (else dropped: stale).

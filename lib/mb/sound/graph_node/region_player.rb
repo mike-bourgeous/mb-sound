@@ -1,4 +1,5 @@
 require_relative '../sequence/timeline_node'
+require_relative '../sequence/timeline_hold_fade'
 
 module MB
   module Sound
@@ -38,6 +39,7 @@ module MB
         include GraphNode
         include SampleRateHelper
         include Sequence::TimelineNode
+        prepend Sequence::TimelineHoldFade # (holds its place while the transport is paused)
         node_traits memory: :short, timeline: true, fresh: 'it finds its place in every region from the timeline in a rebuilt graph'
 
         ALIGNS = [:timeline, :launch].freeze
@@ -93,6 +95,10 @@ module MB
           @timeline_paused = nil
           @timeline_launch = nil
           @node_type_name = 'RegionPlayer'
+          @hold_mode = nil # (pausing in place: Sequence::TimelineHoldFade)
+          @hold_k = nil
+          @hold_i = nil
+          @hold_buf = nil
         end
 
         def sample_rate=(rate)

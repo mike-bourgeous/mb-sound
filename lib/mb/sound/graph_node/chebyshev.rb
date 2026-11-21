@@ -58,6 +58,11 @@ module MB
         def self.build(input, amounts, drive: nil, antialias: true, **harmonics)
           bad = harmonics.keys - KEYS
           unless bad.empty?
+            high = bad.select { |k| k.to_s.match?(/\Ah\d+\z/) && k.to_s[1..].to_i > MAX_HARMONIC }
+            unless high.empty?
+              # (ux-friction-1: his h21: and h19: read "did you mean :h2?")
+              raise ArgumentError, "chebyshev: harmonics go up to h#{MAX_HARMONIC} (got #{high.map(&:inspect).join(", ")})"
+            end
             guess = DidYouMean::SpellChecker.new(dictionary: KEYS + %i[antialias]).correct(bad[0]).first
             raise ArgumentError, "chebyshev: unknown option#{'s' if bad.length > 1} #{bad.map(&:inspect).join(', ')}#{guess ? " (did you mean #{guess.inspect}?)" : ''}"
           end

@@ -502,12 +502,18 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
   end
 
   describe 'with the default realtime session' do
-    before { ENV['OUTPUT_TYPE'] = 'null' }
+    before do
+      @output_type_was = ENV['OUTPUT_TYPE']
+      ENV['OUTPUT_TYPE'] = 'null'
+    end
     after do
       MB::Sound::Session.default.close
       MB::Sound.bpm(120)
       MB::Sound.rewind
-      ENV.delete('OUTPUT_TYPE')
+      # (put back as it was: deleting it sent later specs in the process,
+      # e.g. perf_spec's capture runs, to a real device that a container
+      # doesn't have)
+      @output_type_was.nil? ? ENV.delete('OUTPUT_TYPE') : ENV['OUTPUT_TYPE'] = @output_type_was
     end
 
     it 'runs scheduled blocks on the scheduler thread' do

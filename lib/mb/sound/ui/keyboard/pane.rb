@@ -15,7 +15,27 @@ module MB
           def initialize(keyboard = nil)
             super(:keyboard, rate: 30, height: 8, width: 44, min_height: 6, description: 'the virtual keyboard: a piano of the computer keys, held notes, octave, velocity, step entry')
             @keyboard = keyboard
+            # (kept between draws: the pane draws at the target rate, and the
+            # piano's Strings and Arrays were ~740 objects a draw, 90k/s at
+            # 122 fps on ui :wall; 2026-11-17)
+            @spaces = []
+            @names = {}
+            @cuts = {}
+            @fill = 0
+            @fill_rgb = nil
+            @sections = {}
+            @parts = nil
+            @parts_key = [nil, 0, 0, 0, 0, nil]
           end
+
+          # The computer keys' letters by semitone ({semitone => "zs"}; made
+          # on first use: UI::Keyboard loads after this file).
+          def self.letters = @letters ||= UI::Keyboard::KEYS.each_with_object({}) { |(ch, s), h| (h[s] ||= +'') << ch }.transform_values(&:freeze).freeze
+
+          # The ink of labels on white keys.
+          LABEL_INK = [30, 30, 30].freeze
+          BLACK_INK_FILLED = [20, 20, 20].freeze
+          BLACK_INK = [210, 210, 210].freeze
 
           def keyboard = @keyboard || UI.keyboard
 
@@ -55,6 +75,10 @@ module MB
           # what Enter does.  At the usual 8 rows: header, a 5-row piano,
           # played and hint; zoomed, the rest appear (ux-1 r3 item 31).
           def sections(step)
+            @sections[step] ||= make_sections(step)
+          end
+
+          private def make_sections(step)
             list = [
               Sections::Section.new(name: :header, min: 1, priority: 0),
               Sections::Section.new(name: :piano, min: 4, pref: step ? 4 : 5, max: 14, priority: 1),
@@ -67,14 +91,31 @@ module MB
             end
             list << Sections::Section.new(name: :roll, min: 4, pref: 8, max: 16, priority: 5)
             list << Sections::Section.new(name: :armed, min: 2, pref: 3, max: 6, priority: 6)
-            list
+            list.freeze
+          end
+
+          # The section canvases of +c+ (kept while the canvas, its place,
+          # and the step flag stay; their rows reset).
+          private def parts_of(c, step)
+            k = @parts_key
+            if @parts && k[0].equal?(c) && k[1] == c.x && k[2] == c.y && k[3] == c.w && k[4] == c.h && k[5] == step
+              @parts.each_value { |p| p.row = 0 }
+              return @parts
+            end
+            k[0] = c
+            k[1] = c.x
+            k[2] = c.y
+            k[3] = c.w
+            k[4] = c.h
+            k[5] = step
+            @parts = Sections.canvases(c, sections(step))
           end
 
           def draw_body(c, s, state)
             kb = state[:keyboard] || keyboard
             v = kb.view
             track_roll(state, v)
-            parts = Sections.canvases(c, sections(!v.step.nil?))
+            parts = parts_of(c, !v.step.nil?)
             header(parts[:header], v, kb)
             held = v.held.map { |n| n - v.base }
             inputs = Keyboard.input_fills(s, v.base)
@@ -134,7 +175,7 @@ module MB
             x0 = (c.w - (left + Keyboard.span_whites + right) * ww) / 2 + left * ww
             bh = [(ph * 0.6).round, 1].max
             bw = [(ww * 0.6).round, 1].max
-            letters = UI::Keyboard::KEYS.each_with_object({}) { |(ch, s), h| (h[s] ||= []) << ch }
+            letters = Keyboard.letters
             first = -semis_for_whites(left)
             last = UI::Keyboard::SPAN - 1 + semis_after(UI::Keyboard::SPAN - 1, right)
             # White keys
@@ -142,22 +183,24 @@ module MB
               next unless WHITE.include?(s % 12)
               x = x0 + white_index(s) * ww
               playable = s >= 0 && s < UI::Keyboard::SPAN
-              fill, frgb = key_fill(ph, s, playable, held, v, inputs)
-              ph.times do |dy|
+              key_fill(ph, s, playable, held, v, inputs)
+              fill = @fill
+              frgb = @fill_rgb
+              blank = spaces(ww - 1)
+              dy = 0
+              while dy < ph
                 filled = dy >= ph - fill
                 rgb = filled ? frgb : playable ? WHITE_KEY : WHITE_DIM
-                c.run(x, y0 + dy, ' ' * (ww - 1), rgb, reverse: true)
+                c.run(x, y0 + dy, blank, rgb, reverse: true)
+                dy += 1
               end
               next unless playable
-              ink = ->(dy) { [[30, 30, 30], { bg: dy >= ph - fill ? frgb : WHITE_KEY }] }
-              label = letters[s]&.join || ''
-              unless label.empty?
-                fg, o = ink.(ph - 1)
-                c.run(x, y0 + ph - 1, label[0, ww - 1], fg, **o)
+              label = letters[s]
+              if label
+                c.run(x, y0 + ph - 1, cut(label, ww - 1), LABEL_INK, bg: ph - 1 >= ph - fill ? frgb : WHITE_KEY)
               end
               if s % 12 == 0 && ph >= 3
-                fg, o = ink.(ph - 2)
-                c.run(x, y0 + ph - 2, kb.note_name(v.base + s)[0, ww - 1], fg, **o)
+                c.run(x, y0 + ph - 2, cut(note_name(kb, v.base + s), ww - 1), LABEL_INK, bg: ph - 2 >= ph - fill ? frgb : WHITE_KEY)
               end
             end
             # Black keys over them
@@ -166,26 +209,59 @@ module MB
               gap = x0 + white_index(s - 1) * ww + ww - 1
               x = gap - bw / 2
               playable = s >= 0 && s < UI::Keyboard::SPAN
-              fill, frgb = key_fill(bh, s, playable, held, v, inputs)
-              bh.times do |dy|
+              key_fill(bh, s, playable, held, v, inputs)
+              fill = @fill
+              frgb = @fill_rgb
+              blank = spaces(bw)
+              dy = 0
+              while dy < bh
                 filled = dy >= bh - fill
                 rgb = filled ? frgb : playable ? BLACK_KEY : BLACK_DIM
-                c.run(x, y0 + dy, ' ' * bw, rgb, reverse: true)
+                c.run(x, y0 + dy, blank, rgb, reverse: true)
+                dy += 1
               end
               next unless playable && letters[s]
               filled = bh - 1 >= bh - fill
-              c.run(x, y0 + bh - 1, letters[s].join[0, bw], filled ? [20, 20, 20] : [210, 210, 210], bg: filled ? frgb : BLACK_KEY)
+              c.run(x, y0 + bh - 1, cut(letters[s], bw), filled ? BLACK_INK_FILLED : BLACK_INK, bg: filled ? frgb : BLACK_KEY)
             end
           end
 
-          # Rows filled and their color for semitone +s+: the keyboard's own
-          # held keys first (only in the playable span), else an input note
-          # (anywhere on the strip; :pressed ones a single dim row).
+          # +n+ spaces (kept per length).
+          def spaces(n) = @spaces[n] ||= (' ' * n).freeze
+
+          # The first +n+ characters of frozen +str+ (kept per String and
+          # length).
+          def cut(str, n)
+            return str if str.length <= n
+            (@cuts[str] ||= [])[n] ||= str[0, n].freeze
+          end
+
+          # Note +n+'s name as the keyboard writes it (kept per note).
+          def note_name(kb, n) = @names[n] ||= kb.note_name(n).freeze
+
+          # Rows filled (@fill) and their color (@fill_rgb) for semitone +s+:
+          # the keyboard's own held keys first (only in the playable span),
+          # else an input note (anywhere on the strip; :pressed ones a
+          # single dim row).  (Set in ivars, not returned as a pair: no
+          # Array a key.)
           def key_fill(rows, s, playable, held, v, inputs)
-            return [fill_rows(rows, v.velocities[v.base + s]), MB::Term::Themes.rgb(:armed)] if playable && held.include?(s)
-            vel, kind = inputs[s]
-            return [0, nil] unless kind
-            kind == :pressed ? [1, MB::Term::Themes.rgb(:dim)] : [fill_rows(rows, vel), input_rgb]
+            if playable && held.include?(s)
+              @fill = fill_rows(rows, v.velocities[v.base + s])
+              @fill_rgb = MB::Term::Themes.rgb(:armed)
+              return
+            end
+            e = inputs[s]
+            kind = e && e[1]
+            if !kind
+              @fill = 0
+              @fill_rgb = nil
+            elsif kind == :pressed
+              @fill = 1
+              @fill_rgb = MB::Term::Themes.rgb(:dim)
+            else
+              @fill = fill_rows(rows, e[0])
+              @fill_rgb = input_rgb
+            end
           end
 
           # Rows of a held key filled for raw velocity +vel+ (1..127).
@@ -196,7 +272,8 @@ module MB
           # The white key index of semitone +s+ from the base C (negative
           # below it).
           def white_index(s)
-            oct, k = s.divmod(12)
+            oct = s / 12 # (floored, as divmod: no Array)
+            k = s % 12
             oct * 7 + WHITE.index(WHITE.include?(k) ? k : k - 1)
           end
 
@@ -232,7 +309,7 @@ module MB
                 end
             mode = kb.off_mode_label
             mode += ' (no key-up)' unless v.releases
-            c.line(0, ' ', [kb.note_name(v.base), :key], ['-', :dim], [kb.note_name(v.base + UI::Keyboard::SPAN - 1), :key],
+            c.line(0, ' ', [note_name(kb, v.base), :key], ['-', :dim], [note_name(kb, v.base + UI::Keyboard::SPAN - 1), :key],
                    ['  vel ', :dim], [v.velocity.to_s, :key], ['  ch ', :dim], [(v.channel + 1).to_s, :key],
                    ['  ', nil], [mode, v.releases ? :ok : :warn], (v.sustain ? ['  sustain', :armed] : ''),
                    (v.scale ? ['  ', nil] : ''), (v.scale ? [v.scale, :queued] : ''), x: x)
@@ -252,7 +329,7 @@ module MB
               on = held.include?(s)
               role = on ? :armed : inputs[s] ? (inputs[s][1] == :pressed ? :dim : :key) : nil
               if WHITE.include?(s % 12)
-                label = s % 12 == 0 ? kb.note_name(v.base + s)[0, 2] : kb.note_name(v.base + s)[0]
+                label = s % 12 == 0 ? note_name(kb, v.base + s)[0, 2] : note_name(kb, v.base + s)[0]
                 label = label.ljust(2)[0, 2] if s % 12 == 0
                 c.run(x, y + 1, label, role || :text, reverse: !role.nil?)
               else
@@ -262,7 +339,7 @@ module MB
           end
 
           def played(c, v, kb, y = 5)
-            notes = v.played.last(12).map { |p| kb.note_name(p.note) }
+            notes = v.played.last(12).map { |p| note_name(kb, p.note) }
             c.line(y, ['played ', :dim], [notes.join(' '), :name]) unless notes.empty?
             c.line(y, [v.message.to_s, :dim]) if notes.empty? && v.message
             hint = v.active ? 'Ctrl-] back  -/+ octave  Up/Dn vel  Space sus  Esc off  Enter capture  ` mode  Tab step' : 'NAV K (or ui.keys, F2): play the keyboard'
@@ -275,13 +352,13 @@ module MB
             x = 0
             unless v.held.empty?
               name = ChordName.of(v.held)
-              x = c.line(0, ['held ', :dim], [v.held.sort.map { |n| kb.note_name(n) }.join(' '), :name])
+              x = c.line(0, ['held ', :dim], [v.held.sort.map { |n| note_name(kb, n) }.join(' '), :name])
               x = c.line(0, ['  ', nil], [name, :key], x: x) if name
               x = c.text(x, 0, '  ', nil)
             end
             return if ext.empty?
             name = ChordName.of(ext)
-            x = c.line(0, ['input ', :dim], [ext.sort.map { |n| kb.note_name(n) }.join(' '), :key], x: x)
+            x = c.line(0, ['input ', :dim], [ext.sort.map { |n| note_name(kb, n) }.join(' '), :key], x: x)
             c.line(0, ['  ', nil], [name, :key], x: x) if name
           end
 
@@ -310,7 +387,7 @@ module MB
             rows = notes.first(c.h - 1)
             rows.each_with_index do |n, i|
               y = i + 1
-              c.text(0, y, kb.note_name(n).ljust(label_w), :name)
+              c.text(0, y, note_name(kb, n).ljust(label_w), :name)
               state[:roll].each do |note, vel, on, off|
                 next unless note == n
                 x0 = ((on - (now - ROLL_SECONDS)) / ROLL_SECONDS * span).floor.clamp(0, span - 1)

@@ -1,6 +1,6 @@
 {
   "about": "Extensions (and their methods) each memcheck spec file calls, and the ext/ structure they were recorded against; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.",
-  "generated": "2026-11-13",
+  "generated": "2026-11-16",
   "specs": {
     "gems/mb-term/spec/native_spec.rb": {
       "fast_term": [
@@ -378,6 +378,8 @@
         "FastUI.monotonic",
         "FastUI.polyline",
         "FastUI.project",
+        "FastUI.response_db",
+        "FastUI.wave",
         "FastUI::GVLProbe.active?",
         "FastUI::GVLProbe.blockers",
         "FastUI::GVLProbe.holds",
@@ -386,6 +388,13 @@
         "FastUI::GVLProbe.start",
         "FastUI::GVLProbe.stop",
         "FastUI::GVLProbe.waits",
+        "FastUI::GVLYield.active?",
+        "FastUI::GVLYield.add",
+        "FastUI::GVLYield.priority",
+        "FastUI::GVLYield.priority=",
+        "FastUI::GVLYield.remove",
+        "FastUI::GVLYield.stats",
+        "FastUI::GVLYield.yielders",
         "FastUI::Grid#compose"
       ]
     },
@@ -830,6 +839,9 @@
         "FastConvolve::Engine#task",
         "FastConvolve::Engine#task_result"
       ],
+      "fast_sound": [
+        "FastSound.matrix_mix"
+      ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
       ]
@@ -841,6 +853,12 @@
       ],
       "fast_clip": [
         "FastClip.shape_curve"
+      ],
+      "fast_sound": [
+        "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
       ]
     },
     "spec/lib/mb/sound/graph_node/db_shaper_spec.rb": {
@@ -991,6 +1009,8 @@
     },
     "spec/lib/mb/sound/graph_node/filter_bank_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.circular_read",
+        "FastArithmetic.circular_write",
         "FastArithmetic.copy"
       ],
       "fast_filter": [
@@ -1089,10 +1109,25 @@
     },
     "spec/lib/mb/sound/graph_node/phaser_spec.rb": {
       "fast_arithmetic": [
-        "FastArithmetic.mix"
+        "FastArithmetic.circular_read",
+        "FastArithmetic.circular_write",
+        "FastArithmetic.copy",
+        "FastArithmetic.fill_range",
+        "FastArithmetic.mix",
+        "FastArithmetic.product"
+      ],
+      "fast_clip": [
+        "FastClip.shape"
+      ],
+      "fast_control": [
+        "FastControl.smooth"
+      ],
+      "fast_dynamics": [
+        "FastDynamics.crossover"
       ],
       "fast_filter": [
-        "FastFilter.phaser"
+        "FastFilter.phaser",
+        "FastFilter.phaser_osc"
       ],
       "fast_sound": [
         "FastSound.oscillate"
@@ -1275,6 +1310,7 @@
         "FastFilter.filter_bank",
         "FastFilter.four_pole",
         "FastFilter.phaser",
+        "FastFilter.phaser_osc",
         "FastFilter.svf"
       ],
       "fast_lofi": [
@@ -1791,6 +1827,7 @@
       ],
       "fast_wavetable": [
         "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
@@ -1877,8 +1914,6 @@
         "FastSynth.oscillate_bl"
       ],
       "fast_wavetable": [
-        "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
@@ -1961,6 +1996,8 @@
         "FastSampler.play"
       ],
       "fast_sound": [
+        "FastSound.biquad_narray",
+        "FastSound.cookbook",
         "FastSound.fast_math=",
         "FastSound.oscillate"
       ]
@@ -2130,8 +2167,14 @@
       "fast_clip": [
         "FastClip.shape"
       ],
+      "fast_plan": [
+        "FastPlan.run"
+      ],
       "fast_sound": [
         "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
       ]
     },
     "spec/lib/mb/sound/tone_feedback_spec.rb": {
@@ -2881,7 +2924,8 @@
       "dir": "ext/mb/sound/fast_ui",
       "sources": [
         "fast_ui.c",
-        "gvl_probe.c"
+        "gvl_probe.c",
+        "gvl_yield.c"
       ],
       "modules": [
         "FastUI"

@@ -48,6 +48,23 @@ module MB
 
       def self.topic_page(name) = TopicPage.new(TOPICS.fetch(name), index)
 
+      # `.name`: a node or value method as topic pages list it (`.unison`).
+      DOT_METHOD = /\A\.([a-z_]\w*[?!=]?)\z/
+
+      # The method page for +text+ written `.name` (ux-friction-1 round 2:
+      # the maintainer's `help .unison` and `help '.unison'` from the
+      # :unison topic showed the topic again or searched), or nil: the
+      # documented methods of that name other than console commands, or
+      # all of them when none is a node or value method.
+      def self.dot_method_page(text)
+        m = text.strip.match(DOT_METHOD) or return nil
+        entries = index.find_all(m[1].to_sym)
+        return nil if entries.empty?
+
+        methods = entries.reject { |e| e.surface == 'console' }
+        MethodPage.new(methods.empty? ? entries : methods, index)
+      end
+
       # `Owner#method`, `Owner.method`, and `A::B#method` (fixes-15: `help
       # Clip#ghost_chords` read the # as a Ruby comment and searched).
       OWNER_METHOD = /\A((?:::)?[A-Z]\w*(?:::[A-Z]\w*)*)([#.])([a-z_]\w*[?!=]?)\z/
@@ -124,6 +141,7 @@ module MB
         when Regexp then SearchPage.new(subject, index)
         when Symbol, String
           page = owner_method_page(subject.to_s) and return page
+          page = dot_method_page(subject.to_s) and return page
           name = subject.to_sym
           return topic_page(name) if TOPICS.key?(name)
           return topic_page(TOPIC_ALIASES[name]) if TOPIC_ALIASES.key?(name)
@@ -247,6 +265,7 @@ module MB
         text = text.to_s.strip
         return page_for(nil) if text.empty?
         page = owner_method_page(text, binding) and return page
+        page = dot_method_page(text) and return page
 
         tree = Prism.parse(text)
         if tree.success? && (stmts = tree.value.statements.body).length == 1

@@ -128,7 +128,12 @@ module MB
       #     key :d; scale(:dorian)        # D dorian (following the key's root in generators)
       #     scale                         # the session key's scale
       #     motifs(scale(:phrygian), 4)   # key :a, at: bar(9) moves it to A phrygian
-      def scale(intervals = nil, root = nil)
+      def scale(intervals = nil, root = nil, **_keys)
+        unless _keys.empty?
+          # (ux-friction-1 round 2: his `motifs(scale(:phrygian, :a, range: A1..A4))`)
+          given = _keys.map { |k, v| "#{k}: #{v.is_a?(Range) ? "#{v.begin}..#{v.end}" : v.inspect}" }.join(', ')
+          raise ArgumentError, "scale takes a mode and a root, no keywords (got #{given}): they belong to the call around it, e.g. motifs(scale(:phrygian, :a), #{given})"
+        end
         session_key = Session.existing&.then { |s| s.transport.key(s.now) } || Sequence.current_transport.key
         return session_key.scale.following(:key) if (intervals.nil? || intervals == :key) && (root.nil? || root == :key)
         return Scale[intervals, root] unless root.nil? || root == :key

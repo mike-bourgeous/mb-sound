@@ -38,29 +38,47 @@ module MB
         end
       end
 
+      # Buffer sizes of UI.warm_up's short sessions (one session each).
+      RENDER_SESSIONS = [256, 800, 128, 512, 256, 800].freeze
+
       # Draws every built-in pane for +frames+ refreshes of Demo snapshots
       # into grids nobody sees (and runs a Poll on a silent Session), so
       # YJIT has compiled the painter before a band goes on screen (its
       # first frames otherwise hold the GVL for tens of milliseconds while
-      # compiling).  Once per process; nil without YJIT.  Returns seconds.
+      # compiling).  Before that, the render thread's side of a screen
+      # (snapshots, meters, the scope) in short sessions.  Once per
+      # process; nil without YJIT.  Returns seconds.
       def self.warm_up(frames: 130)
         return nil if @warmed || !JIT.compiling?
         @warmed = true
         t0 = MB::U.clock_now
 
-        session = Session.new(output: NullOutput.new(channels: 2, sleep: false), realtime: false, transport: Sequence::Transport.new)
-        session.knob(:warm_up, 0.5)
-        poll = Poll.new(session)
-
-        # The render thread's side: snapshots with meters and a scope
-        feed = Feed.new
-        feed.needs = %i[meters scope]
-        session.ui_feed = feed
-        session.add(110.hz.triangle.at(-20.db), name: :warm_up)
-        (frames / 2).times do
-          session.process_buffer(256)
-          feed.take
+        # The render thread's side: snapshots with meters and a scope, in
+        # RENDER_SESSIONS short sessions of different buffer sizes, with
+        # the painter taking every other snapshot.  A session's, a
+        # player's, and a feed's first buffers run code once each (their
+        # setup, the meters' filters), which YJIT compiles at its fifth
+        # call: with one session here, the next four songs a process played
+        # compiled it in their first buffer on the render thread (ui-perf-2
+        # step 2: a 26-41 ms buffer at bar 1 on the emulated i9, ~500
+        # blocks, about half of them the feed's).
+        session = nil
+        RENDER_SESSIONS.each_with_index do |n, k|
+          session&.close
+          session = Session.new(output: NullOutput.new(channels: 2, sleep: false), realtime: false, transport: Sequence::Transport.new)
+          session.knob(:warm_up, 0.5)
+          feed = Feed.new
+          feed.needs = %i[meters scope]
+          session.ui_feed = feed
+          session.add(110.hz.triangle.at(-20.db), name: :warm_up)
+          session.add(165.hz.ramp.at(-24.db), name: :warm_up_2) if k.odd?
+          (frames / 10).times do |i|
+            session.process_buffer(n)
+            feed.take if i.even?
+          end
         end
+        poll = Poll.new(session)
+        warm_up_poll
 
         # Every pane (the deck has them all) drawn each refresh, then the
         # diffed path
@@ -79,6 +97,43 @@ module MB
         session&.close
         sink&.close
       end
+
+      # Polls (Poll#call: slow data, as the painter does 4 times a second)
+      # a small set in a session of its own: tracks, a kit with a fill,
+      # sequences with rests, ties, swing, and legato, scenes, and a knob.
+      # A set's first poll writes each clip's Ruby (ClipInfo#ruby), and
+      # cold that compiled the recipe writer and the poll on the painter:
+      # Last Stop's first poll took 111 ms natively, 94 ms of it YJIT
+      # compiling 3422 blocks in stretches no handover can interrupt; after
+      # this, 18 ms (13 ms, 592 blocks; ui-perf-2 step 3).  Costs ~135 ms
+      # natively once per process.
+      def self.warm_up_poll
+        ws = Session.new(output: NullOutput.new(channels: 2, sleep: false), realtime: false, transport: Sequence::Transport.new)
+        Session.with_context(session: ws) do
+          MB::Sound.instance_eval do
+            knob :wu_cut, 900, range: 100..8000
+            kit = grid(16, kick: 'x...x...x...x...', hat: '..x...x...x...x.', clap: '....X.......X...')
+              .fill(:turn, clap: grid(16, '....X...x.x.xXXX', value: 39)).loop(align: :launch)
+            n = ->(m) { Note.new(m) } # (A1 = 33; the note constants are the console's)
+            a = seq(R, n[33], R, n[33], R, n[33], R, n[33]).n8.loop(align: :launch)
+            b = seq(R, R, !n[33], n[33], R, n[36], R, n[31]).n16.swing(0.56).loop(align: :launch)
+            c = seq(n[76], Tie, Tie, Tie).n1.loop(align: :launch).named(:wu_tension)
+            d = seq(n[45], n[45], n[45], n[43]).n1.legato(0.98).loop(align: :launch)
+            e = seq(n[81], n[84], n[88], n[83]).n16.loop(align: :launch)
+            track(:wu_drums) { |k| k.tone.sine.at(0.1) }
+            track(:wu_bass) { |clip| clip.tone.saw.at(0.1).filter(:lowpass, cutoff: knob(:wu_cut)) * clip.env(0.01, 0.1, 0.5, 0.1) }
+            track(:wu_lead) { |clip| clip.tone.triangle.at(0.1) * clip.env(0.01, 0.1, 0.5, 0.1) }
+            scene :wu_a, wu_drums: kit, wu_bass: a, wu_lead: c
+            scene :wu_b, wu_drums: kit, wu_bass: b, wu_lead: d
+            scene :wu_c, wu_bass: a, wu_lead: e, wu_cut: 2000
+          end
+        end
+        # (a new Poll each time: each caches its clips' Ruby)
+        6.times { Poll.new(ws).call(%i[meters scope]) }
+      ensure
+        ws&.close
+      end
+      private_class_method :warm_up_poll
 
       # Lines .warm_up_console types: the kinds of console lines a set
       # takes (numbers, symbols, strings, assignments, method calls).

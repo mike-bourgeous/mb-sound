@@ -41,8 +41,12 @@ module MB
           end
 
           # A Ruby-looking signature from the parameters: `turn(name, value = nil, at:, ...)`.
+          # A rest parameter named with a leading underscore catches guesses
+          # only to explain them (`fx :x, a, b`, `start :pluck`) and is left out.
           def signature
             params = unbound.parameters.map { |type, n|
+              next nil if type == :rest && n.to_s.start_with?('_')
+
               case type
               when :req then n.to_s
               when :opt then "#{n} = ..."
