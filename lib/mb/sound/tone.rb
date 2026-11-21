@@ -669,7 +669,10 @@ module MB
       # Changes the waveform type to a band-limited sawtooth (a rising
       # ramp; see BandLimit; #asaw is the naive, aliased version).  Graphs
       # print it as saw (the official name since ux-fix-1, 2026-10-18;
-      # ramp and sawtooth are aliases).
+      # ramp and sawtooth are aliases).  It starts in the middle (0),
+      # rising, and jumps from +1 to -1 halfway through each cycle: as a
+      # bar-synced LFO (`1.bar.lfo.saw`) on beat 3.  #drumramp starts at
+      # the bottom and jumps at the cycle's start (the downbeat).
       def saw
         set_wave(:ramp, true)
       end
@@ -1017,6 +1020,12 @@ module MB
       # Changes the waveform type to ramp, with phase set so the oscillator
       # starts at the bottom instead of the middle of its ramp.  This allows
       # using #drumramp oscillators to play beats in time with each other.
+      # The same as `saw.with_phase(0.5)`: it starts at -1, rises through
+      # the cycle, and jumps back at the next cycle's start, so a
+      # bar-synced LFO jumps on the downbeat (a plain #saw starts at 0 and
+      # jumps halfway, on beat 3 of a bar).
+      #
+      #     bg 110.hz.saw.at(-16.db).lp4(1.bar.lfo.drumramp.at(150..2000))
       def drumramp
         ramp.with_phase(-0.5)
       end
@@ -1283,9 +1292,14 @@ module MB
       # wave (0 to 1; whole cycles wrap): 0 starts oscillators at 0 and
       # rising (or at the top half of the cycle for a square wave), 0.25 at
       # the top of a sine.  +phase+ may also be an MB::Sound::Phase (e.g.
-      # `1.2.radians`, Phase.degrees(90)).
+      # `1.2.radians`, Phase.degrees(90)).  A saw starts in its middle and
+      # jumps at 0.5, so `with_phase(0.5)` puts its jump on the start (the
+      # downbeat of a bar-synced LFO; #drumramp is that saw); 0.5 starts a
+      # square low, 0.75 a sine or triangle at its bottom.  Tempo-synced
+      # tones keep the offset through timeline jumps.
       #
       # Example: 123.hz.with_phase(0.25)
+      #     1.bar.lfo.saw.with_phase(0.5).at(150..2000)   # 150 on each downbeat, rising
       def with_phase(phase)
         # (a graph document's param becomes its number; effects-3)
         phase = GraphNode.build_setting(phase)
@@ -1756,8 +1770,22 @@ module MB
       # Durations have their own #lfo for tempo-synced LFOs (see
       # Sequence::Duration#lfo).
       #
+      # Where each shape starts (measured, 2026-11-21; a bar-synced LFO
+      # starts so on each downbeat; phases in cycles):
+      #
+      #     sine (default), triangle, parabola: 0, rising; top at 1/4, bottom at 3/4
+      #     square: top (+1); drops to the bottom at 1/2
+      #     saw (ramp): 0 (the middle), rising; jumps from top to bottom at 1/2
+      #     drumramp (= saw.with_phase(0.5)): bottom (-1), rising; jumps at the cycle's end
+      #
+      # So `1.bar.lfo.ramp.at(150..2000)` reads 1075 on the downbeat and
+      # jumps to 150 on beat 3; `1.bar.lfo.drumramp.at(150..2000)` starts
+      # at 150 on the downbeat and jumps there.  #with_phase moves any
+      # shape's start (0.5 half a cycle).
+      #
       # Example:
       #     play 220.hz.saw.at(1).filter(:lowpass, cutoff: 0.25.hz.triangle.lfo.at(200..2000), quality: 4)
+      #     bg 110.hz.saw.at(-16.db).lp4(1.bar.lfo.drumramp.at(150..2000))   # rises each bar, jumps on the downbeat
       def lfo
         configure { @lfo = true }
         or_at(1)

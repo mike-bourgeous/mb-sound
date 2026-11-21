@@ -96,6 +96,12 @@ module MB
         `440.hz` is a Pitch; oscillator methods make a Tone (antialiased by
         default, `a*` twins are naive).  Phases are in cycles.  Lengths
         (`250.ms`, `1.n8`) and intervals (`7.semitones`) work everywhere.
+        LFOs (`0.2.hz.lfo`, `1.bar.lfo`) start where their shape starts: a
+        sine or triangle in the middle, rising; a square at its top; a saw
+        in the middle, jumping to the bottom halfway (beat 3 of
+        `1.bar.lfo.saw`).  `1.bar.lfo.drumramp` (a saw with
+        `with_phase(0.5)`) starts at the bottom and jumps on the downbeat;
+        `with_phase` moves any shape's start (`help :lfo` has the table).
       TEXT
       commands :silence, :impulse
       dsl :ramp, :square, :triangle, :sine, :pulse, :pwm, :fm, :pm, :fm_feedback, :sync, :unison, :swarm,
@@ -107,6 +113,9 @@ module MB
       end
       example 'FM bell' do
         bg :try, 440.hz.fm(660.hz.at(400) * env([[1, 0], [0, 1.5, 60]])).at(-16.db) * env([[1, 0.005], [0, 2, 40]])
+      end
+      example 'a filter sweep that rises each bar and jumps back on the downbeat' do
+        bg :try, 110.hz.saw.at(-16.db).lp4(1.bar.lfo.drumramp.at(150..2000)).until(2.bars)
       end
     end
 

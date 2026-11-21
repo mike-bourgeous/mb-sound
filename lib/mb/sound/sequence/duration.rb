@@ -197,7 +197,12 @@ module MB
         # each cycle every 4 bars from the start of the timeline.  It swings
         # over -1..1 unless #at is called, plays forever, and freezes while
         # the timeline is paused.  Call #freewheel to let it run free of the
-        # timeline (it still follows the tempo).
+        # timeline (it still follows the tempo).  Each cycle starts on its
+        # downbeat where the shape starts (Tone#lfo lists them): a sine or
+        # triangle in the middle, rising; a saw in the middle, jumping to
+        # the bottom halfway (beat 3 of `1.bar.lfo.saw`);
+        # `1.bar.lfo.drumramp` (a saw with `with_phase(0.5)`) starts at the
+        # bottom and jumps on the downbeat.
         #
         # Example (bin/sound.rb):
         #     cutoff = 4.bars.lfo.triangle.at(200..2000)
