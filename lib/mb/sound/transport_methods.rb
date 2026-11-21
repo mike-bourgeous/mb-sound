@@ -145,6 +145,15 @@ module MB
         session.idle? && !loaded_flow(session.arrangement).nil?
       end
 
+      # What #start says before it starts the loaded flow of +session+
+      # (Arrangement#start_note), or nil when it would resume, play on, or
+      # do nothing (for NAV Space's flash).
+      def self.start_note(session)
+        return nil if session.transport_paused? || (session.realtime? && session.paused?) || !would_start?(session)
+        f = loaded_flow(session.arrangement) or return nil
+        session.arrangement.start_note(f)
+      end
+
       # The console line NAV Space runs in +session+ (recorded in the take):
       # `start` when it starts something, else `pause`.
       def self.toggle_line(session)
