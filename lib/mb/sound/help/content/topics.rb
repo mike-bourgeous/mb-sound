@@ -2038,7 +2038,9 @@ module MB
         knobs, buses with meters.  Focus a pane in NAV (its number, or a
         for clips, r racks, o knobs, b buses) and press Enter for its keys: arrows
         move, Enter launches the cell (`launch :bass, 3`), g its scene (`go
-        :drop`), x stops the track, + - > < transpose, L legato, S swing, Q
+        :drop`), x stops the track, Space plays or stops the cell, s m
+        solo and mute its track, a auditions it in CUE (`cue :bass, 3`),
+        + - > < transpose, L legato, S swing, Q
         quantize, D double, H half, R reverse (`tweak :bass, transpose: 1`),
         u undo; in racks and the knobs pane Up/Down pick a knob and
         Left/Right turn it (Shift: fine; 0 its default; Enter types a
