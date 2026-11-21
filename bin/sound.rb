@@ -99,6 +99,11 @@ MB::Sound::Session::Cue::Prefs.apply # the saved phones blend (cue_mix 0.3, save
 MB::Sound::Help.first_level_check # first launch only, in a terminal, with a sound card
 puts MB::Sound::Help.welcome, ''
 
+# MB_SOUND_DROPOUT_PROBE=1 probes the whole session's dropouts, as it does for
+# scripts (`dropouts :stop`, or quitting, prints the report; see
+# MB::Sound::DropoutMethods)
+MB::Sound::DropoutMethods.start_from_env
+
 # The take: an always-on log of every line typed and exactly where each change
 # it made landed (see MB::Sound::Take); `take.save` writes a script that
 # replays the performance.  Started after warm_up, so it records the random

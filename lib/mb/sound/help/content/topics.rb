@@ -1938,9 +1938,11 @@ module MB
         `lesson` teaches the newer layers step by step.  When something
         goes wrong live, `debug_dump` writes the state (players, changes,
         graphs as Ruby, the screen, the take, recent MIDI, threads) to a
-        folder to read or send along.
+        folder to read or send along.  When the sound drops out,
+        `dropouts` starts a probe that names each dropout's likely cause
+        (`dropouts :report`, `dropouts :stop`; saved to tmp/dropout_probe/).
       TEXT
-      commands :help, :now, :lesson, :players, :knobs, :scenes, :tracks, :mutes, :changes, :markers, :ruby, :debug_dump
+      commands :help, :now, :lesson, :players, :knobs, :scenes, :tracks, :mutes, :changes, :markers, :ruby, :debug_dump, :dropouts
       see :sets, :knobs, :ui
     end
 

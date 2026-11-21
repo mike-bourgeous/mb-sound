@@ -74,6 +74,8 @@ module MB
         meta: {},
         marks: nil,
         startup: Analysis::STARTUP,
+        announce: true,
+        follow: false,
       }.freeze
 
       @armed = nil
@@ -93,22 +95,33 @@ module MB
         # A started probe for +session+ when one was armed (.arm) or
         # MB_SOUND_DROPOUT_PROBE is set (a .json path, or 1 for
         # .default_path(+name+)), else nil.  How ScriptRunner#live probes any
-        # live script; call #finish at the end.
-        def from_env(session, name: 'probe', env: ENV)
+        # live script; call #finish at the end.  +defaults+ are options an
+        # armed probe's own override (the console's +follow: true+).
+        def from_env(session, name: 'probe', env: ENV, **defaults)
           opts = @armed
           @armed = nil
           v = env['MB_SOUND_DROPOUT_PROBE'].to_s
           return nil if opts.nil? && (v.empty? || v == '0')
 
-          opts = (opts || {}).dup
+          opts = defaults.merge(opts || {})
           opts[:json] ||= v.empty? || v == '1' || v == '0' ? default_path(name) : v
           opts[:name] ||= name
           start(session, **opts)
         end
 
-        # tmp/dropout_probe/<name>-<local time>.json
+        # <dir>/<name>-<local time>.json (see .dir).
         def default_path(name = 'probe')
-          File.join('tmp', 'dropout_probe', "#{name}-#{Time.now.strftime('%Y%m%d-%H%M%S')}.json")
+          File.join(dir, "#{name}-#{Time.now.strftime('%Y%m%d-%H%M%S')}.json")
+        end
+
+        # Where probes save by default: tmp/dropout_probe/ in the main
+        # checkout (the handoff inbox, so a worktree's or the console's
+        # runs land where the maintainer files them), or under
+        # $MB_SOUND_CHECKOUT_TMP, or the user data directory's tmp/ for an
+        # installed gem (Internal.checkout_inbox; console-offers-1: the
+        # path was relative to the current directory).
+        def dir
+          Internal.checkout_inbox('dropout_probe')
         end
 
         def mono_ns
@@ -131,7 +144,12 @@ module MB
       # [monotonic ns, label] of things done on purpose, e.g.
       # bin/dropout_probe.rb's injected stalls, which the report matches
       # with the dropouts after them), +startup+ (2 s: dropouts this soon
-      # after the output started are :startup).
+      # after the output started are :startup), +announce+ (false: no
+      # start line, for callers that print their own; the per-dropout lines
+      # still come unless +quiet+), +follow+ (true: follow the default
+      # Session when it is replaced, as `latency :low` and `use_output` do:
+      # the console's `dropouts`).  Lines go through Internal.console_puts,
+      # so with a screen up they land in the REPL pane (or the messages).
       def initialize(session, **opts)
         unknown = opts.keys - DEFAULTS.keys
         raise ArgumentError, "Unknown dropout probe options: #{unknown.join(', ')} (known: #{DEFAULTS.keys.join(', ')})" unless unknown.empty?
@@ -214,10 +232,14 @@ module MB
         @thread = Thread.new { monitor }
         @thread.name = 'dropout-probe'
         ExitClose.register(self) # (a console session that quits still writes its log)
-        unless @options[:quiet]
-          $stdout.puts "Dropout probe: #{@traced ? describe_output : "#{@output.class} has no dropout trace (no underruns to see; render timings only)"}#{@latency_probe ? "; system probe #{@latency_probe.stats[:priority]}" : ''}"
-        end
+        say("Dropout probe: #{describe}") if @options[:announce]
         self
+      end
+
+      # What is probed, in one line: the output (or that it has no trace)
+      # and the system probe's priority.
+      def describe
+        "#{@traced ? describe_output : "#{@output.class} has no dropout trace (no underruns to see; render timings only)"}#{@latency_probe ? "; system probe #{@latency_probe.stats[:priority]}" : ''}"
       end
 
       # Stops the probe, analyzes what is left, and (with +json+) writes the
@@ -261,9 +283,12 @@ module MB
         self
       end
 
-      # The report text (Report#text).
+      # The report text (Report#text); while running, the report so far
+      # (taken under the probe's lock, between polls).
       def report
-        Report.new(self).text
+        return Report.new(self).text unless running?
+
+        @lock.synchronize { Report.new(self).text }
       end
 
       # Paths written by #save: :json, :csv, :txt (and :latency, the
@@ -443,6 +468,7 @@ module MB
         @lock.synchronize {
           now = self.class.mono_ns
           @offset = Process.clock_gettime(Process::CLOCK_REALTIME, :nanosecond) - now
+          follow_session if @options[:follow]
           attach_output unless @session.output.equal?(@output)
           drain_trace
           drain_log
@@ -564,7 +590,18 @@ module MB
 
         d = { n: @dropouts.length + 1, gap: gap, ctx: ctx, result: result }
         @dropouts << d
-        $stdout.puts(Report.live_line(d, self)) unless @options[:quiet]
+        say(Report.live_line(d, self))
+      end
+
+      def say(line)
+        Internal.console_puts(line) unless @options[:quiet]
+      end
+
+      # The default Session when it replaced the one probed (+follow+):
+      # Session.use_output closes the old one and makes the next.
+      def follow_session
+        s = Session.existing
+        @session = s if s && !s.equal?(@session)
       end
 
       # Classifies every dropout again with what the LatencyProbe filed by

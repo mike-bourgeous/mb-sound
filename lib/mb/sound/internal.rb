@@ -417,6 +417,39 @@ module MB
         @checkout_tmp_dir = main && File.join(main, 'tmp')
       end
 
+      # The folder +name+ of the handoff inbox: #checkout_tmp_dir/<name>
+      # (the main checkout's tmp/, or $MB_SOUND_CHECKOUT_TMP), else the
+      # user data directory's tmp/<name> for an installed gem.  Where
+      # DropoutProbe.default_path saves (console-offers-1).
+      def checkout_inbox(name)
+        base = checkout_tmp_dir
+        base ? File.join(base, name.to_s) : user_data_dir('tmp', name)
+      end
+
+      # Prints +text+ from a background thread (a probe, a device report)
+      # where console output goes without tearing a screen
+      # (console-offers-1): with the tiles up, above the REPL pane's prompt
+      # (MB::Term::Input::ReplHost#print_above, which redraws the line
+      # being typed); with another screen owning the terminal (the band),
+      # into UI.messages as notes; otherwise (or on the REPL's own thread,
+      # whose output is the REPL's) $stdout.  Returns nil.
+      def console_puts(text)
+        s = defined?(UI) && UI.respond_to?(:screen) ? UI.screen : nil
+        if s && !UI.repl_thread?
+          host = s.respond_to?(:host) ? s.host : nil
+          if host.respond_to?(:print_above)
+            host.print_above(text.to_s)
+            return nil
+          end
+          if UI.owns_terminal?
+            text.to_s.each_line { |l| UI.messages.add(l, severity: :note) }
+            return nil
+          end
+        end
+        $stdout.puts(text)
+        nil
+      end
+
       # $MB_SOUND_CHECKOUT_TMP as a full path, or nil (see
       # #checkout_tmp_dir).
       def checkout_tmp_override
