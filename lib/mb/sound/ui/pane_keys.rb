@@ -55,7 +55,7 @@ module MB
       # Preview (a live unjournaled knob move), a Commit (a gesture's
       # line, from the Session), an Ask (a value to type on a prompt
       # line, handed to key_<answer>), a Paste (a line onto the REPL's
-      # prompt, not run).
+      # prompt, not run), a Focus (into another pane).
       module PaneKeys
         def self.included(base)
           base.extend(ClassMethods)
@@ -170,6 +170,22 @@ module MB
         # for the status line.
         Paste = Data.define(:code, :note) do
           def self.[](code, note = nil) = new(code: code.freeze, note: note&.freeze)
+        end
+
+        # Another pane a pane key goes into (tracks-enter-1: the tracks
+        # pane's Enter takes its track into the knobs pane, and the knobs
+        # pane's Esc comes back): the screen focuses +pane+ (a pane name or
+        # kind on screen; with +rows+, a pane of that kind put in for a
+        # while where none is, as a jump letter's temporary pane), goes
+        # into its mode, then calls its key_<+action+>(state, *+args+, the
+        # asking pane's name) when +action+ is given, handling what that
+        # returns like a key's result.  +leave+ takes the asking pane away
+        # if a jump or a Focus put it in for a while.  UI state only: no
+        # line runs, nothing is journaled.  +note+ for the status line.
+        Focus = Data.define(:pane, :action, :args, :rows, :leave, :note) do
+          def self.[](pane, action = nil, *args, rows: nil, leave: false, note: nil)
+            new(pane: pane, action: action, args: args.freeze, rows: rows, leave: leave, note: note&.freeze)
+          end
         end
 
         # The pane's keymap (its kind's), or nil.
