@@ -81,6 +81,13 @@ RSpec.describe('console command results') do
       within { MB::Sound.level(:pad, -6.db) }
       run(800)
       expect(session.strip_info[:muted]).to eq([:"pluck/live"])
+
+      # A bus has no fader: level refuses it, naming mute and feed (his
+      # `level :hall, -80.db` changed nothing); mute works on buses
+      within { MB::Sound.bus(:hall) { |sig| sig } }
+      within { MB::Sound.feed(:pad, :hall, 0.5) }
+      expect { within { MB::Sound.level(:hall, -80.db) } }.to raise_error(ArgumentError, /level :hall: a bus has no level of its own .* mute :hall silences it, feed :pad, :hall, 0 closes one send \(sending: :pad\)/)
+      expect(session.knobs.key?(:"hall/level")).to eq(false)
     end
   end
 

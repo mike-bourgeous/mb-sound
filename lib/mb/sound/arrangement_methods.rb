@@ -328,6 +328,16 @@ module MB
         return session.level(name) if value.nil?
         point = LaunchPoint.of(binding) or return nil
         return nil unless strip_names_known?(:level, [name])
+        if name.is_a?(Symbol) && session.names.kind(name) == :bus
+          # (ux-friction-1: his `level :hall, -80.db` made a knob that
+          # nothing reads; buses have no fader, Faders#fader_levels is
+          # players' only)
+          sends = session.routes.select { |_, r| r[:send]&.key?(name) }.keys
+          return MB::Sound.live_error(ArgumentError.new(
+            "level #{name.inspect}: a bus has no level of its own (the knob would change nothing); mute #{name.inspect} silences it, " \
+            "feed :#{sends.first || 'track'}, #{name.inspect}, 0 closes one send#{sends.empty? ? '' : " (sending: #{sends.map(&:inspect).join(', ')})"}"
+          ))
+        end
         session_command(name, label: "level #{name.inspect}", kind: :turn) { |s, time|
           s.level(name, value, at: point, over: over, curve: curve, from: from, smooth: smooth, start_time: point.given? ? nil : time)
         }
