@@ -203,4 +203,61 @@ RSpec.describe(MB::Sound::Session::TransportPause, :aggregate_failures) do
     session.play_on
     expect(session.transport_paused?).to eq(false)
   end
+
+  describe 'the console commands on a realtime Session' do
+    let(:rt) { MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 1, sleep: :virtual, buffer_size: 256), channels: 1, master_gain: 1, realtime: true, transport: MB::Sound::Sequence::Transport.new(bpm: 120)) }
+
+    after do
+      rt.close
+      MB::Sound.rewind
+    end
+
+    def consume(seconds) = MB::Sound::Internal.wait_audio(rt, seconds)
+    def within(&block) = MB::Sound::Session.with_context(session: rt, &block)
+
+    it 'pauses with pause, plays on with start (or pause), and freezes with suspend' do
+      rt.add(220.hz.sine.at(0.1), name: :drone, at: :now, fade: 0)
+      consume(0.1)
+      st = within { MB::Sound.pause }
+      expect(st.state).to eq(:paused)
+      expect(st.to_s).to include('effects ring out')
+      consume(0.1)
+      expect(rt.transport_paused?).to eq(true)
+      expect(MB::Sound::TransportMethods.toggle_line(rt)).to eq('start') # (NAV Space)
+      pos = rt.transport.position
+      rendered = rt.frames_rendered
+      consume(0.1)
+      expect(rt.transport.position).to eq(pos)
+      expect(rt.frames_rendered).to be > rendered # (renders on while paused)
+
+      st = within { MB::Sound.start }
+      expect(st.state).to eq(:resumed)
+      consume(0.1)
+      expect(rt.transport.position).to be > pos
+      expect(within { MB::Sound.pause }.state).to eq(:paused)
+      expect(within { MB::Sound.pause }.state).to eq(:resumed) # (pause again plays on)
+      consume(0.05)
+
+      st = within { MB::Sound.suspend }
+      expect(st.state).to eq(:suspended)
+      consume(0.1)
+      held = rt.frames_rendered
+      consume(0.1)
+      expect(rt.frames_rendered).to eq(held) # (the old freeze: nothing renders)
+      expect(within { MB::Sound.suspend }.state).to eq(:resumed)
+      consume(0.05)
+      expect(rt.frames_rendered).to be > held
+    end
+  end
+
+  it 'shows a paused transport in the transport pane as a pause sign, not a stop' do
+    draw = ->(**f) {
+      grid = MB::Term::Cells.new(50, 1)
+      MB::Sound::UI::Panes::Transport.new.draw(MB::Sound::UI::Canvas.new(grid, 0, 0, 50, 1), MB::Sound::UI::Snapshot.fake(**f), {})
+      grid.to_text(:none).lines.first.to_s
+    }
+    expect(draw.(playing: true)).to start_with('▶ 1:1')
+    expect(draw.(playing: false, paused: true)).to start_with('││ 1:1')
+    expect(draw.(playing: false)).to start_with('■ 1:1')
+  end
 end

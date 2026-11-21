@@ -1275,7 +1275,11 @@ module MB
               run_safely {
                 s = keys_session || Session.current
                 st = UI.run_line(TransportMethods.toggle_line(s), s)
-                flash(st.to_s, :dim) if st.is_a?(TransportMethods::Status)
+                next st unless st.is_a?(TransportMethods::Status)
+                # (self: run_safely flashes any other result, and flash's
+                # own return value printed as `=> [text, role, ...]`)
+                flash(st.to_s, :dim)
+                self
               }
             end
           when :keys then keys
@@ -2389,7 +2393,8 @@ module MB
           role = %i[nav overlay once].include?(mode) ? :armed : mode == :grab ? (step ? :queued : :rec) : mode == :pane ? :queued : :key
           @grid.put_run(0, y, badge, MB::Term::Cells.pack(Theme.rgb(role)), nil, MB::Term::Cells::REVERSE | MB::Term::Cells::BOLD)
           x = badge.length + 1
-          right = snap ? "#{snap.playing ? c.glyph(:play) : c.glyph(:stop)} #{snap.stamp} " : ''
+          # (paused: the bar stands while effects ring out, a pause sign)
+          right = snap ? "#{snap.paused ? c.glyph(:sep) * 2 : snap.playing ? c.glyph(:play) : c.glyph(:stop)} #{snap.stamp} " : ''
           right = "#{frame_rate[:text]}  #{right}" if @show_fps
           unread = UI.messages.unread
           if unread > 0 && !@tiler.layout.panes.include?(:messages)

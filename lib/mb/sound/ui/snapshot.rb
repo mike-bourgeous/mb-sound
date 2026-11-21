@@ -158,7 +158,8 @@ module MB
       # Fast fields: +seq+ (publish count), +time+ (MB::U.clock_now when
       # published), +frame+, +pos+ (timeline position in whole notes),
       # +bar+, +beat+ (Rational, counting from 1), +bpm+, +bar_length+
-      # (whole notes), +playing+, +sample_rate+, +buffer_size+, +load+ and
+      # (whole notes), +playing+, +paused+ (the transport is paused while
+      # effects ring out: Session::TransportPause), +sample_rate+, +buffer_size+, +load+ and
       # +load_max+ (render time over buffer time, mean and worst over the
       # snapshot's buffers), +parts+ (PartLoads), +master+ (MasterLevels,
       # or nil without a meter pane), +scope+ (frozen Numo::SFloats, one per
@@ -174,14 +175,14 @@ module MB
       # HeldNotes on the Session's MIDI inputs, always); +sounding+
       # (reserved for notes after a scale transform; nil).
       Snapshot = Data.define(
-        :seq, :time, :frame, :pos, :bar, :beat, :bpm, :bar_length, :playing,
+        :seq, :time, :frame, :pos, :bar, :beat, :bpm, :bar_length, :playing, :paused,
         :sample_rate, :buffer_size, :load, :load_max, :parts, :master, :scope,
         :underruns, :knobs, :slow, :latency, :bus_levels, :send_levels, :notes, :sounding
       ) do
         # Defaults for every field (a stopped transport at bar 1).
         def self.defaults
           {
-            seq: 0, time: 0.0, frame: 0, pos: 0r, bar: 1, beat: 1r, bpm: 120, bar_length: 1r, playing: false,
+            seq: 0, time: 0.0, frame: 0, pos: 0r, bar: 1, beat: 1r, bpm: 120, bar_length: 1r, playing: false, paused: false,
             sample_rate: 48000, buffer_size: 800, load: nil, load_max: nil, parts: [].freeze, master: nil, scope: nil,
             underruns: nil, knobs: [].freeze, slow: Slow.empty, latency: 0.0,
             bus_levels: nil, send_levels: nil, notes: [].freeze, sounding: nil,
@@ -576,7 +577,7 @@ module MB
 
           Snapshot.new(
             seq: @published + 1, time: MB::U.clock_now, frame: rec[:frame], pos: rec[:pos],
-            bar: stamp.bar, beat: stamp.beat, bpm: rec[:bpm], bar_length: rec[:bar_length], playing: rec[:playing],
+            bar: stamp.bar, beat: stamp.beat, bpm: rec[:bpm], bar_length: rec[:bar_length], playing: rec[:playing], paused: !!rec[:paused],
             sample_rate: rate, buffer_size: session.buffer_size,
             load: @frames > 0 && @load_sum > 0 ? @load_sum / @frames : nil, load_max: @load_max > 0 ? @load_max : nil,
             parts: parts,

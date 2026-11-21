@@ -67,8 +67,10 @@ module MB
             end
 
             load, role = Panes.load_text(s.load)
+            # (paused: the bar stands while effects ring out, not stopped audio)
+            state = s.paused ? [c.glyph(:sep) * 2, :warn] : s.playing ? [c.glyph(:play), :ok] : [c.glyph(:stop), :dim]
             segs = [
-              [s.playing ? c.glyph(:play) : c.glyph(:stop), s.playing ? :ok : :dim], ' ',
+              state, ' ',
               [s.stamp.ljust(6), :key], ' ',
               [Panes.fmt(s.bpm), :name], [' bpm ', :dim], [s.meter, :name],
               ['  load ', :dim], [load.rjust(4), role], ' ',
