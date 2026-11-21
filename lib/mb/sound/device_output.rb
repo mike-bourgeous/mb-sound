@@ -331,7 +331,6 @@ module MB
         end
 
         self.class.track(self, true)
-        DeviceReport.opened(self) # (a line on the live console; see DeviceReport)
       end
 
       # Queues audio for playback: an Array with one Numo::NArray per

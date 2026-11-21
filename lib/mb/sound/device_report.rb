@@ -11,65 +11,52 @@ module MB
     # 512-frame writes were pulled in 1024-frame blocks: the screens got new
     # audio half as often and the sound came later, and nothing said so.
     #
-    # Only in live mode (bin/sound.rb; MB::Sound.live?): DeviceOutput#initialize
-    # calls .opened, and the console calls .poll after each line it runs
-    # (and once at startup), on its own thread: nothing here runs on the
-    # render or device threads, and nothing blocks.  The JACK pull is known
-    # at open (the server's buffer size); other backends' is the largest
-    # callback so far, read once a second of audio has played.
+    # Only in the live console: bin/sound.rb calls .poll after each line it
+    # runs (and once at startup), on its own thread, and a poll looks at
+    # the default Session's output (a new one is a new open: the first
+    # play, `latency :low`, `use_output`).  Nothing here runs on the render
+    # or device threads, nothing blocks, and DeviceOutput knows nothing of
+    # it (the audio I/O layer stays free of the console).  The JACK pull is
+    # known at open (the server's buffer size); other backends' is the
+    # largest callback so far, read once a second of audio has played.
+    # Outputs used outside the default Session (an explicit
+    # MB::Sound.output) aren't reported; `latency` reports the default's.
     #
-    #     Audio out: jack "sound" (PipeWire's JACK) at 48000 Hz, buffer 512 frames (latency :default), pulls 1024 frames
+    #     Audio out: jack client "sound" (PipeWire's JACK) at 48000 Hz, buffer 512 frames (latency :default), pulls 1024 frames
     #
-    # `latency` with no argument prints .facts (the same, the queue, and the
-    # underruns so far).
+    # `latency` with no argument prints .report (the same, the queue, and
+    # the underruns so far).
     module DeviceReport
       # Seconds of audio played before a measured (non-JACK) pull counts.
       PULL_AFTER = 1.0
 
-      # What .poll follows: the newest open DeviceOutput, the pull it last
-      # reported (nil until known), and whether its open line printed.
-      State = Struct.new(:output, :pull, :announced)
+      # What .poll follows: the output it reported and the pull it last
+      # reported (nil until known).
+      State = Struct.new(:output, :pull)
 
-      @lock = Mutex.new
-      @opened = nil
       @state = nil
       @warned = false
       @pipewire = nil
 
       class << self
-        # Called by DeviceOutput#initialize: in live mode, remembers
-        # +output+ for the next .poll.
-        def opened(output)
-          return unless MB::Sound.live?
-
-          @lock.synchronize { @opened = output }
-          nil
-        end
-
         # Prints what changed since the last call (the console's thread,
-        # after each line): an output's open line, a pull measured later,
-        # a JACK period change; warns once when a pull is larger than the
-        # buffer.  Returns nil.
-        def poll
-          out = @lock.synchronize {
-            o = @opened
-            @opened = nil
-            o
-          }
-          if out && !out.closed?
+        # after each line) about +session+'s output (default: the default
+        # Session's, if it has opened one; nothing is opened here): a new
+        # output's open line, a pull measured later, a JACK period change;
+        # warns once when a pull is larger than the buffer.  Returns nil.
+        def poll(session = Session.existing)
+          out = session&.output_open? ? session.output : nil
+          return nil unless out.is_a?(DeviceOutput) && !out.closed?
+
+          st = @state
+          unless st&.output.equal?(out)
             p = pull(out)
-            @state = State.new(out, p, true)
+            @state = State.new(out, p)
             Internal.console_puts(open_line(out, p))
             check(out, p)
             return nil
           end
 
-          st = @state
-          return nil unless st
-          if st.output.closed?
-            @state = nil
-            return nil
-          end
           p = pull(st.output)
           return nil if p.nil? || p == st.pull
 
@@ -112,9 +99,9 @@ module MB
           "Audio out: #{out.backend} #{name}#{pipewire_jack?(out) ? " (PipeWire's JACK)" : ''} at #{rate}, buffer #{out.buffer_size} frames (latency #{out.profile.inspect})#{period}#{tail}"
         end
 
-        # The facts `latency` prints for +out+ (lines): the open line, the
-        # queue and latency, the underruns (xruns) so far.
-        def facts(out)
+        # What `latency` prints for +out+ (lines): the open line, the queue
+        # and latency, the underruns (xruns) so far.
+        def report(out)
           return "Audio out: not open (it opens when something plays)" if out.nil?
           return "Audio out: #{out.class.name.split('::').last} at #{out.sample_rate.round} Hz, buffer #{out.buffer_size} frames (no sound card#{Internal.detect_output == :null ? ', OUTPUT_TYPE=null' : ''})" unless out.is_a?(DeviceOutput)
           return "Audio out: #{out.inspect}" if out.closed?
@@ -199,7 +186,6 @@ module MB
 
         # Forgets what was reported (specs).
         def reset!
-          @lock.synchronize { @opened = nil }
           @state = nil
           @warned = false
           @pipewire = nil

@@ -402,7 +402,7 @@ module MB
       # Light patches (e.g. a few band-limited oscillators) can use :low;
       # heavy graphs need :default or :safe.  An AUDIO_PROFILE environment
       # variable still takes precedence.  Without a profile, prints what the
-      # output gets (DeviceReport.facts: backend, device, rate, buffer,
+      # output gets (DeviceReport.report: backend, device, rate, buffer,
       # period, how many frames the sound server pulls at a time, the queue,
       # and the underruns (xruns) so far; console-offers-1) and returns the
       # current output's profile (nil if it has none).  Also available as
@@ -415,7 +415,7 @@ module MB
       def latency(profile = nil)
         if profile.nil?
           out = Session.default.output
-          puts DeviceReport.facts(out)
+          puts DeviceReport.report(out)
           return out.respond_to?(:profile) ? out.profile : nil
         end
 

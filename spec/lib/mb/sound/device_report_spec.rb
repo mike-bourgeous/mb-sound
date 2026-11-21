@@ -15,7 +15,6 @@ RSpec.describe(MB::Sound::DeviceReport, :aggregate_failures) do
 
   after do
     @outputs.each(&:close)
-    MB::Sound.live = false
     described_class.reset!
   end
 
@@ -38,18 +37,25 @@ RSpec.describe(MB::Sound::DeviceReport, :aggregate_failures) do
     allow(described_class).to receive(:jack_library).and_return(library)
   end
 
-  it "prints nothing outside live mode (scripts, specs): DeviceOutput's open isn't remembered" do
-    card
-    expect { described_class.poll }.not_to output.to_stdout
+  # A stand-in for the default Session: what .poll reads.
+  def session_of(out) = Struct.new(:output, :output_open?).new(out, !out.nil?)
+
+  it 'prints nothing without an open output, for a NullOutput, or for a closed card; never opens one' do
+    expect { described_class.poll(nil) }.not_to output.to_stdout
+    expect { described_class.poll(session_of(nil)) }.not_to output.to_stdout
+    null = MB::Sound::NullOutput.new(channels: 2, sample_rate: 48000, buffer_size: 800)
+    expect { described_class.poll(session_of(null)) }.not_to output.to_stdout
+    o = card
+    o.close
+    expect { described_class.poll(session_of(o)) }.not_to output.to_stdout
   end
 
   it 'prints a JACK output through PipeWire once, with the pull, and warns once with what to type' do
-    MB::Sound.live = true
     jack(1024)
     o = card(backend: :jack, name: 'sound', period: 1024)
-    described_class.opened(o) # (the stubs came after the real open)
+    session = session_of(o)
     expect {
-      expect { described_class.poll }.to output(
+      expect { described_class.poll(session) }.to output(
         "Audio out: jack client \"sound\" (PipeWire's JACK) at 48000 Hz, buffer 512 frames (latency :default), pulls 1024 frames\n"
       ).to_stdout
     }.to output(
@@ -57,16 +63,15 @@ RSpec.describe(MB::Sound::DeviceReport, :aggregate_failures) do
       "PipeWire keeps the period (quantum) it had when mb-sound joined: start with PIPEWIRE_QUANTUM=512/48000 bin/sound.rb, " \
       "or set it for everything with `pw-metadata -n settings 0 clock.force-quantum 512` (0 undoes it)\n"
     ).to_stderr
-    expect { described_class.poll }.not_to output.to_stdout
+    expect { described_class.poll(session) }.not_to output.to_stdout
 
     # The period changes: one line, no second warning
     jack(2048)
-    expect { described_class.poll }.to output("Audio out: PipeWire now pulls 2048 frames at a time (was 1024)\n").to_stdout
-    expect { described_class.poll }.not_to output.to_stdout
+    expect { described_class.poll(session) }.to output("Audio out: PipeWire now pulls 2048 frames at a time (was 1024)\n").to_stdout
+    expect { described_class.poll(session) }.not_to output.to_stdout
   end
 
   it "words it for jackd when the JACK library isn't PipeWire's, and says nothing more when the pull fits" do
-    MB::Sound.live = true
     jack(1024, library: jackd_libjack)
     o = card(backend: :jack, name: 'sound')
     expect(described_class.open_line(o)).to eq('Audio out: jack client "sound" at 48000 Hz, buffer 512 frames (latency :default), pulls 1024 frames')
@@ -82,20 +87,19 @@ RSpec.describe(MB::Sound::DeviceReport, :aggregate_failures) do
   end
 
   it 'gives other backends their pull once a second has played, then warns in general words' do
-    MB::Sound.live = true
     played = 0
     o = card(backend: :pulseaudio, name: 'Built-in Audio Analog Stereo', period: 480, stats: -> { { frames_played: played, max_callback: 1024 } })
-    described_class.opened(o)
-    expect { described_class.poll }.to output(
+    session = session_of(o)
+    expect { described_class.poll(session) }.to output(
       "Audio out: pulseaudio \"Built-in Audio Analog Stereo\" at 48000 Hz, buffer 512 frames (latency :default), period 480, pull size known after a second of sound (`latency` shows it)\n"
     ).to_stdout
     played = 24_000
-    expect { described_class.poll }.not_to output.to_stdout
+    expect { described_class.poll(session) }.not_to output.to_stdout
     played = 48_000
     expect {
-      expect { described_class.poll }.to output("Audio out: the sound card pulls 1024 frames at a time\n").to_stdout
+      expect { described_class.poll(session) }.to output("Audio out: the sound card pulls 1024 frames at a time\n").to_stdout
     }.to output(/\AAudio out: the sound card pulls 1024 frames at a time, twice mb-sound's 512-frame buffer, .*; set the sound server's period \(buffer size\) to 512 frames\n\z/).to_stderr
-    expect { described_class.poll }.not_to output.to_stdout
+    expect { described_class.poll(session) }.not_to output.to_stdout
   end
 
   it 'prints an ALSA output with its period, and resampling' do
@@ -111,7 +115,7 @@ RSpec.describe(MB::Sound::DeviceReport, :aggregate_failures) do
   it 'gives `latency` the facts: the open line, the queue, the underruns and skipped JACK cycles, and the advice' do
     jack(1024)
     o = card(backend: :jack, name: 'sound', stats: { underruns: 3, concealed_gaps: 2, concealed: 960 })
-    text = described_class.facts(o)
+    text = described_class.report(o)
     lines = text.lines.map(&:chomp)
     expect(lines[0]).to eq("Audio out: jack client \"sound\" (PipeWire's JACK) at 48000 Hz, buffer 512 frames (latency :default), pulls 1024 frames")
     expect(lines[1]).to match(/\AQueue: 50 ms \(adaptive, up to 85 ms\); latency now \d+ ms \(the queue plus the card's buffer\)\z/)
@@ -119,9 +123,9 @@ RSpec.describe(MB::Sound::DeviceReport, :aggregate_failures) do
     expect(lines[3]).to start_with('Pull: PipeWire pulls 1024 frames at a time')
     expect(lines.length).to eq(4)
 
-    expect(described_class.facts(nil)).to eq('Audio out: not open (it opens when something plays)')
+    expect(described_class.report(nil)).to eq('Audio out: not open (it opens when something plays)')
     null = MB::Sound::NullOutput.new(channels: 2, sample_rate: 48000, buffer_size: 800)
-    expect(described_class.facts(null)).to start_with('Audio out: NullOutput at 48000 Hz, buffer 800 frames (no sound card')
+    expect(described_class.report(null)).to start_with('Audio out: NullOutput at 48000 Hz, buffer 800 frames (no sound card')
   end
 
   it 'finds the JACK library the process loaded, from /proc/self/maps where there is one' do
