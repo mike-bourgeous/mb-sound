@@ -324,6 +324,12 @@ module MB
       def level(name = nil, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, smooth: nil)
         session = Session.current
         return session.levels if name.nil?
+        if name.is_a?(Numeric) && !name.is_a?(Integer)
+          # (ux-friction-1 round 2: the maintainer's `level -30.db`)
+          return MB::Sound.live_error(ArgumentError.new(
+            "level takes a name first: level :drums, #{name.inspect} (a player's number: level 2, #{name.inspect}); the whole mix is master_gain #{name.inspect}"
+          ))
+        end
         name = player_name(name)
         return session.level(name) if value.nil?
         point = LaunchPoint.of(binding) or return nil

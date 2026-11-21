@@ -91,6 +91,12 @@ RSpec.describe('console command results') do
       within { MB::Sound.feed(:pad, :hall, 0.5) }
       expect { within { MB::Sound.level(:hall, -80.db) } }.to raise_error(ArgumentError, /level :hall: a bus has no level of its own .* mute :hall silences it, feed :pad, :hall, 0 closes one send \(sending: :pad\)/)
       expect(session.knobs.key?(:"hall/level")).to eq(false)
+
+      # A level without a name, and a master given a level (ux-friction-1
+      # round 2: his `level -30.db` and `master -30.db`), name master_gain
+      expect { within { MB::Sound.level(-30.db) } }.to raise_error(ArgumentError,
+        'level takes a name first: level :drums, -30.db (a player\'s number: level 2, -30.db); the whole mix is master_gain -30.db')
+      expect { within { MB::Sound.master(-30.db) } }.to raise_error(ArgumentError, /\(got -30.db\); the master level is master_gain -30.db\z/)
     end
   end
 
