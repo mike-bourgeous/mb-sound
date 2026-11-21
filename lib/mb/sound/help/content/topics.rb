@@ -1100,7 +1100,8 @@ module MB
         same name) with labels, gotos, and picks decided at commit points;
         perform it with loop!, onward, goto, skip, finish, practice, seek.
         `flow` alone shows it (where it is, what comes next, how to end
-        it); `start` (or `play`, `go` with nothing) plays the loaded flow
+        it), `sections` lists its sections like `players` (the one playing,
+        the next), `section` alone names the one playing; `start` (or `play`, `go` with nothing) plays the loaded flow
         and `pause` (NAV Space) toggles: the bar stops, sounding notes
         release, loops and drones fade out and hold their place, and
         echoes and reverbs ring out; playing on doesn't retrigger notes
@@ -1112,7 +1113,7 @@ module MB
         `go :drop, section: :drop2` picks one; a scene no section plays
         ends the flow: you're driving).
       TEXT
-      commands :flow, :start, :pause, :play_form, :section, :loop!, :onward, :goto, :skip, :finish, :practice, :seek, :marker, :meter, :suspend
+      commands :flow, :start, :pause, :play_form, :section, :sections, :loop!, :onward, :goto, :skip, :finish, :practice, :seek, :marker, :meter, :suspend
       note :arrangement
       see :sets, :long_form
       example 'a tiny song form' do

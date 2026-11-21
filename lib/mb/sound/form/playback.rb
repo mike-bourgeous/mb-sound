@@ -109,15 +109,19 @@ module MB
         # as declared (its order is decided as it plays).  Frozen, and the
         # same object every call (forms don't change while they play).
         def section_rows
-          @section_rows ||= begin
-            plays = @form.generative? ? @form.sections.values.map { |s| [s.name, s.times, s.length] } : @form.plays
-            texts = {}
-            plays.each do |name, times, len|
-              t = "#{Playback.length_text(len)}#{" x#{times}" if times != 1}"
-              (texts[name] ||= []) << t
-            end
-            texts.map { |name, list| [name, list.join(' · ').freeze].freeze }.freeze
+          @section_rows ||= Playback.rows_of(@form)
+        end
+
+        # #section_rows for Form +form+ (playing or not: the console's
+        # `sections` lists a loaded flow too).
+        def self.rows_of(form)
+          plays = form.generative? ? form.sections.values.map { |s| [s.name, s.times, s.length] } : form.plays
+          texts = {}
+          plays.each do |name, times, len|
+            t = "#{length_text(len)}#{" x#{times}" if times != 1}"
+            (texts[name] ||= []) << t
           end
+          texts.map { |name, list| [name, list.join(' · ').freeze].freeze }.freeze
         end
 
         # A section length as listings say it: "8 bars" (a number of bars)
