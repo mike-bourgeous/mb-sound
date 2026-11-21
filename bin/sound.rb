@@ -139,11 +139,14 @@ MB::Sound::UI.install_pry!
 # MB::Sound::UI::EnterSubmits); deleting the first word of a line keeps the
 # space after it (MB::Sound::UI::FirstLineSpaces), and Backspace after a
 # continuation line's indentation joins it to the line above
-# (MB::Sound::UI::BackspaceJoins)
+# (MB::Sound::UI::BackspaceJoins).  Alt-Up/Alt-Down on a number steps it and
+# runs the line again; Alt-Shift-Left/Right jump between numbers
+# (MB::Sound::UI::NudgeKeys)
 MB::Sound::UI::Prompt.install!
 MB::Sound::UI::EnterSubmits.install!
 MB::Sound::UI::FirstLineSpaces.install!
 MB::Sound::UI::BackspaceJoins.install!
+MB::Sound::UI::NudgeKeys.install!
 
 # Pry 0.16 reads with Reline's multiline editor, which treats piped input as
 # one paste and evaluates it as a single block (so `printf 'a\nb\n' |
