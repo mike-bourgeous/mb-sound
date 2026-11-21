@@ -816,6 +816,7 @@ module MB
       #     bg :pad, pad.follow                     # tonal: the phase vocoder keeps notes whole
       #     bg :pad, pad.follow(stretch: :slice)    # say which
       #     bg :pad, pad.follow(stretch: { mode: :spectral, transients: :markers })  # the vocoder, attacks at the markers
+      #     bg :pad, pad.follow(stretch: { mode: :spectral, lock: :peaks })  # plain vocoder phases, not the waveform lock (restretches in a third of the time)
       #     bg :hit, hit.follow(stretch: :none)     # as recorded, once per loop length
       #     bg :vinyl, brk.follow(:resample)         # pitch follows the tempo
       #     bpm 128                                  # every follower restretches
@@ -1183,16 +1184,22 @@ module MB
       # input's relative phases, moved in time, so a tone keeps its
       # waveform; a loop then closes its phases over the last half
       # second or so (Spectral::SHAPE_CLOSING windows), where it runs
-      # free.  How a loop's phases close: +closure+ :spread (default)
-      # spreads each partial's error evenly over the loop, :shift
-      # closes a harmonic sound with a pitch change of up to
+      # free.  It is the default for looped stretches (:spectral with
+      # +wrap+, given or by the sample's loop; Spectral.loop_lock:
+      # not with randomize: 1 or closure: :shift), about 3x the time to
+      # make; :peaks (identity locking alone, unlooped stretches'
+      # default) opts out.  How a loop's phases close: +closure+
+      # :spread (default) spreads each partial's error evenly over the
+      # loop (or the shape lock's closing span), :shift (with lock:
+      # :peaks) closes a harmonic sound with a pitch change of up to
       # Spectral::SHIFT_CENTS (keeping its shape, but it dulls the
       # top above 2 kHz: the frames disagree by a few samples), and
       # +closure_length+ (seconds or a Length) closes only that long
       # before the loop point, the rest as with its own ends.  (A
       # bass loop through its track's waveshaper lost 2.4 dB of sub
       # with the closed loop; lock: :shape gave it back,
-      # stretch-fixes-6.)
+      # stretch-fixes-6, and became the loops' default in
+      # stretch-lock-default-1.)
       #
       # +mode+ :slice (SliceStretch; loops) cuts the sample at +slices+
       # (markers, else onsets, else sixteenths; :markers, :onsets,
@@ -1250,7 +1257,9 @@ module MB
       #     brk.stretch(1.25, mode: :spectral, transients: [0, 1.n8, 2.n8, 13230.samples])   # or at these positions
       #     brk.stretch(1.25, mode: :spectral, transients: :markers, confirm: true)   # only markers with an attack, on the attack
       #     brk.stretch(1.25, mode: :slice, confirm: true)                             # slices only at markers with an attack
-      #     bass.stretch(1.29, mode: :spectral, lock: :shape)  # the waveform kept (for a distortion after it)
+      #     bass.looped.stretch(1.29, mode: :spectral)          # a loop: the waveform kept (for a distortion after it)
+      #     bass.looped.stretch(1.29, mode: :spectral, lock: :peaks)  # the plain vocoder's phases (a third of the time)
+      #     bass.stretch(1.29, mode: :spectral, lock: :shape)  # unlooped, asking for the waveform lock
       #     hit.stretch(1.25, mode: :none)             # as recorded, then silence
       def stretch(ratio, mode: :cyclic, cycle: 25.ms, crossfade: CROSSFADE, fit: :auto, window: nil, overlap: Spectral::OVERLAP, transients: nil, seed: 0, randomize: nil, link: true, shape: :hann,
                   slices: nil, fade: nil, fill: nil, wrap: nil, noise: nil, confirm: nil, threshold: nil, slot_fade: nil, fade_law: nil, positions: nil, closure: nil, closure_length: nil, lock: nil)
