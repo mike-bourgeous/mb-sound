@@ -37,6 +37,14 @@ RSpec.describe('knob ranges', :aggregate_failures) do
     end
   end
 
+  it "says where a knob is when turned without a value (ux-friction-1 round 2)" do
+    MB::Sound::Session.with_context(session: session) do
+      MB::Sound.knob(:spec_drive, 1.5, range: 0..4)
+      expect { MB::Sound.turn(:spec_drive) }.to raise_error(ArgumentError, 'turn :spec_drive takes a value: it is at 1.5 (0..4) now (turn :spec_drive, 4 sets it)')
+      expect(session.knobs[:spec_drive].value).to eq(1.5)
+    end
+  end
+
   it 'turns typed knobs with typed values' do
     MB::Sound::Session.with_context(session: session) do
       k = MB::Sound.knob(:spec_tone, 2400.hz, range: 150.hz..8000.hz)

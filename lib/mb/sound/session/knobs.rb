@@ -384,6 +384,13 @@ module MB
           check_turn_keywords(keys)
           point = LaunchPoint.of(binding) or return nil
           k = knob!(name)
+          if value.nil? && keys.empty? && follow.nil? && over.nil? && from.nil?
+            # (ux-friction-1 round 2: the maintainer's `turn :'a/envelope'`
+            # with no value, after `turn :'a/drive'` said only "got nil")
+            return MB::Sound.live_error(ArgumentError.new(
+              "turn #{k.name.inspect} takes a value: it is at #{knob_info[k.name]} now (turn #{k.name.inspect}, #{GraphNode::Knob.number(k.range.end)} sets it)"
+            ))
+          end
           if !build && @arrangement&.build_knob?(k.name) && !(rebuilds = @arrangement.build_knob_tracks(k.name)).empty?
             # (3000.hz for a build knob's cutoff: its number; see #knob_value)
             typed = value.is_a?(MB::Sound::Pitch) || !(value.nil? || value.is_a?(Numeric) || value.respond_to?(:sample))
