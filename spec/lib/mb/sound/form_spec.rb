@@ -790,6 +790,29 @@ RSpec.describe(MB::Sound::Form) do
       offline&.close
       live&.close
     end
+
+    it 'keeps time from the start through a silent first section (nothing to hold)' do
+      out = start_output(512)
+      live = MB::Sound::Session.new(master_gain: 1, output: out, transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 1, buffer_size: 512, realtime: true)
+      MB::Sound::Session.with_context(session: live) do
+        MB::Sound.track(:a) { |c| c.gate * 0.5 }
+        MB::Sound.scene(:gap, others: :cut)
+        MB::Sound.scene(:two, a: MB::Sound.seq(MB::Sound::E4).n4.loop)
+        f = live.arrangement.build_form { gap 1.bars; two 8.bars }
+        live.ensure_running
+        MB::Sound::Internal.wait_audio(live, 0.05)
+        t0 = live.frame
+        MB::Sound.play_form(f, warm_up: false)
+        expect(live.form_keeps_time?).to eq(true)
+        audio_until(live) { out.written_frames > t0 + 1.5 * bar }
+        start = live.journal.changes.find { |e| e.kind == :bg && e.subject == :a }
+        expect(start.lands.to_s).to eq('2:1')
+        expect(start.lands.frame - t0).to be_between(bar - 3 * 512, bar) # (bar 2, the timeline moving from the start)
+      end
+    ensure
+      live&.arrangement&.playback&.stop
+      live&.close
+    end
   end
 
   describe 'fills' do
