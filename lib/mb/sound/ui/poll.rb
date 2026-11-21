@@ -112,6 +112,8 @@ module MB
             matrix: matrix_info(arr),
             racks: rack_infos(s),
             clocks: clock_infos(s),
+            stopped: (s.stopped.keys.freeze rescue [].freeze),
+            build_knobs: arr.respond_to?(:build_knob_names) ? arr.build_knob_names : [].freeze,
             inspector: (info = needs&.include?(:inspect) ? (@inspector ||= Inspect::Gatherer.new).call(s) : nil),
             render_source: needs&.include?(:render) ? render_source(s, arr, info) : nil,
             cue_heard: (s.cue_heard? rescue false)

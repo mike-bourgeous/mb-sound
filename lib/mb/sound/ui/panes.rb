@@ -275,17 +275,53 @@ module MB
         end
 
         # Knobs: a meter at each knob's position in its range, and its value.
+        #
+        # In the pane's mode (NAV Enter; knobs-pane-keys-1, the maintainer:
+        # "I expect the knobs pane to let me turn the knobs with the
+        # keyboard") the keys of the racks pane's knob rows, through the
+        # same UI::KnobTurns: Up/Down pick a knob (reversed; the list
+        # scrolls to it), Left/Right turn it by 2% of its position (Shift or
+        # H/L 0.2%; held: a live sweep and one `turn` line when the keys
+        # stop), 0 its default, Enter a typed value.  Build knobs turn one
+        # `turn` line a press (each rebuilds their track).  Turn lines show
+        # on the pane's last row while in the mode, never in the REPL pane.
+        # Outside the mode the pane draws as it always has.
         class Knobs < Pane
-          def initialize = super(:knobs, rate: 15, height: 6, width: 28, title: 'knobs', description: 'session knobs: a meter of each one\'s position and its value')
+          include KnobTurns
+
+          mode_keys do
+            group 'Knobs'
+            on [:up, 'k'], :pick, -1, help: 'previous knob', label: 'Up Down j k'
+            on [:down, 'j'], :pick, 1, help: 'next knob', label: 'Up Down j k'
+            on [:right, 'l'], :turn, KnobTurns::STEP, help: 'turn the knob up (held: a live sweep, one turn line)', label: 'Right l'
+            on [:left, 'h'], :turn, -KnobTurns::STEP, help: 'turn the knob down (held: a live sweep, one turn line)', label: 'Left h'
+            on [:right, :shift], :turn, KnobTurns::FINE, help: 'turn up, fine'
+            on [:left, :shift], :turn, -KnobTurns::FINE, help: 'turn down, fine'
+            on ['L'], :turn, KnobTurns::FINE, help: 'turn up, fine'
+            on ['H'], :turn, -KnobTurns::FINE, help: 'turn down, fine'
+            on '0', :reset, help: "the knob's default"
+            on :enter, :ask, help: 'type a value (turn :cut, 3000.hz)', label: 'Enter'
+            on 'y', :copy_text, help: "copy the pane's text (OSC 52)"
+          end
+
+          keys do
+            group 'Knobs'
+            doc 'Enter', 'pick and turn knobs (Esc back to NAV)'
+          end
+
+          def initialize = super(:knobs, rate: 15, height: 6, width: 28, title: 'knobs', description: 'session knobs: a meter of each one\'s position and its value; turn them from its keys')
 
           def draw_body(c, s, state)
             return unless s
 
+            state[:snap] = s
+            c = turn_line_canvas(c, state) if state[:mode]
             if s.knobs.empty?
               c.puts ['no knobs', :dim]
               return
             end
             name_w = [[s.knobs.map { |k| k.name.to_s.length }.max, 4].max, 8].min
+            return draw_mode(c, s, state, name_w) if state[:mode]
             s.knobs.first(c.h).each_with_index do |k, y|
               spec = k.spec
               value = "#{Panes.fmt(k.value)}#{spec.unit ? " #{spec.unit}" : ''}"
@@ -294,6 +330,51 @@ module MB
               x = c.meter(spec.position(k.value).to_f, width: mw, x: x, y: y, role: :key)
               c.text(x + 1, y, value, :text)
             end
+          end
+
+          # Up/Down: the previous or next knob (a held gesture's line goes
+          # out first).
+          def key_pick(state, d)
+            out = flush(state)
+            n = state[:snap]&.knobs&.length.to_i
+            state[:pick] = n == 0 ? 0 : (state[:pick].to_i + d).clamp(0, n - 1)
+            k = n == 0 ? nil : state[:snap].knobs[state[:pick]]
+            note = k ? "#{k.name} (Left Right turn, Enter a value, 0 default)" : 'no knobs'
+            out.empty? ? note : [*out, note]
+          end
+
+          private
+
+          # The rows in the mode: the picked knob reversed, scrolled into
+          # view, the value a key set (or a held gesture's target, in the
+          # queued color) over the snapshot's.
+          def draw_mode(c, s, state, name_w)
+            n = s.knobs.length
+            pick = state[:pick] = state[:pick].to_i.clamp(0, n - 1)
+            top = state[:top].to_i
+            top = pick if pick < top
+            top = pick - c.h + 1 if c.h > 0 && pick >= top + c.h
+            state[:top] = top = top.clamp(0, [n - c.h, 0].max)
+            s.knobs[top, c.h].each_with_index do |k, y|
+              spec = k.spec
+              v, turning = shown_value(state, k.name, k)
+              value = "#{Panes.fmt(v)}#{spec.unit ? " #{spec.unit}" : ''}"
+              sel = top + y == pick
+              x = c.run(0, y, c.pad(k.name, name_w), sel ? :key : :name, reverse: sel)
+              x = c.text(x, y, ' ')
+              mw = [c.w - x - value.length - 1, 3].max
+              x = c.meter(spec.position(v).to_f, width: mw, x: x, y: y, role: :key)
+              c.text(x + 1, y, value, turning ? :queued : :text)
+            end
+          end
+
+          def no_knob_note = 'no knobs to turn (knob :cut, 800, range: 100..8000)'
+
+          def picked(state)
+            knobs = state[:snap]&.knobs
+            return nil if knobs.nil? || knobs.empty?
+            k = knobs[state[:pick].to_i.clamp(0, knobs.length - 1)]
+            [k.name, k]
           end
         end
 

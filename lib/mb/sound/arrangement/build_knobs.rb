@@ -40,6 +40,12 @@ module MB
           list.select { |t| @tracks[t]&.patch? && @session.playing_after_queue?(t) }
         end
 
+        # The names of every build knob (frozen; the terminal UI's poll:
+        # takes no render lock).
+        def build_knob_names
+          @build_knob_lock.synchronize { @build_knobs.keys }.freeze
+        end
+
         # True if knob +name+ is a build knob of a track (see BuildKnobs).
         def build_knob?(name)
           @build_knob_lock.synchronize { @build_knobs.key?(name) }

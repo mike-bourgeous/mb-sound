@@ -50,9 +50,15 @@ module MB
         # A turn key: starts or extends the gesture on the picked knob
         # (another knob's gesture goes out first) with a live Preview;
         # its Commit comes from #key_tick when the keys stop (or #flush).
+        #
+        # A build knob (#build_knob?: read while a track builds, so each
+        # turn rebuilds it at its launch point) turns one `turn` line a
+        # press instead, never a held sweep (a sweep of a structure can't
+        # be one line: BuildKnobs).
         def key_turn(state, step)
           cell = picked(state) or return no_knob_note
           kn, k = cell
+          return step_turn(state, kn, k, step) if build_knob?(state, kn)
           now = self.class.clock.call
           g = (state[:gesture] ||= TurnGesture.new)
           out = g.turning? && g.knob != kn ? flush(state) : nil
@@ -174,6 +180,19 @@ module MB
         private
 
         def no_knob_note = 'no knob to turn here'
+
+        # True if knob +kn+ is a build knob (the snapshot's
+        # Slow#build_knobs); panes with more to say override it.
+        def build_knob?(state, kn) = state[:snap]&.build_knobs&.include?(kn) == true
+
+        # One `turn` line moving knob +kn+ (KnobValue +k+) by +step+ from
+        # the value shown (a build knob's press), or nil at the range's end.
+        def step_turn(state, kn, k, step)
+          v, = shown_value(state, kn, k)
+          to = KnobTurns.turned(k.spec, v, step)
+          return nil if to == v.to_f
+          set(state, kn, to.to_f == to.round ? to.round : to)
+        end
 
         # The gesture's Commit now (another key), as an Array (empty
         # without one).

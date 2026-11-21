@@ -123,20 +123,18 @@ module MB
             "type #{cell[0]}'s value"
           end
 
-          # A turn key on a build knob (read while the track builds: the
-          # init voice's sync) is one `turn` line a step (each rebuilds the
-          # track), never a held sweep; other knobs turn as in KnobTurns.
+          # A turn key on a literal param binds it (#literal_turn); knobs
+          # turn as in KnobTurns (a build knob, read while the track builds:
+          # the init voice's sync, one `turn` line a step, each rebuilding
+          # the track, never a held sweep).
           def key_turn(state, step)
-            cell = picked(state)
-            info = state[:snap]&.inspector
-            return literal_turn(state, step) || super if cell.nil?
-            return super unless info&.build_knobs&.include?(cell[0])
-            kn, k = cell
-            v, = shown_value(state, kn, k)
-            to = KnobTurns.turned(k.spec, v, step)
-            return nil if to == v.to_f
-            set(state, kn, to.to_f == to.round ? to.round : to)
+            return literal_turn(state, step) || super if picked(state).nil?
+            super
           end
+
+          # The inspected track's build knobs (InspectInfo#build_knobs: also
+          # those its graph reads that no build noted yet), else the set's.
+          def build_knob?(state, kn) = state[:snap]&.inspector&.build_knobs&.include?(kn) == true || super
 
           # A turn key on a literal param that can be bound (sound-design-2,
           # the envelope editor: an envelope's point, a segment list's time
