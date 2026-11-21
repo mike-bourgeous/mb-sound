@@ -222,6 +222,9 @@ module MB
       # render thread's wait so far), :holder (a thread name), :c (native
       # frames, innermost first), :ruby (Ruby frames, innermost first).
       def stacks
+        # (#report already holds the lock while running: console-offers-1's
+        # report so far, merged with gvl-main-1's stacks)
+        return @stacks.dup if @lock.owned?
         @lock.synchronize { @stacks.dup }
       end
 
