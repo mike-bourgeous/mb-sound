@@ -1184,6 +1184,11 @@ module MB
 
         durations = amplitude.is_a?(Range) ? [amplitude.begin, amplitude.end].count { |v| v.is_a?(Sequence::Duration) } : 0
         raise ArgumentError, 'Use a Range of Durations (e.g. 3.n16..5.n16), not a single Duration' if amplitude.is_a?(Sequence::Duration)
+        if amplitude.is_a?(Range) && durations == 0 && !(amplitude.begin.is_a?(Numeric) && amplitude.end.is_a?(Numeric))
+          # (ux-friction-1 round 2: `.at(D3..B6)` raised NoMethodError 'to_f' for a Note)
+          raise ArgumentError, "#at takes a Range of numbers (Hz for a cutoff: .at(150..2000); got #{amplitude.inspect}); " \
+                               'for a sweep in notes, .at(D3.number..B6.number).freq'
+        end
         raise ArgumentError, 'Both ends of a Range must be Durations, or neither' if durations == 1
         raise ArgumentError, 'A phasor outputs cycles (0...1) and has no amplitude; scale it with arithmetic' if phasor? && !@in_or_at
         GraphNode::ArithmeticMethods.check_at(amplitude) unless @in_or_at
@@ -1747,9 +1752,25 @@ module MB
       #
       # Example:
       #     play 220.hz.saw.at(1).filter(:lowpass, cutoff: 0.25.hz.triangle.lfo.at(200..2000), quality: 4)
-      def lfo
+      def lfo(*_options, **_keys)
+        Tone.lfo_takes_no_options(_options, _keys) unless _options.empty? && _keys.empty?
         configure { @lfo = true }
         or_at(1)
+      end
+
+      # Why Tone#freewheel refused a tone that isn't tempo-synced
+      # (ux-friction-1 round 2: the maintainer's `0.2.hz.lfo...freewheel`).
+      FREEWHEEL_ONLY_SYNCED = 'Only tempo-synced tones (e.g. 4.bars.lfo) can freewheel; ' \
+                              'a Hz LFO (0.2.hz.lfo) already runs free of the timeline'
+
+      # Raises for options given to Tone#lfo, Pitch#lfo, or Duration#lfo,
+      # which take none (ux-friction-1 round 2: the maintainer's
+      # `2.bars.lfo(unipolar: true)` said only "wrong number of arguments").
+      def self.lfo_takes_no_options(args, keys)
+        given = [*args.map(&:inspect), *keys.map { |k, v| "#{k}: #{v.inspect}" }].join(', ')
+        raise ArgumentError, "lfo takes no options (got #{given}): the rate comes before it (2.bars.lfo, 0.2.hz.lfo), the shape after it (.ramp), " \
+                             'and the range in .at(150..2000), which maps the whole -1..1 swing (no unipolar needed); ' \
+                             'a synth voice\'s v.lfo(5, unipolar: true) is the LFO that takes options'
       end
 
       # Locks this tone's phase to the timeline of +tempo+ (a
@@ -1784,7 +1805,7 @@ module MB
       # Sequence::TempoNode#freewheel), so every tone made from the same
       # tempo pitch freewheels.
       def freewheel(free = true)
-        raise ArgumentError, 'Only tempo-synced tones (e.g. 4.bars.lfo) can freewheel' if @tempo.nil?
+        raise ArgumentError, FREEWHEEL_ONLY_SYNCED if @tempo.nil?
 
         @tempo.freewheel(free)
         self

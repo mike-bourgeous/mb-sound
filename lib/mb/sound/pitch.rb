@@ -321,7 +321,7 @@ module MB
       def fm_feedback(amount, gain: nil, dc: false) = tone.fm_feedback(amount, gain: gain, dc: dc)
       alias fm_fb fm_feedback
       alias fmfb fm_feedback
-      def lfo = tone.lfo
+      def lfo(*_options, **_keys) = tone.lfo(*_options, **_keys)
       def sync(master = nil, ratio: nil, enabled: true) = tone.sync(master, ratio: ratio, enabled: enabled)
       def softsync(master = nil, ratio: nil, enabled: true) = tone.softsync(master, ratio: ratio, enabled: enabled)
       def wraps = signal.wraps
@@ -363,7 +363,7 @@ module MB
       # its oscillators run free of the timeline (see
       # Sequence::TempoNode#freewheel).
       def freewheel(free = true)
-        raise ArgumentError, 'Only tempo-synced tones (e.g. 4.bars.lfo) can freewheel' unless @source.respond_to?(:freewheel)
+        raise ArgumentError, Tone::FREEWHEEL_ONLY_SYNCED unless @source.respond_to?(:freewheel)
 
         @source.freewheel(free)
         self

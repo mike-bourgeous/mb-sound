@@ -143,6 +143,25 @@ RSpec.describe(MB::Sound::Pitch, :aggregate_failures) do
       expect { 2.hz.freewheel }.to raise_error(ArgumentError, /tempo-synced/)
       expect(1.beat.hz.freewheel).to be_a(MB::Sound::Pitch)
     end
+
+    it "says a Hz LFO already runs free (ux-friction-1 round 2: the maintainer's 0.2.hz.lfo...freewheel)" do
+      expect { 0.2.hz.freewheel }.to raise_error(ArgumentError, /a Hz LFO \(0.2.hz.lfo\) already runs free of the timeline/)
+      expect { 0.2.hz.lfo.ramp.at(150..2000).freewheel }.to raise_error(ArgumentError, /already runs free of the timeline/)
+    end
+  end
+
+  describe '#lfo' do
+    it "explains that it takes no options, for Pitches and Durations alike (ux-friction-1 round 2: lfo(unipolar: true))" do
+      expect { 2.bars.lfo(unipolar: true) }.to raise_error(ArgumentError, /lfo takes no options \(got unipolar: true\): the rate comes before it .*no unipolar needed/)
+      expect { 0.2.hz.lfo(5) }.to raise_error(ArgumentError, /lfo takes no options \(got 5\)/)
+      expect(2.bars.lfo).to be_a(MB::Sound::Tone).and(be_lfo)
+      expect(0.2.hz.lfo).to be_lfo
+    end
+
+    it "refuses a Range of Notes for #at with the note-sweep spelling (ux-friction-1 round 2)" do
+      expect { 1.bar.lfo.ramp.at(MB::Sound::D3..MB::Sound::B6) }.to raise_error(ArgumentError, /for a sweep in notes, \.at\(D3\.number\.\.B6\.number\)\.freq/)
+      expect(1.bar.lfo.ramp.at(MB::Sound::D3.number..MB::Sound::B6.number).freq).to be_a(MB::Sound::GraphNode)
+    end
   end
 
   describe 'in sequences' do
