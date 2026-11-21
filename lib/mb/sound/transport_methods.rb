@@ -42,7 +42,15 @@ module MB
       # what is playing, or that there is nothing to start.  Also
       # available as `play`, `go`, and #start_playback with no arguments.
       # Returns a Status.
-      def start(at: nil, on: nil, in: nil, resync: false)
+      def start(*_names, at: nil, on: nil, in: nil, resync: false)
+        unless _names.empty?
+          # (ux-friction-1: the maintainer's `start :pluck`)
+          n = _names.first.inspect
+          return MB::Sound.live_error(ArgumentError.new(
+            "start starts the transport and the loaded flow and takes no names; bg #{n} plays a track's clip again " \
+            "(launch #{n}, :clip plays one of its clips; go :scene launches a scene)"
+          ))
+        end
         point = LaunchPoint.of(binding) or return nil
         s = Session.current
         if s.realtime? && s.paused?

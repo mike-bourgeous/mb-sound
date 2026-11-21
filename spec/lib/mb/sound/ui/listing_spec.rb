@@ -68,6 +68,31 @@ RSpec.describe('UI listings', :aggregate_failures) do
     term&.close
   end
 
+  it "takes :pager for :page everywhere a pane name goes, and refuses a name that is no pane with a did-you-mean (ux-friction-1)" do
+    expect(ui.pane_catalog[:page].aliases).to eq([:pager])
+    expect(ui.pane_catalog.to_s).to match(/page, pager/)
+    expect(MB::Term::Viewports.layout(:alias_test, focus: :pager) { tabs :pager, :scope, active: :pager }.panes).to eq(%i[page scope])
+
+    term = UIHelpers::FakeTerminal.new(40, 120)
+    tiles = ui::Tiles.new(layout: ui.tiles_layout_named(:tiles), input: term.slave, output: term.slave, repl: :none, probe: false,
+                          size: [40, 120], clock: -> { 0.0 }, source: -> { ui_fake_snapshot },
+                          keyboard: ui::Keyboard.new(out: UIHelpers::NullKeyboardOut.new))
+    tiles.start(thread: false)
+    tiles.show(:pager)
+    expect(tiles.layout.panes).to include(:page)
+    tiles.focus(:pager)
+    expect(tiles.list.panes.find(&:focused).name).to eq(:page)
+    tiles.close(:pager)
+    expect(tiles.layout.panes).not_to include(:page)
+    expect { tiles.show(:pagr) }.to raise_error(ArgumentError, /\ANo pane :pagr \(did you mean :pager, :page\?\) \(ui.panes lists them\)/)
+    expect(tiles.layout.panes).not_to include(:pagr)
+    expect { tiles.jump(:pagr) }.to raise_error(ArgumentError, /No pane :pagr/)
+    expect { tiles.enter(:pagr) }.to raise_error(ArgumentError, /No pane :pagr/)
+  ensure
+    tiles&.stop
+    term&.close
+  end
+
   it 'answers with no screen up' do
     allow(ui).to receive(:screen).and_return(nil)
     l = ui.list

@@ -39,6 +39,8 @@ buses; routes                                         # listings
 render('x.flac', stems: 'stems/') { ... }             # one stem per bus too
 ```
 
+Buses have no fader (2026-11-21, measured: `level :verb, 0` changed nothing, since `Faders#fader_levels` applies to players only); `level :bus, x` is refused naming `mute :bus` and `feed :track, :bus, 0` (ux-friction-1; a bus level is an open option in that round's report).
+
 ## Decisions (agent's, open to the maintainer's review)
 
 - **One concept** (maintainer, 2026-10-18: "bus and send should be the same thing unlike in some DAWs"): a bus is a named chain; a player reaches it with a level (`send:`, `feed`) or with all of its sound (`to:`).  There are no aux, return, or group kinds: the routing tree, the buses pane, and the meters (`Snapshot#bus_levels`, `#send_levels`, terminal_ui.md "UI round 4") show one kind of bus with its sends and sources.

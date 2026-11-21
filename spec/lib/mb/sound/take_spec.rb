@@ -692,6 +692,16 @@ RSpec.describe(MB::Sound::Take) do
     expect(t.to_ruby).to include('# skipped (foreground): ui :keys').and include('# skipped (foreground): ui.keys')
   end
 
+  it 'leaves out blank lines (Enter on nothing; ux-friction-1)' do
+    t = MB::Sound::Take.new(session: session)
+    ['x = 1', '', "  \n", 'y = 2'].each do |code|
+      t.begin_line(code)
+      t.end_line
+    end
+    expect(t.lines.map(&:code)).to eq(['x = 1', 'y = 2'])
+    expect(t.recent_lines.map(&:last)).to eq(['x = 1', 'y = 2'])
+  end
+
   it 'saves to the user data directory by default, or a set home' do
     allow(described_class).to receive(:data_dir).and_return(tmp_path('takes'))
     path = nil

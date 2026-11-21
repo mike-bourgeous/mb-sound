@@ -41,11 +41,16 @@ module MB
       end
 
       # Takes the terminal: raw input, the alternate screen, bracketed
-      # paste, and the options.  Returns self.
-      def enter(mouse: false, focus: false, kitty: false)
+      # paste, and the options.  #leave puts back +mode+ (an
+      # IO::ConsoleMode), or the input's mode as it is now: a screen
+      # entered while a line editor holds the terminal raw (Ctrl-] from
+      # Reline) passes the mode from before the editor's, or #leave would
+      # put back raw input, no echo (ux-friction-1: `exit` left the shell
+      # needing `stty sane`).  Returns self.
+      def enter(mouse: false, focus: false, kitty: false, mode: nil)
         return self if @entered
 
-        @console_mode = @input.console_mode if @input.respond_to?(:console_mode) && @input.tty?
+        @console_mode = (mode || @input.console_mode) if @input.respond_to?(:console_mode) && @input.tty?
         @input.raw!(intr: false) if @input.respond_to?(:raw!) && @input.tty?
         seq = +"\e[?1049h\e[0m\e[H\e[2J\e[?2004h"
         seq << "\e[?1000h\e[?1002h\e[?1006h" if mouse

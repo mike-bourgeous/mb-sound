@@ -104,7 +104,12 @@ module MB
       # A block is not an effect: Ruby would drop it silently (the
       # maintainer's `fx(:sub) { it.pan(1) }` changed nothing), so a block
       # warns once per line, naming the Proc spelling, and is ignored.
-      def fx(name, effects = Arrangement::KEEP_FX, at: nil, on: nil, in: nil)
+      def fx(name, effects = Arrangement::KEEP_FX, *_more, at: nil, on: nil, in: nil)
+        unless _more.empty?
+          # (ux-friction-1: the maintainer's guesses at a chain)
+          list = [effects, *_more].map { |e| e.is_a?(Library::Entry) ? e.head_path : e.inspect }.join(', ')
+          return MB::Sound.live_error(ArgumentError.new("fx #{name.inspect} takes one effect or a list: fx #{name.inspect}, [#{list}] (a list chains them in order)"))
+        end
         if block_given?
           n = name.inspect
           Internal.warn_once_per_site(:fx_block,
@@ -117,7 +122,15 @@ module MB
           return tr.fx || []
         end
         point = LaunchPoint.of(binding) or return nil
-        arrangement.fx(name, effects, point)
+        result = arrangement.fx(name, effects, point)
+        if result.is_a?(Symbol) && !Session.context&.time && MB::Sound.live?
+          # (ux-friction-1: fx on a stopped track returned :pluck and he
+          # couldn't tell anything had happened until his next `bg :pluck`)
+          tr = arrangement.tracks[name]
+          what = tr&.fx ? Arrangement::Fx.label(tr.fx) : 'no effect'
+          $stdout.puts "\e[2mfx #{name.inspect}: #{name.inspect} isn't playing, so #{what} plays from its next launch (bg #{name.inspect}, its scene, or launch)\e[0m" unless Session.current.playing_after_queue?(name)
+        end
+        result
       rescue Arrangement::Fx::Error => e
         MB::Sound.live_error(e)
       end
@@ -314,6 +327,17 @@ module MB
         name = player_name(name)
         return session.level(name) if value.nil?
         point = LaunchPoint.of(binding) or return nil
+        return nil unless strip_names_known?(:level, [name])
+        if name.is_a?(Symbol) && session.names.kind(name) == :bus
+          # (ux-friction-1: his `level :hall, -80.db` made a knob that
+          # nothing reads; buses have no fader, Faders#fader_levels is
+          # players' only)
+          sends = session.routes.select { |_, r| r[:send]&.key?(name) }.keys
+          return MB::Sound.live_error(ArgumentError.new(
+            "level #{name.inspect}: a bus has no level of its own (the knob would change nothing); mute #{name.inspect} silences it, " \
+            "feed :#{sends.first || 'track'}, #{name.inspect}, 0 closes one send#{sends.empty? ? '' : " (sending: #{sends.map(&:inspect).join(', ')})"}"
+          ))
+        end
         session_command(name, label: "level #{name.inspect}", kind: :turn) { |s, time|
           s.level(name, value, at: point, over: over, curve: curve, from: from, smooth: smooth, start_time: point.given? ? nil : time)
         }
@@ -441,6 +465,7 @@ module MB
       # scheduled block's time inside one, and is one undo step).
       def strip_command(kind, names, point, fade:)
         names = names.flatten.map { |n| player_name(n) }
+        return nil unless strip_names_known?(kind, names)
         label = "#{kind} #{names.map(&:inspect).join(', ')}".strip
         value = session_command(names, label: label) { |session, time|
           session.public_send(kind, *names, at: point, fade: fade, start_time: point.given? ? nil : time)
@@ -450,6 +475,39 @@ module MB
         session = Session.current
         entries = value.map { |c| session.journal[c.seq] }
         entries.length == 1 ? entries.first : entries
+      end
+
+      # False (after MB::Sound.live_error with a did-you-mean, so the
+      # command does nothing) if a name in +names+ is nothing a strip
+      # command (+command+: mute, solo, level, ...) can act on, a track,
+      # player, bus, rack, or mute group (or a monitor, cue, or wire of
+      # one), or a name already muted or soloed, while a known name is
+      # spelled close to it: a typo (ux-friction-1: the maintainer's
+      # `solo :plubk` silenced every track but a name that wasn't there;
+      # `level :plubk` made a knob).  A new name nothing is spelled like
+      # still works, applying when a player of that name starts (lesson
+      # :design sets `level :l_lead, -16.db` before `design :l_lead`);
+      # live, a dim line says so.  Scheduled blocks (a context with a
+      # time) skip the check.
+      def strip_names_known?(command, names)
+        ctx = Session.context
+        return true if ctx&.time || ctx&.batch || names.empty?
+        session = Session.current
+        info = session.strip_info
+        known = session.names.to_h.reject { |_, kind| kind == :knob || kind == :knob_group || kind == :clock }.keys |
+                session.players.keys | session.arrangement.tracks.keys | session.mute_groups.keys | info[:muted] | info[:soloed]
+        names.each do |n|
+          next if n.is_a?(Integer) || known.include?(n) || known.include?(Session::Name[n].strip_owner)
+
+          hint = GraphIO.suggest(n, known)
+          if hint.empty?
+            $stdout.puts "\e[2m#{command} #{n.inspect}: nothing is named #{n.inspect} yet; it applies when a player of that name starts\e[0m" if MB::Sound.live?
+            next
+          end
+          MB::Sound.live_error(ArgumentError.new("#{command} #{n.inspect}: no track, player, bus, or mute group #{n.inspect}#{hint} (tracks lists them)"))
+          return false
+        end
+        true
       end
 
       # Runs a hold or unhold command (see #hold) like #strip_command.

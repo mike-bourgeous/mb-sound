@@ -9,7 +9,8 @@ module MB
       # name words, tags, and families (Library::Finder, ranked), narrowing
       # with every key.  Up and Down pick, Tab or Enter puts the picked
       # entry's full chain on the line (Enter again runs it), Esc closes the
-      # list until the word changes.  The keys are Reline one-shot bindings
+      # list until the word changes.  Only typing or deleting opens it (a
+      # chain recalled from history doesn't, so Up goes on through it).  The keys are Reline one-shot bindings
       # held only while the list shows, so Tab, the arrows, and Enter work
       # as before everywhere else (Pry's own completion included); multi-line
       # input reads the line being edited.  The plain console and the tiled
@@ -62,6 +63,11 @@ module MB
             end
           else
             return close(st) if word.nil? || word == st.closed
+            # (Only typing opens it: a line recalled from history or a cursor
+            # moved onto a chain kept Up from reaching the next entry;
+            # ux-friction-1, the maintainer: "pressing up repeatedly to go
+            # through history landed me inside a tab completion menu")
+            return close(st) if st.list.nil? && !typed?(key)
             st.closed = nil
             list = st.finder.candidates(word, limit: LIMIT)
             return close(st) unless list
@@ -80,6 +86,14 @@ module MB
           )
         rescue StandardError
           nil
+        end
+
+        # Reline editing methods that open the list (typing or deleting in
+        # the word; everything else, history and cursor moves included,
+        # only updates a list already showing).
+        def typed?(key)
+          sym = key&.method_symbol
+          !sym.nil? && (sym == :ed_insert || sym == :ed_quoted_insert || sym.to_s.match?(/delete|kill|rubout/))
         end
 
         # Which of KEYS +key+ is.
