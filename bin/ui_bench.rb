@@ -179,7 +179,12 @@ module MB::Sound
         k = 0
         while t < warm + seconds
           list << [t, (k % 20 == 19) ? "\x15" : 'x'] # (Ctrl-U clears the line now and then)
-          t += 0.15
+          # (0.15 s apart plus a step of the golden ratio's fraction of a
+          # 60 Hz frame, so keys land at every phase of the frame grid:
+          # at 0.15 s every key came at the same phase of a 60 or 120 fps
+          # grid, and key-to-frame times measured that one phase;
+          # pace-default-1)
+          t += 0.15 + ((k * 0.618034) % 1.0) / 60.0
           k += 1
         end
         list
@@ -495,7 +500,10 @@ module MB::Sound
     # that shows it, and per pane the updates that changed it (visible
     # rate and gaps), optionally moved to the refreshes of a +vsync+ Hz
     # display.  The sink's own "visible" numbers count every frame.
-    def present_report(data, rects, t_from, profile, vsync: nil)
+    # +key_panes+ (the scenario's): each typed key's send to the update
+    # showing the first frame that changed those panes (key to shown; the
+    # sink's key_to_visible is key to frame).
+    def present_report(data, rects, t_from, profile, vsync: nil, key_panes: [])
       frames = data['frames'].select { |f| f[0] >= t_from }
       return { model: profile.name, frames: 0 } if frames.empty?
       ftimes = frames.map(&:first)
@@ -515,7 +523,18 @@ module MB::Sound
         ts = shown_times.(idx)
         [name, stats(ts.each_cons(2).map { |a, b| b - a }).merge(visible_per_s: (ts.length / span).round(1))]
       end
+      kr = key_panes.filter_map { |n| rects[n] }
+      sent = (data['keys_sent'] || []).select { |t| t >= t_from }
+      key_shown = []
+      unless kr.empty?
+        sent.each_with_index do |t, i|
+          limit = [sent[i + 1] || Float::INFINITY, t + 1.0].min
+          k = frames.index { |fr| fr[0] >= t && fr[0] < limit && kr.any? { |r| hit.(fr, r) } }
+          key_shown << at.(shown[k]) - t if k && shown[k]
+        end
+      end
       { model: profile.name, kind: profile.kind, vsync: vsync, frames: frames.length, written_per_s: (frames.length / span).round(1),
+        key_to_shown_ms: kr.empty? ? nil : stats(key_shown),
         updates_per_s: (all_t.length / span).round(1), update_gaps_ms: stats(all_t.each_cons(2).map { |a, b| b - a }),
         delay_ms: stats(delays), panes: panes,
         # (frames arriving under the short timer after the one before: each
@@ -602,7 +621,7 @@ module MB::Sound
       present: [nil, 'Model when a terminal shows the frames (UI::TerminalProfile): konsole (Konsole before 26.04: 10 ms after output stops, 40 ms at the latest), konsole26 or sync (each DEC 2026 frame at its end), cadence:HZ, interval:MS, bulk:SHORT,LONG (ms); several joined by +', String],
       vsync: [nil, 'With --present: the display\'s refresh rate (Hz); updates move to its next refresh', Float],
       no_song: [false, 'Play nothing but --line (no song or demo; e.g. --line "bg 120.hz.ramp.filter(:lowpass, cutoff: 2.hz.ramp.at(3000..150))")'],
-      pace: [nil, 'The painter\'s pacing (ui.pace): exact or terminal (frame writes spaced for the --present terminal\'s short timer)', Symbol],
+      pace: [nil, 'The painter\'s pacing (ui.pace): terminal (the default: frame writes spaced for the --present terminal\'s short timer) or exact', Symbol],
       quiet_header: [false, 'Skip the header line (one scenario of a multi-scenario run)'],
     ) { |_args, p|
       ENV['AUDIO_PROFILE'] = p.latency.to_s if p.latency
@@ -1008,10 +1027,15 @@ module MB::Sound
           perf: s, sink_report: UIBench.sink_report(sink, rects, warm, key_panes: UIBench::KEY_PANES[sc] || []), machine: machine,
           pane_cpu_ms: screen.is_a?(UI::Tiles) ? screen.stats[:pane_cpu_ms] : nil, # (each pane's draws, the last 200)
           pace: screen.respond_to?(:pace) ? screen.pace : nil,
+          # (the painter's own record of its write gaps: writes closer than
+          # the terminal's gap, counted on its clock; the model terminal's
+          # close_per_s comes from the sink's stamps, which load delays)
+          pacer_writes: screen.respond_to?(:pacer) ? screen.pacer.write_gaps : nil,
           # (each model as written, then on the --vsync display too)
           presents: p.present&.split('+')&.flat_map { |m|
             pr = UI::TerminalProfile.parse(m)
-            [UIBench.present_report(sink, rects, warm, pr), p.vsync && UIBench.present_report(sink, rects, warm, pr, vsync: p.vsync)].compact
+            kp = UIBench::KEY_PANES[sc] || []
+            [UIBench.present_report(sink, rects, warm, pr, key_panes: kp), p.vsync && UIBench.present_report(sink, rects, warm, pr, vsync: p.vsync, key_panes: kp)].compact
           },
         }
         results << row

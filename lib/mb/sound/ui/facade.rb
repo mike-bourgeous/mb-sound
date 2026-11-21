@@ -240,19 +240,20 @@ module MB
           on ? :on : :off
         end
 
-        # The painter's pacing (konsole-pacing, 2026-11-21; off by
-        # default): :exact writes frames on the target's deadlines;
-        # :terminal also keeps frame writes far enough apart for the
-        # detected terminal to show each one (Konsole before 26.04 shows
-        # output only 10 ms after it stops arriving, so frames written
-        # closer, above about 95 a second, show at about 25 a second; the
-        # gap is 12 ms, about 83 frames a second at most).  Terminals
-        # without such a rule (or not detected) pace as :exact.  With no
-        # argument, the mode; MB_SOUND_UI_PACE=terminal sets :terminal at
+        # The painter's pacing (konsole-pacing, 2026-11-21): :terminal (the
+        # default since pace-default-1, the maintainer's choice of
+        # 2026-11-21) keeps frame writes far enough apart for the detected
+        # terminal to show each one (Konsole before 26.04 shows output only
+        # 10 ms after it stops arriving, so frames written closer, above
+        # about 95 a second, show at about 25 a second; the gap is 12 ms,
+        # about 83 frames a second at most, whatever target is typed);
+        # :exact writes frames on the target's deadlines.  Terminals
+        # without such a rule (or not detected) pace the same either way.
+        # With no argument, the mode; MB_SOUND_UI_PACE=exact sets :exact at
         # start.  Takes effect on the running screen.
         #
-        #     ui.pace :terminal
         #     ui.pace            # => :terminal
+        #     ui.pace :exact     # pacing off
         def pace(mode = nil)
           return FrameRate.pace if mode.nil?
           unless FrameRate::PACES.include?(mode)

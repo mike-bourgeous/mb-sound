@@ -118,12 +118,14 @@ module MB
         # Called with each Frame after it (UI::PaneRates#observe).
         attr_accessor :on_frame
 
-        # konsole-pacing (2026-11-21; `ui.pace :terminal`, off by default):
-        # the least seconds between frame writes, or nil.  Konsole before
-        # 26.04 shows output only 10 ms after it stops arriving (at the
-        # latest 40 ms after it starts), so frames written closer than that
-        # show at about 25 a second; with a gap the deadlines are at least
-        # this far apart and a woken frame's write waits for it
+        # konsole-pacing (2026-11-21; `ui.pace :terminal`, the default since
+        # pace-default-1): the least seconds between frame writes, or nil
+        # (terminals with no such rule).  Konsole before 26.04 shows output
+        # only 10 ms after it stops arriving (at the latest 40 ms after it
+        # starts), so frames written closer than that show at about 25 a
+        # second; with a gap the deadlines are at least this far apart, a
+        # woken frame without room waits for its deadline (#defer_wake?),
+        # and a write that would still come too soon waits for the gap
         # (#hold_before_write), so every frame shows.  See TerminalProfile.
         attr_accessor :min_gap
 
@@ -152,6 +154,9 @@ module MB
           @min_gap = nil
           @hold = 0.0
           @last_write = nil
+          @write_gap_min = nil
+          @close_writes = 0
+          @gap_writes = 0
           self.fps = fps
         end
 
@@ -180,12 +185,33 @@ module MB
         # Before a frame's write (the screen's timed write): waits until
         # #min_gap has passed since the last write ended, and notes the
         # wait as the frame's hold.  Nothing without a gap.
+        # (the sleep can end early, a key's Thread#wakeup: it waits again
+        # until the gap has passed.)  Each write's gap since the last one,
+        # on this clock, goes into #write_gaps.
         def hold_before_write
           g = @min_gap or return
-          if @last_write && (w = @last_write + g - @clock.call) > 0
+          return unless @last_write
+          t0 = @clock.call
+          now = t0
+          while (w = @last_write + g - now) > 0
             @sleeper.call(w)
-            @hold += w
+            now = @clock.call
           end
+          @hold += now - t0
+          gap = now - @last_write
+          @write_gap_min = gap if @write_gap_min.nil? || gap < @write_gap_min
+          @close_writes += 1 if gap < g - 1e-9 # (float rounding of a wait that ended on the gap)
+          @gap_writes += 1
+        end
+
+        # The writer's own record of the gaps #hold_before_write kept
+        # (pace-default-1): writes checked, the shortest gap from a write's
+        # end to the next write's start in ms (nil before two writes), and
+        # writes closer than #min_gap (0 by construction: the property the
+        # bench reports, read on the painter's clock rather than from a
+        # model terminal's stamps, which a busy machine delays).
+        def write_gaps
+          { writes: @gap_writes, min_ms: @write_gap_min && (@write_gap_min * 1000).round(3), under_gap: @close_writes }
         end
 
         # The screen's timed write ended at +t+ (for #min_gap).
@@ -224,7 +250,8 @@ module MB
           # less than a period past it starts at once, and only the
           # deadlines a frame overran by more than a whole period are skipped
           step = @period - @trim
-          step = @min_gap if @min_gap && step < @min_gap
+          gs = gap_step
+          step = gs if gs && step < gs
           # (a frame woken before its deadline, by a key, leaves that
           # deadline for the next frame: ui-perf-1, a woken frame used to
           # push the next one a whole period past the deadline it slept
@@ -253,9 +280,22 @@ module MB
           want = nxt - (timed ? 0.0 : @offset) - done
           @sleeper.call(want) if want > 0
           woke = @clock.call
-          slept = woke - done
           # (woken early: Thread#wakeup ended the sleep before its time)
-          @woken = want > 0 && slept < want - WOKEN_EARLY
+          @woken = want > 0 && woke - done < want - WOKEN_EARLY
+          # (pace-default-1: with #min_gap a woken frame that has no room
+          # waits for the deadline it slept toward, see #defer_wake?)
+          while @woken && defer_wake?(woke, nxt)
+            rest = nxt - (timed ? 0.0 : @offset) - woke
+            if rest <= 0
+              @woken = false
+              break
+            end
+            @sleeper.call(rest)
+            t = @clock.call
+            @woken = t - woke < rest - WOKEN_EARLY
+            woke = t
+          end
+          slept = woke - done
           if timed && !@woken
             # (the data late: look again until it comes or the window ends;
             # the frame's deadline is then when it starts, so the next
@@ -278,6 +318,41 @@ module MB
           f
         end
 
+        # The deadline spacing #min_gap asks for when the target's period
+        # is shorter (nil otherwise): the smallest whole number of target
+        # periods at least the gap, when that is within GRID_SLACK gaps,
+        # else the gap.  (pace-default-1, 2026-11-21: spaced by the bare
+        # 12 ms gap, about 83 frames a second, the painter beat against
+        # the feed's 60 snapshots a second with `ui.smooth :off` and caught
+        # only 47 of them at target 120, against 57 shown with :exact;
+        # two periods, 16.7 ms, catch 59, and with smooth on show 59 even
+        # updates (shown gaps p95 17 ms) instead of 70 at p95 24 ms.  So
+        # 120 and 180 pace at 60, 240 at 80, 144 at 72; 90, 100 and 110,
+        # whose two periods are over 18 ms, at the gap.)
+        GRID_SLACK = 1.5
+
+        def gap_step
+          g = @min_gap
+          return nil unless g && @period < g
+          s = (g / @period).ceil * @period
+          s <= GRID_SLACK * g ? s : g
+        end
+
+        # True when a frame woken at +t+ (a key, the REPL's echo) should
+        # wait for the deadline +nxt+ it slept toward instead of starting
+        # now: with #min_gap, when its write would come closer than the gap
+        # after the last write, or the deadline's frame closer than the gap
+        # after it.  (pace-default-1, 2026-11-21: the woken frame used to
+        # start at once and hold its write for the gap, which then held the
+        # deadline's frame, moving it off the grid: with `ui.smooth :on`
+        # while typing at 60 the scope's shown gaps p95 rose 20.9 -> 37.5
+        # ms.  Now the deadline's frame shows the key; at 60 with a 12 ms
+        # gap no woken frame has room, at 30 one does.)
+        private def defer_wake?(t, nxt)
+          g = @min_gap or return false
+          (@last_write && t < @last_write + g) || nxt - t < g
+        end
+
         # The wake offset follows where wakes land (a wake +late+ past its
         # deadline asks earlier next time; early, later), and once per
         # ADAPT_SECONDS the rate trim follows the measured refresh rate.
@@ -294,8 +369,8 @@ module MB
 
           measured = @window_frames / span
           # (seconds per frame too long, positive when short of the target;
-          # the target is the gap's rate when #min_gap is the longer)
-          err = 1.0 / measured - (@min_gap && @min_gap > @period ? @min_gap : @period)
+          # the target is the gap's spacing when #min_gap is the longer)
+          err = 1.0 / measured - (gap_step || @period)
           @trim = (@trim + TRIM_GAIN * err).clamp(0.0, MAX_TRIM * @period)
           @window_at = woke
           @window_frames = 0

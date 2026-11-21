@@ -98,6 +98,12 @@ module MB
         `440.hz` is a Pitch; oscillator methods make a Tone (antialiased by
         default, `a*` twins are naive).  Phases are in cycles.  Lengths
         (`250.ms`, `1.n8`) and intervals (`7.semitones`) work everywhere.
+        LFOs (`0.2.hz.lfo`, `1.bar.lfo`) start where their shape starts: a
+        sine or triangle in the middle, rising; a square at its top; a saw
+        in the middle, jumping to the bottom halfway (beat 3 of
+        `1.bar.lfo.saw`).  `1.bar.lfo.drumramp` (a saw with
+        `with_phase(0.5)`) starts at the bottom and jumps on the downbeat;
+        `with_phase` moves any shape's start (`help :lfo` has the table).
       TEXT
       commands :silence, :impulse
       dsl :ramp, :square, :triangle, :sine, :pulse, :pwm, :fm, :pm, :fm_feedback, :sync, :unison, :swarm,
@@ -109,6 +115,9 @@ module MB
       end
       example 'FM bell' do
         bg :try, 440.hz.fm(660.hz.at(400) * env([[1, 0], [0, 1.5, 60]])).at(-16.db) * env([[1, 0.005], [0, 2, 40]])
+      end
+      example 'a filter sweep that rises each bar and jumps back on the downbeat' do
+        bg :try, 110.hz.saw.at(-16.db).lp4(1.bar.lfo.drumramp.at(150..2000)).until(2.bars)
       end
     end
 
@@ -2017,10 +2026,14 @@ module MB
         show at once: a snapshot after every buffer, frames timed to them,
         and the console's echo waking the screen.  A terminal may show
         fewer frames than are written: Konsole before 26.04 shows a frame
-        only 10 ms after output stops, so above about 95 frames a second it
-        shows about 25 (keep `ui.target_fps` at 60 there; the report's
-        Rates estimate what it showed).  `ui.pace :terminal` (off by
-        default) spaces frames so that each one shows.
+        only 10 ms after output stops, so frames written closer show
+        together.  The screen paces for it by default (`ui.pace
+        :terminal`, since 2026-11-21): writes stay 12 ms apart, at most
+        about 83 a second whatever target is typed (whole frame periods
+        where they fit: 120 runs at 60, 240 at 80), so each one shows;
+        target 60 is the smoothest on a 120 Hz display (the report's Rates
+        estimate what the terminal showed).  `ui.pace :exact` turns pacing
+        off; other terminals pace the same either way.
 
         `ui.note 'the cutoff turns too slowly'` keeps a note for the next
         UI refinement round with the screen as text, the layout and focused
