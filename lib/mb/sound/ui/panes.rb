@@ -151,9 +151,9 @@ module MB
             on [:right, 'l'], :level, 1, help: 'its level 1 dB up (level)', label: 'Left Right'
             on '0', :level, 0, help: 'its level back to 0 dB'
             on 'x', :stop_track, help: 'stop it (stop)'
-            on ' ', :play_stop, help: 'this track: play a stopped one again (resume), stop a playing one (NAV Space: the transport)', label: 'Space'
-            on 's', :solo, help: 'solo or unsolo it (solo, unsolo)'
-            on 'm', :mute, help: 'mute or unmute it (mute, unmute)'
+            on ' ', :play_stop, help: 'this track: resume or stop (NAV Space: the transport)', label: 'Space'
+            on 's', :solo, help: 'solo, unsolo it'
+            on 'm', :mute, help: 'mute, unmute it'
             on ['d', :delete], :untrack, help: 'remove it from the set (untrack; d twice; undo brings it back)', label: 'd Del'
             on 'v', :stopped_view, help: 'hide or show stopped tracks'
             on 'y', :copy_text, help: "copy the pane's text (OSC 52)"
