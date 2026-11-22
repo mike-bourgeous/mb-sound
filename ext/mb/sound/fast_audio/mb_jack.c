@@ -57,6 +57,8 @@ static struct {
 	int (*midi_event_get)(jack_midi_event_t *event, void *buffer, uint32_t index);
 	void (*midi_clear_buffer)(void *buffer);
 	int (*midi_event_write)(void *buffer, jack_nframes_t time, const uint8_t *data, size_t size);
+	size_t (*midi_max_event_size)(void *buffer);
+	jack_nframes_t (*frame_time)(const jack_client_t *client);
 	void (*set_error_function)(void (*func)(const char *));
 	void (*set_info_function)(void (*func)(const char *));
 } jack;
@@ -192,6 +194,8 @@ int mb_jack_load(void)
 	LOAD(midi_event_get, "jack_midi_event_get");
 	LOAD(midi_clear_buffer, "jack_midi_clear_buffer");
 	LOAD(midi_event_write, "jack_midi_event_write");
+	LOAD(midi_max_event_size, "jack_midi_max_event_size");
+	LOAD(frame_time, "jack_frame_time");
 	LOAD(set_error_function, "jack_set_error_function");
 	LOAD(set_info_function, "jack_set_info_function");
 
@@ -727,6 +731,16 @@ void mb_jack_midi_clear(void *buffer)
 int mb_jack_midi_write(void *buffer, uint32_t time, const uint8_t *data, size_t size)
 {
 	return jack.midi_event_write(buffer, time, data, size);
+}
+
+size_t mb_jack_midi_max_event_size(void *buffer)
+{
+	return jack.midi_max_event_size(buffer);
+}
+
+uint32_t mb_jack_frame_time(void)
+{
+	return jack.frame_time(client);
 }
 
 const char *mb_jack_port_name(void *port)

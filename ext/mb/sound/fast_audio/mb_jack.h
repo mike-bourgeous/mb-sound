@@ -114,6 +114,13 @@ uint32_t mb_jack_midi_count(void *buffer);
 int mb_jack_midi_get(void *buffer, uint32_t index, uint32_t *time, const uint8_t **data, size_t *size);
 void mb_jack_midi_clear(void *buffer);
 int mb_jack_midi_write(void *buffer, uint32_t time, const uint8_t *data, size_t size);
+// The largest event that fits in a MIDI port buffer now (all of it, right
+// after mb_jack_midi_clear).
+size_t mb_jack_midi_max_event_size(void *buffer);
+
+// The server's estimate of the current frame time (any thread; the shared
+// client must be open).
+uint32_t mb_jack_frame_time(void);
 
 // Port names and connections (not for the process thread).  Lists are
 // NULL-terminated and freed with mb_jack_free_list.

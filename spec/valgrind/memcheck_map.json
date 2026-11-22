@@ -1,6 +1,6 @@
 {
   "about": "Extensions (and their methods) each memcheck spec file calls, and the ext/ structure they were recorded against; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.",
-  "generated": "2026-11-16",
+  "generated": "2026-11-22",
   "specs": {
     "gems/mb-term/spec/native_spec.rb": {
       "fast_term": [
@@ -15,6 +15,9 @@
         "FastTerm::Grid#set_cell",
         "FastTerm::Grid#to_text",
         "FastTerm::Grid#write_frame"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "gems/mb-term/spec/vt_native_spec.rb": {
@@ -51,6 +54,9 @@
         "FastTerm::VT#sync_mark",
         "FastTerm::VT#take_replies",
         "FastTerm::VT#title"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/fast_sound/complex_synthesis_spec.rb": {
@@ -58,6 +64,9 @@
         "FastSound::ComplexSynthesis.cot_int",
         "FastSound::ComplexSynthesis.csc_int",
         "FastSound::ComplexSynthesis.csc_int_int"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/fast_sound_spec.rb": {
@@ -67,6 +76,9 @@
         "FastSound.narray_log10",
         "FastSound.narray_log2",
         "FastSound.number_to_freq"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/fast_arithmetic_spec.rb": {
@@ -91,6 +103,9 @@
         "FastArithmetic.product",
         "FastArithmetic.scale",
         "FastArithmetic.wet_dry"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/fast_audio_conceal_spec.rb": {
@@ -105,6 +120,9 @@
         "FastAudio::Playback#initialize",
         "FastAudio::Playback#stats",
         "FastAudio::Playback#write"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/fast_audio_jack_spec.rb": {
@@ -154,6 +172,9 @@
         "FastMIDI::Output#close",
         "FastMIDI::Output#send_bytes",
         "FastMIDI::Output.new"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/fast_audio_spec.rb": {
@@ -178,6 +199,9 @@
         "FastAudio::Playback#sample_rate",
         "FastAudio::Playback#stats",
         "FastAudio::Playback#write"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/fast_audio_trace_spec.rb": {
@@ -191,11 +215,17 @@
         "FastAudio::Playback#trace_stats",
         "FastAudio::Playback#trace_stop",
         "FastAudio::Playback#write"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/fast_control_spec.rb": {
       "fast_control": [
         "FastControl.smooth"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/fast_convolve_spec.rb": {
@@ -214,11 +244,17 @@
         "FastConvolve::Engine#swap_state",
         "FastConvolve::Engine#task",
         "FastConvolve::Engine#task_result"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/fast_delay_spec.rb": {
       "fast_delay": [
         "FastDelay.read"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/fast_dynamics_spec.rb": {
@@ -226,6 +262,9 @@
         "FastDynamics.compand",
         "FastDynamics.crossover",
         "FastDynamics.limit"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/fast_generative_spec.rb": {
@@ -236,6 +275,9 @@
         "FastGenerative.rand",
         "FastGenerative.rands",
         "FastGenerative.start"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/fast_latency_spec.rb": {
@@ -252,21 +294,33 @@
         "FastLatency::Probe#stats",
         "FastLatency::Probe#stop",
         "FastLatency::Probe#wait"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/fast_lofi_spec.rb": {
       "fast_lofi": [
         "FastLofi.decimate"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/fast_loop_spec.rb": {
       "fast_loop": [
         "FastLoop.run"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/fast_loudness_spec.rb": {
       "fast_loudness": [
         "FastLoudness.peak_sumsq"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/fast_midi_spec.rb": {
@@ -285,6 +339,9 @@
         "FastMIDI::Output#close",
         "FastMIDI::Output#send_bytes",
         "FastMIDI::Output.new"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/fast_plan_spec.rb": {
@@ -309,11 +366,17 @@
         "FastSynth.jump_add",
         "FastSynth.jump_queue",
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/fast_recipe_spec.rb": {
       "fast_recipe": [
         "FastRecipe.frame_binding"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/fast_resample_spec.rb": {
@@ -324,18 +387,27 @@
         "FastResample#mode_name",
         "FastResample#read",
         "FastResample#setup_converter_type"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/fast_resonator_spec.rb": {
       "fast_resonator": [
         "FastResonator.modes",
         "FastResonator.ping"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/fast_reverb_spec.rb": {
       "fast_reverb": [
         "FastReverb::Network#initialize",
         "FastReverb::Network#process"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/fast_sampler_grains_spec.rb": {
@@ -344,22 +416,34 @@
       ],
       "fast_sound": [
         "FastSound.oscillate"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/fast_sampler_spec.rb": {
       "fast_sampler": [
         "FastSampler.play"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/fast_synth_feedback_spec.rb": {
       "fast_synth": [
         "FastSynth.feedback_sine"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/fast_texture_spec.rb": {
       "fast_texture": [
         "FastTexture.drift",
         "FastTexture.dust"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/fast_ui_spec.rb": {
@@ -374,17 +458,22 @@
       ],
       "fast_ui": [
         "FastUI.area",
+        "FastUI.copy",
         "FastUI.decimate",
         "FastUI.monotonic",
         "FastUI.polyline",
         "FastUI.project",
         "FastUI.response_db",
+        "FastUI.trace",
         "FastUI.wave",
         "FastUI::GVLProbe.active?",
         "FastUI::GVLProbe.blockers",
         "FastUI::GVLProbe.holds",
         "FastUI::GVLProbe.log_drain",
         "FastUI::GVLProbe.log_stop",
+        "FastUI::GVLProbe.stacks_drain",
+        "FastUI::GVLProbe.stacks_start",
+        "FastUI::GVLProbe.stacks_stop",
         "FastUI::GVLProbe.start",
         "FastUI::GVLProbe.stop",
         "FastUI::GVLProbe.waits",
@@ -399,6 +488,9 @@
       ]
     },
     "spec/ext/mb/sound/fast_unison_spec.rb": {
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
+      ],
       "fast_unison": [
         "FastUnison.exact",
         "FastUnison.interp",
@@ -416,6 +508,9 @@
         "FastSynth.oscillate_sync",
         "FastSynth.sync_pulse_edges",
         "FastSynth.sync_running_phases"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ],
       "fast_wavetable": [
         "FastWavetable.half_means",
@@ -474,6 +569,37 @@
         "FastMIDI::Output#close",
         "FastMIDI::Output#send_bytes",
         "FastMIDI::Output.new"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
+      ]
+    },
+    "spec/ext/mb/sound/jack_midi_timed_spec.rb": {
+      "fast_audio": [
+        "FastAudio.jack_close",
+        "FastAudio.jack_connect",
+        "FastAudio.jack_frame_time",
+        "FastAudio::JackMIDIInput#close",
+        "FastAudio::JackMIDIInput#initialize",
+        "FastAudio::JackMIDIInput#read",
+        "FastAudio::JackMIDIOutput#close",
+        "FastAudio::JackMIDIOutput#discard_timed",
+        "FastAudio::JackMIDIOutput#initialize",
+        "FastAudio::JackMIDIOutput#max_message",
+        "FastAudio::JackMIDIOutput#stats",
+        "FastAudio::JackMIDIOutput#write",
+        "FastAudio::JackMIDIOutput#write_at",
+        "FastAudio::Playback#close",
+        "FastAudio::Playback#initialize",
+        "FastAudio::Playback#jack_clock",
+        "FastAudio::Playback#jack_frame_of"
+      ],
+      "fast_midi": [
+        "FastMIDI::Output#close",
+        "FastMIDI::Output.new"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/jack_port_teardown_spec.rb": {
@@ -496,18 +622,27 @@
       "fast_midi": [
         "FastMIDI::Output#close",
         "FastMIDI::Output.new"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/ext/mb/sound/jack_server_loss_spec.rb": {
       "fast_midi": [
         "FastMIDI::Output#close",
         "FastMIDI::Output.new"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/fast_sound_spec.rb": {
       "fast_sound": [
         "FastSound.smootherstep_buf",
         "FastSound.smoothstep_buf"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/band_limit_spec.rb": {
@@ -529,6 +664,9 @@
         "FastSynth.sync_pulse_edges",
         "FastSynth.sync_running_phases"
       ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
+      ],
       "fast_wavetable": [
         "FastWavetable.half_means",
         "FastWavetable.harmonic_spectra",
@@ -546,6 +684,9 @@
       ],
       "fast_envelope": [
         "FastEnvelope.process"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/delay_line_spec.rb": {
@@ -559,6 +700,9 @@
       ],
       "fast_sound": [
         "FastSound.cookbook"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/device_input_spec.rb": {
@@ -582,6 +726,9 @@
         "FastAudio::Capture#resampling?",
         "FastAudio::Capture#sample_rate",
         "FastAudio::Capture#stats"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/device_output_spec.rb": {
@@ -612,6 +759,9 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/envelope_segments_spec.rb": {
@@ -624,6 +774,9 @@
       ],
       "fast_envelope": [
         "FastEnvelope.process"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/envelope_spec.rb": {
@@ -633,6 +786,9 @@
       ],
       "fast_envelope": [
         "FastEnvelope.process"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/filter/biquad_spec.rb": {
@@ -642,6 +798,9 @@
         "FastSound.biquad_narray",
         "FastSound.cookbook",
         "FastSound.oscillate"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/filter/cookbook_spec.rb": {
@@ -660,6 +819,9 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/filter/delay_spec.rb": {
@@ -694,6 +856,9 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/filter/diode_ladder_spec.rb": {
@@ -711,6 +876,9 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/filter/four_pole_spec.rb": {
@@ -726,6 +894,9 @@
       ],
       "fast_sound": [
         "FastSound.oscillate"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/filter/svf_spec.rb": {
@@ -736,6 +907,9 @@
         "FastSound.biquad_narray",
         "FastSound.cookbook",
         "FastSound.oscillate"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/generation_methods_spec.rb": {
@@ -750,6 +924,9 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ],
       "fast_wavetable": [
         "FastWavetable.oscillate"
@@ -770,6 +947,9 @@
       ],
       "fast_sampler": [
         "FastSampler.grains"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/graph_node/calculus_spec.rb": {
@@ -801,6 +981,9 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/graph_node/constant_spec.rb": {
@@ -809,6 +992,9 @@
       ],
       "fast_sound": [
         "FastSound.smoothstep_buf"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/graph_node/convolver_spec.rb": {
@@ -844,6 +1030,9 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/graph_node/curve_shaper_spec.rb": {
@@ -859,6 +1048,9 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/graph_node/db_shaper_spec.rb": {
@@ -876,6 +1068,9 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/graph_node/decimator_spec.rb": {
@@ -892,6 +1087,9 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/graph_node/dynamics/transient_shaper_spec.rb": {
@@ -911,6 +1109,9 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/graph_node/dynamics_spec.rb": {
@@ -953,6 +1154,9 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/graph_node/feedback_loop_spec.rb": {
@@ -1005,6 +1209,9 @@
       "fast_synth": [
         "FastSynth.blit",
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/graph_node/filter_bank_spec.rb": {
@@ -1023,6 +1230,9 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/graph_node/formant_spec.rb": {
@@ -1034,11 +1244,17 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/graph_node/harmonic_table_spec.rb": {
       "fast_sound": [
         "FastSound.oscillate"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ],
       "fast_wavetable": [
         "FastWavetable.half_means",
@@ -1061,6 +1277,9 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/graph_node/modal_resonator_spec.rb": {
@@ -1081,6 +1300,9 @@
       ],
       "fast_texture": [
         "FastTexture.dust"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/graph_node/multitap_delay_spec.rb": {
@@ -1105,6 +1327,9 @@
       ],
       "fast_sound": [
         "FastSound.oscillate"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/graph_node/phaser_spec.rb": {
@@ -1134,6 +1359,9 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/graph_node/resample_spec.rb": {
@@ -1159,6 +1387,9 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/graph_node/resonator_spec.rb": {
@@ -1172,6 +1403,9 @@
       "fast_sound": [
         "FastSound.number_to_freq",
         "FastSound.oscillate"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/graph_node/reverb_spec.rb": {
@@ -1203,6 +1437,9 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/graph_node/texture_spec.rb": {
@@ -1221,6 +1458,9 @@
       "fast_texture": [
         "FastTexture.drift",
         "FastTexture.dust"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/graph_node/wavetable_spec.rb": {
@@ -1233,6 +1473,9 @@
       ],
       "fast_synth": [
         "FastSynth.sync_pulse_edges"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ],
       "fast_wavetable": [
         "FastWavetable.half_means",
@@ -1313,6 +1556,12 @@
         "FastFilter.phaser_osc",
         "FastFilter.svf"
       ],
+      "fast_generative": [
+        "FastGenerative.fold",
+        "FastGenerative.rand",
+        "FastGenerative.rands",
+        "FastGenerative.start"
+      ],
       "fast_lofi": [
         "FastLofi.decimate"
       ],
@@ -1373,6 +1622,9 @@
         "FastTexture.drift",
         "FastTexture.dust"
       ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
+      ],
       "fast_unison": [
         "FastUnison.exact",
         "FastUnison.scale"
@@ -1431,6 +1683,9 @@
         "FastMIDI.compiled_apis",
         "FastMIDI::Output#close",
         "FastMIDI::Output.new"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/loudness_spec.rb": {
@@ -1439,6 +1694,9 @@
       ],
       "fast_sound": [
         "FastSound.biquad_narray"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/midi/input_spec.rb": {
@@ -1462,6 +1720,9 @@
         "FastMIDI::Output#close",
         "FastMIDI::Output#send_bytes",
         "FastMIDI::Output.new"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/midi/live_source_spec.rb": {
@@ -1499,6 +1760,9 @@
         "FastMIDI::Output#close",
         "FastMIDI::Output#send_bytes",
         "FastMIDI::Output.new"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/notes_fast_paths_spec.rb": {
@@ -1535,6 +1799,9 @@
       "fast_synth": [
         "FastSynth.jump_queue",
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/notes_smoothing_spec.rb": {
@@ -1549,6 +1816,9 @@
       ],
       "fast_sound": [
         "FastSound.number_to_freq"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/plan/arithmetic_ops_spec.rb": {
@@ -1579,6 +1849,9 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/plan/channel_mixer_ops_spec.rb": {
@@ -1617,6 +1890,9 @@
         "FastSynth.jump_queue",
         "FastSynth.oscillate_bl"
       ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
+      ],
       "fast_unison": [
         "FastUnison.scale"
       ]
@@ -1641,6 +1917,9 @@
       "fast_sound": [
         "FastSound.narray_log10",
         "FastSound.oscillate"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/plan/filter_bank_op_spec.rb": {
@@ -1666,6 +1945,9 @@
       ],
       "fast_synth": [
         "FastSynth.jump_queue"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/plan/filter_ops_spec.rb": {
@@ -1689,6 +1971,9 @@
         "FastSound.cookbook",
         "FastSound.dynamic_biquad",
         "FastSound.smoothstep_buf"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/plan/hold_tempo_ops_spec.rb": {
@@ -1702,6 +1987,9 @@
       "fast_sound": [
         "FastSound.fast_math=",
         "FastSound.oscillate"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/plan/installation_spec.rb": {
@@ -1741,6 +2029,9 @@
         "FastSynth.jump_add",
         "FastSynth.jump_queue",
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/plan/lane_group_spec.rb": {
@@ -1788,6 +2079,9 @@
         "FastSynth.jump_queue",
         "FastSynth.oscillate_bl"
       ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
+      ],
       "fast_unison": [
         "FastUnison.scale"
       ]
@@ -1825,9 +2119,11 @@
         "FastSynth.jump_add",
         "FastSynth.jump_queue"
       ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
+      ],
       "fast_wavetable": [
         "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate",
         "FastWavetable.shape"
       ]
@@ -1868,6 +2164,9 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/plan/notes_ops_spec.rb": {
@@ -1912,6 +2211,9 @@
         "FastSynth.jump_add",
         "FastSynth.jump_queue",
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ],
       "fast_wavetable": [
         "FastWavetable.oscillate",
@@ -1962,6 +2264,9 @@
       ],
       "fast_texture": [
         "FastTexture.noise_skip"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/plan/resonator_op_spec.rb": {
@@ -1996,10 +2301,11 @@
         "FastSampler.play"
       ],
       "fast_sound": [
-        "FastSound.biquad_narray",
-        "FastSound.cookbook",
         "FastSound.fast_math=",
         "FastSound.oscillate"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/plan/shared_inputs_spec.rb": {
@@ -2042,6 +2348,9 @@
       "fast_synth": [
         "FastSynth.jump_queue",
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/plan/stream_restart_spec.rb": {
@@ -2065,6 +2374,9 @@
         "FastSynth.jump_add",
         "FastSynth.jump_queue",
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/plan/tone_op_spec.rb": {
@@ -2087,6 +2399,9 @@
         "FastSynth.jump_add",
         "FastSynth.jump_queue",
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ],
       "fast_wavetable": [
         "FastWavetable.half_means",
@@ -2125,6 +2440,9 @@
         "FastSynth.jump_queue",
         "FastSynth.oscillate_bl"
       ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
+      ],
       "fast_unison": [
         "FastUnison.exact",
         "FastUnison.scale"
@@ -2158,6 +2476,9 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/shaper_spec.rb": {
@@ -2175,6 +2496,9 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/tone_feedback_spec.rb": {
@@ -2194,6 +2518,9 @@
       "fast_synth": [
         "FastSynth.feedback_sine",
         "FastSynth.sync_pulse_edges"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/tone_gain_spec.rb": {
@@ -2219,6 +2546,9 @@
         "FastSynth.oscillate_sync",
         "FastSynth.sync_pulse_edges"
       ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
+      ],
       "fast_wavetable": [
         "FastWavetable.oscillate"
       ]
@@ -2234,6 +2564,9 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/tone_waveforms_spec.rb": {
@@ -2249,6 +2582,9 @@
         "FastSynth.jump_add",
         "FastSynth.jump_queue",
         "FastSynth.oscillate_bl"
+      ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
       ]
     },
     "spec/lib/mb/sound/tone_wavetable_spec.rb": {
@@ -2271,6 +2607,9 @@
         "FastSynth.sync_pulse_edges",
         "FastSynth.sync_running_phases"
       ],
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
+      ],
       "fast_wavetable": [
         "FastWavetable.half_means",
         "FastWavetable.harmonic_spectra",
@@ -2281,6 +2620,9 @@
       ]
     },
     "spec/lib/mb/sound/wavetable_spec.rb": {
+      "fast_ui": [
+        "FastUI::GVLYield.priority"
+      ],
       "fast_wavetable": [
         "FastWavetable.half_means",
         "FastWavetable.harmonic_spectra",
@@ -2317,6 +2659,7 @@
         "mb_conceal.h",
         "mb_jack.c",
         "mb_jack.h",
+        "mb_midi_timed.h",
         "mb_miniaudio.h",
         "miniaudio.h",
         "miniaudio_impl.c"
@@ -2327,6 +2670,7 @@
       "includes": [
         "ext/mb/sound/fast_audio/mb_conceal.h",
         "ext/mb/sound/fast_audio/mb_jack.h",
+        "ext/mb/sound/fast_audio/mb_midi_timed.h",
         "ext/mb/sound/fast_audio/mb_miniaudio.h",
         "ext/mb/sound/fast_audio/miniaudio.h"
       ],
@@ -2335,6 +2679,7 @@
           "ext/mb/sound/fast_audio/fast_audio.c",
           "ext/mb/sound/fast_audio/mb_conceal.h",
           "ext/mb/sound/fast_audio/mb_jack.h",
+          "ext/mb/sound/fast_audio/mb_midi_timed.h",
           "ext/mb/sound/fast_audio/mb_miniaudio.h",
           "ext/mb/sound/fast_audio/miniaudio.h"
         ],
