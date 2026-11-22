@@ -12,9 +12,14 @@ module MB
         #
         # Two lanes, each one thread: :interim (quick stretches, never
         # stuck behind a slow one) and :full.  The threads start on the
-        # first job, wait for more without cost, hand the GVL to the
+        # first job, wait for more without cost, and hand the GVL to the
         # render thread whenever it wants it (UI::Yielding, as the UI's
-        # workers do), and hold off major GCs while they work (GCQuiet).
+        # workers do).  They leave GC alone: holding majors off
+        # (GCQuiet.during, as scene builds do) kept a stretch's arrays
+        # young, and the minor collections they then needed stopped the
+        # render thread 8.8-11.8 ms in 10 of 16 bpm changes (128-frame
+        # buffers, Mac container); without it 3 of 28 changes had a buffer
+        # over 5 ms (6.8-34.9 ms) and the rest 1.9-5.6 ms.
         #
         # Only a realtime Session's render thread submits jobs (.live?):
         # offline renders, process_buffer callers, and #prepare make
@@ -144,9 +149,7 @@ module MB
                 job = @queue.pop
                 break if job == :close
                 next if job.cancelled?
-                yielding(job.render) do
-                  GCQuiet.during { job.run }
-                end
+                yielding(job.render) { job.run }
                 @done += 1
                 @busy += job.seconds.to_f
               end

@@ -117,6 +117,13 @@ module SessionFuzz
   # Clips whose frequency is a function of the timeline position alone
   FREQ_CLIPS = ['seq(C4, E4, G4).n8.loop', 'seq(A3, C4.n4, E4).n8.loop', 'seq(G3.n4, D4.n8.dotted, B3.n16).loop'].freeze
 
+  # Tempo-following loops (Sample#follow) of one beat of an arpeggio
+  # (stretch-live-1; short, so each tempo's stretch is quick)
+  FOLLOW_LOOPS = [
+    'Sample[(seq(A3, C4, E4, G4).n16.loop.tone.saw * 0.2).multi_sample(800, 30), bpm: 120, beats: 1].follow(stretch: :slice)',
+    'Sample[(seq(C4, G4).n8.loop.tone.triangle * 0.2).multi_sample(800, 30), bpm: 120, beats: 1].follow(stretch: { mode: :spectral, lock: :peaks, window: 1024.samples })',
+  ].freeze
+
   module_function
 
   # --- generation -----------------------------------------------------
@@ -696,6 +703,12 @@ module SessionFuzz
 
       cut = s.pick(['(150.hz..8000.hz).at(2400.hz)', '(100.hz..5000.hz).at(600.hz)'])
       "GraphIO.load(%(graph \#{GraphIO::FORMAT}, name: \"cut\", kind: :set\\nknob :cut, #{cut}\\n), session: Session.current)"
+    },
+    ->(s) {
+      # (stretch-live-1) a loop following the tempo, restretched at each
+      # tempo the song's changes, ramps, and LFOs reach (slices, and the
+      # vocoder on a short loop: renders make each stretch at once)
+      "bg :#{s.bg_name}, #{s.pick(FOLLOW_LOOPS)}#{s.on}"
     },
     # (new commands go here, at the end)
   ].freeze

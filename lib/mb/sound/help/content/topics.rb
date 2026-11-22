@@ -730,12 +730,16 @@ module MB
 
         `sample.follow` plays a loop in time with the session: its beats
         fill the same span at any tempo, lined up with bar 1 (`align:
-        :launch` counts from the launch), restretched when `bpm` changes.
+        :launch` counts from the launch), restretched when `bpm` changes
+        (live, on a worker thread: the loop plays its `interim:`
+        meanwhile, `:slice` slices at the new tempo by default, `:hold`
+        the old stretch at the new speed, or `:coarse` a quicker
+        vocoder, then crossfades to the new stretch).
         `follow` keeps the pitch: drums with the slice stretch, notes and
         pads with the phase vocoder (`sample.material` decides from name
         words or how noisy it sounds; `stretch: :slice` or `:spectral`
         to say; the vocoder keeps a tone's waveform, `stretch: { mode:
-        :spectral, lock: :peaks }` for its plain phases, about a third of
+        :spectral, lock: :peaks }` for its plain phases, about half
         the time per restretch); `follow(:resample)` lets the pitch follow
         the tempo like a varispeed.  `.stretch(r, mode: :slice)` cuts at
         the hits (markers, else onsets, else the 16th grid; `slices:
