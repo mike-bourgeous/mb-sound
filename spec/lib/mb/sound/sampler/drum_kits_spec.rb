@@ -134,6 +134,9 @@ RSpec.describe 'SoundFont kits by name and role', :aggregate_failures do
       MB::Sound.live = true
       expect { kits.play(:acoustic, clip) }.to output(/apt install avldrums\.lv2-soundfont/).to_stderr
       expect { kits.play(:acoustic, clip) }.not_to output.to_stderr # (once)
+      # (a tune on the fallback machine: it keeps its pitch, said once)
+      expect { kits.play(:acoustic, clip, tune: -3) }.to output(/kit\(:acoustic\): tune pitches SoundFont kits; the tr909 playing instead keeps its pitch/).to_stderr
+      expect { kits.play(:acoustic, clip, tune: -3) }.not_to output.to_stderr
     ensure
       MB::Sound.live = false
     end
