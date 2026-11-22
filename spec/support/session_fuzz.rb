@@ -25,7 +25,8 @@
 #   does the first such part, and a one-shot tween (ONCE_TWEENS), in a
 #   bus chain first fed at the launch (fix-bus-tween-1)
 # - :warm: warming every change before it lands (Session::Warming.always:
-#   copies built and played in sandboxes) gives the same mix, bit for bit
+#   copies built and played in sandboxes) gives the same mix, bit for bit,
+#   and no warm-up fails to load or build its copy (WARM_FAILURES)
 # - :carry: a carrying rebuild of each patch track (what a bind or a build
 #   knob's turn does; Session::Carry, carry-1) at a point drawn from the
 #   song gives the same mix, bit for bit, when every swap was a cut
@@ -867,6 +868,7 @@ module SessionFuzz
     end
     @warnings = err.string.lines.reject { |l| EXPECTED_WARNINGS.any? { |re| l.match?(re) } }
     @hung = hung_wire_notes(session)
+    @warm_failures = warm && session ? session.warmed.select { |w| w.result == :failed && WARM_FAILURES.any? { |re| w.reason.to_s.match?(re) } } : []
     mix = out.captured.map { |c| Numo::DFloat.cast(c) }
     if mix.first && mix.first.length >= RENDER_CAP * 48000
       raise RenderCapped, "the song's #{bars}-bar render ran to SessionFuzz::RENDER_CAP (#{RENDER_CAP} s) without ending (a seek loop?)"
@@ -1000,6 +1002,17 @@ module SessionFuzz
     /No background player :\w+ is playing or stopped/, /doesn't play any of the clips being replaced/, /so a swap would never be heard/,
     /swap :\w+: track :\w+ isn't playing/,
   ].freeze
+
+  # Warm-up failures the :warm relation reports (a warm-up may fail by
+  # design: a graph without a recipe, a copy that can't print; these say
+  # the copy's document didn't load or build in the sandbox: racks-r3-2,
+  # every graph using a named rack failed with "rack :dub isn't defined
+  # here").
+  WARM_FAILURES = [/GraphIO::LoadError/, /NameError/, /NoMethodError/].freeze
+
+  # The failed warm-ups (Session::Warming::Warm) of the last #render with
+  # warm: true whose reasons match WARM_FAILURES.
+  def warm_failures = @warm_failures || []
 
   # The unexpected lines the last #render printed to stderr.
   def warnings = @warnings || []
@@ -1135,7 +1148,8 @@ module SessionFuzz
       compare(ref, got, tolerance: 0, label: 'planned vs unplanned') ||
         compare(ref, render(code, song.bars, rebuilds: :next_span), tolerance: 0, label: 'planned with deferred rebuilds vs unplanned')
     when :warm
-      compare(render(code, song.bars), render(code, song.bars, warm: true), tolerance: 0, label: 'warmed changes vs not')
+      compare(render(code, song.bars), render(code, song.bars, warm: true), tolerance: 0, label: 'warmed changes vs not') ||
+        warm_failures.first&.then { |w| "Warm-up of #{w.kind} #{w.name.inspect} failed: #{w.reason}" }
     when :meta
       plain = without_meta(code)
       return :skip if plain == code
