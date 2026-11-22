@@ -490,23 +490,31 @@ module MB
         @playback.jack_ports
       end
 
-      # For JACK outputs, where the latest JACK cycle started: a Hash with
-      # its :frame_time (JACK's 32-bit frame counter), the queue's
-      # :read_pos and :write_pos (device-rate frames since opening), and the
-      # device clock (:frames_played).  Queued frame +x+ plays at JACK frame
-      # `frame_time + (x - read_pos)` (until an underrun), the time base of
-      # JACK MIDI input (see MIDI::LiveSource).  nil for other backends.
+      # For JACK outputs, where the next JACK cycle starts, as the latest
+      # one left it: a Hash with its :frame_time (JACK's 32-bit frame
+      # counter), the queue's :read_pos and :write_pos (device-rate frames
+      # since opening), and the device clock (:frames_played).  Queued
+      # frame +x+ plays at JACK frame `frame_time + (x - read_pos)` (until
+      # the queue runs short), the time base of JACK MIDI input (see
+      # MIDI::LiveSource).  nil for other backends.
       def jack_clock
         @playback.jack_clock
+      end
+
+      # The FastAudio::Playback of a JACK output (nil for other backends),
+      # for timed MIDI that follows its queue
+      # (FastAudio::JackMIDIOutput#write_after, MIDI::Destination).
+      def jack_playback
+        @backend == :jack ? @playback : nil
       end
 
       # For JACK outputs, the JACK frame time (32 bits, wrapping) at which
       # the frame +ahead+ frames past the queue's write position (0: the
       # next frame #write queues) reaches the ports, by the latest cycle's
       # clock (see #jack_clock), without allocating; nil for other backends
-      # and before the first cycle.  +ahead+ is at the card's rate.  Timed
-      # MIDI output (MIDI::Destination) leaves on it, so a note goes with
-      # the audio of the same frame.
+      # and before the first cycle.  +ahead+ is at the card's rate.  A
+      # prediction for frames not queued yet: a cycle that runs short before
+      # them moves them (timed MIDI output uses #jack_playback instead).
       def jack_frame_of(ahead)
         @playback.jack_frame_of(ahead)
       end

@@ -14,7 +14,13 @@
 # early before the first audio left (midi-out-first-note: the first note
 # went 256 frames ahead of its audio in 983 of 1000 starts, and that check
 # failed only when a cycle landed between its clock read and the
-# destination's).
+# destination's).  Each message is checked against its own frame's click,
+# so a gap in the audio (an underrun, which a busy machine can cause) moves
+# the truth of what follows it: notes go with their audio through gaps too
+# (midi-out-first-note-2), so a gap doesn't fail a play; plays with one are
+# counted and reported after the example.  The output conceals underruns
+# with silence unless +conceal:+ says otherwise, so concealment grains can't
+# repeat a click.
 #
 # Usage: include_context 'JACK MIDI out timing' in a describe block.
 RSpec.shared_context 'JACK MIDI out timing' do
@@ -32,6 +38,8 @@ RSpec.shared_context 'JACK MIDI out timing' do
 
   before(:each) do
     skip @jack_error if @jack_error
+    @gaps = 0
+    @plays = 0
     ENV['AUDIO_BACKEND'] = 'jack'
     ENV['OUTPUT_DEVICE'] = 'none'
     ENV['MIDI_API'] = 'jack'
@@ -41,6 +49,9 @@ RSpec.shared_context 'JACK MIDI out timing' do
   end
 
   after(:each) do
+    if @gaps.to_i > 0
+      RSpec.configuration.reporter.message("#{RSpec.current_example.full_description}: #{@gaps} of #{@plays} plays had a gap in the audio (underruns), their notes checked against their own audio")
+    end
     @opened.reverse_each(&:close)
     @synth&.close
     MB::Sound::MIDI::Destination.close
@@ -73,8 +84,15 @@ RSpec.shared_context 'JACK MIDI out timing' do
   # end); the loopback's :lag; :steps, each click's played frame minus its
   # session frame (one value when the audio flowed without a gap); and the
   # :phase measured.
-  def play(clip, size:, bpm:, offset:, frames:, start: 1/16r, phase: nil)
-    out = open(MB::Sound::DeviceOutput.new(channels: 1, buffer_size: size, latency: 0.15, adaptive: false, capture: 48000 * 4))
+  #
+  # +hold+ makes the Session's writes late on purpose, as a busy machine
+  # does: :first holds the first write until a JACK cycle has gone by with
+  # the ring still empty (the first notes are already queued by then: sends
+  # come while a buffer renders), and an Integer k holds the k-th write
+  # (from 0) until the output has run out of audio (an underrun, with notes
+  # of that buffer queued before it).
+  def play(clip, size:, bpm:, offset:, frames:, start: 1/16r, phase: nil, hold: nil, conceal: :silence)
+    out = open(MB::Sound::DeviceOutput.new(channels: 1, buffer_size: size, latency: 0.15, adaptive: false, capture: 48000 * 4, conceal: conceal))
     capture = open(MB::Sound::MIDI::Input.new) # our own midi_in: JACK frame times
     session = open(MB::Sound::Session.new(master_gain: 1, output: out, transport: MB::Sound::Sequence::Transport.new(bpm: bpm),
                                          channels: 1, buffer_size: size, realtime: false, raise_errors: true))
@@ -95,17 +113,19 @@ RSpec.shared_context 'JACK MIDI out timing' do
     lag = delta(probe, echo[0])
 
     # Each message's session frame, and a click in the audio on each
-    # note-on's frame (sends come while a buffer renders, before it's
+    # message's frame (sends come while a buffer renders, before it's
     # written)
     sent = []
     clicks = []
     send_at = dest.method(:send_at)
     dest.define_singleton_method(:send_at) do |s, frame, kind, d1, d2 = 0|
       sent << frame
-      clicks << frame if kind == 0x90
+      clicks << frame unless clicks.include?(frame)
       send_at.call(s, frame, kind, d1, d2)
     end
     written = 0
+    writes = 0
+    held = nil
     write = out.method(:write)
     out.define_singleton_method(:write) do |data|
       n = data[0].length
@@ -114,7 +134,19 @@ RSpec.shared_context 'JACK MIDI out timing' do
         data = data.map(&:dup)
         here.each { |f| data[0][f - written] = 1 }
       end
+      if (hold == :first && writes == 0) || hold == writes
+        deadline = MB::U.clock_now + 2
+        if hold == :first
+          c0 = out.jack_clock[:frame_time]
+          nil until out.jack_clock[:frame_time] != c0 || MB::U.clock_now > deadline || !sleep(0.0002)
+        else
+          u0 = out.stats[:underruns]
+          nil until out.stats[:underruns] != u0 || MB::U.clock_now > deadline || !sleep(0.001)
+        end
+        held = MB::U.clock_now < deadline
+      end
       written += n
+      writes += 1
       write.call(data)
     end
 
@@ -144,38 +176,49 @@ RSpec.shared_context 'JACK MIDI out timing' do
 
     # Where each click left: the device clock counts every frame played,
     # so captured frame k left on JACK frame frame_time + k - frames_played
+    # (each message by its own frame's click, so a gap in the audio moves
+    # what follows it)
     played = out.captured[0]
     found = (0...played.length).select { |k| played[k] > 0.5 }
     expect(found.length).to eq(clicks.length)
-    steps = found.zip(clicks).map { |k, f| k - f }.uniq
+    step_of = clicks.zip(found).to_h { |f, k| [f, k - f] }
+    steps = step_of.values.uniq
     clock = out.jack_clock
-    left = ->(f) { (clock[:frame_time] + f + steps[0] - clock[:frames_played]) & 0xffff_ffff }
+    left = ->(f) { (clock[:frame_time] + f + step_of[f] - clock[:frames_played]) & 0xffff_ffff }
 
     { got: got.map { |f, b| [delta(lag, f) & 0xffff_ffff, b.bytes] }, sent: sent.map { |f| [f, left.(f)] },
-      mstats: dest.output.stats, astats: astats, lag: lag, steps: steps, phase: phase }
+      mstats: dest.output.stats, astats: astats, lag: lag, steps: steps, phase: phase, held: held }
   end
 
-  # Expects every message of +r+ (see #play) on its audio's JACK frame plus
-  # +offset_frames+, with the audio unbroken and nothing late.
-  def expect_on_time(r, offset_frames, label)
-    label = "#{label} (loopback lag #{r[:lag]}, JACK #{MB::Sound::Jack.info&.slice(:skipped_cycles, :repeated_cycles)})"
+  # Expects every message of +r+ (see #play) on its own audio's JACK frame
+  # plus +offset_frames+, nothing late or still waiting; a gap in the audio
+  # is counted (see the file comment), or with +gap+ (a forced underrun)
+  # expected.
+  def expect_on_time(r, offset_frames, label, gap: false)
+    label = "#{label} (loopback lag #{r[:lag]}, JACK #{MB::Sound::Jack.info&.slice(:skipped_cycles, :repeated_cycles)}, audio steps #{r[:steps].inspect})"
+    if gap
+      expect(r[:steps].length).to eq(2), "#{label}: the audio had no gap"
+    else
+      @plays += 1
+      @gaps += 1 if r[:steps].length > 1
+    end
     expect(r[:got].length).to eq(r[:sent].length), label
     deltas = r[:got].zip(r[:sent]).map { |(jack_frame, _bytes), (_frame, audio)| delta(audio, jack_frame) }
     expect(deltas).to eq([offset_frames] * r[:sent].length), "#{label}: #{deltas.inspect}"
-    expect(r[:steps].length).to eq(1), "#{label}: the audio had a gap (#{r[:steps].inspect})"
     expect(r[:mstats][:timed_late]).to eq(0), label
-    expect(r[:astats][:underruns]).to eq(0), label
+    expect(r[:mstats][:timed_waiting]).to eq(0), label
   end
 
   # The first notes of a fresh output, swept over where in the JACK period
   # the first buffer renders (+phases+, frames into the period) at each of
   # +sizes+, +rounds+ times, for a two-note clip launched at +start+: each
   # play's messages on time (#expect_on_time).
-  def sweep(start, sizes:, phases:, rounds: 1)
+  def sweep(start, sizes:, phases:, rounds: 1, hold: nil)
     rounds.times do |round|
       sizes.each do |size|
         phases.each do |phase|
-          r = play(MB::Sound.seq(MB::Sound::C3, MB::Sound::E3).n32, size: size, bpm: 120, offset: 2.ms, frames: 12_000, start: start, phase: phase)
+          r = play(MB::Sound.seq(MB::Sound::C3, MB::Sound::E3).n32, size: size, bpm: 120, offset: 2.ms, frames: 12_000, start: start, phase: phase, hold: hold)
+          expect(r[:held]).to eq(true), "the hold (#{hold.inspect}) timed out" if hold
           expect(r[:sent].length).to be >= 3
           expect_on_time(r, 96, "round #{round}, #{size}-frame buffers, launched at #{start} bars, starting at phase #{r[:phase]} of the period")
           close_opened

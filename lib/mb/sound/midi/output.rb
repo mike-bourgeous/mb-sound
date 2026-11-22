@@ -147,6 +147,20 @@ module MB
           @output.write_at(frame, status, data1, data2)
         end
 
+        # Queues one short message (as #write_at) to leave +offset+ frames
+        # after the audio of the frame +ahead+ frames past +playback+'s
+        # write position (a FastAudio::Playback on JACK, e.g.
+        # DeviceOutput#jack_playback; frames at its device rate) leaves:
+        # JACK's thread places it once that audio is queued, so it stays with
+        # its audio at any start and through underruns (see
+        # FastAudio::JackMIDIOutput#write_after).  Without allocating; from
+        # the thread that writes +playback+.  JACK outputs only.  Returns
+        # false if the queue was full, nil if +playback+ isn't on JACK.
+        def write_after(playback, ahead, offset, status, data1 = 0, data2 = 0)
+          raise ArgumentError, "#{@api} MIDI outputs can't send on exact frames (JACK only)" unless @api == :jack
+          @output.write_after(playback, ahead, offset, status, data1, data2)
+        end
+
         # Drops the timed messages queued and not sent yet (JACK outputs;
         # see #write_at), e.g. for a panic.
         def discard_timed
