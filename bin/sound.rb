@@ -85,13 +85,15 @@ MB::Sound::Starter.start
 startup_step.('Warming up the sound engine') { MB::Sound.warm_up }
 startup_step.('Warming up the terminal UI') { MB::Sound::UI.warm_up }
 
-def clear
-  STDOUT.write("\e[H\e[2J")
-  STDOUT.flush
+# Clears the screen; once, a dim line saying clear_set empties the set; with
+# an argument (`clear :form`), what clears that instead (see
+# MB::Sound::Internal.console_clear)
+def clear(*what, quiet: false)
+  MB::Sound::Internal.console_clear(*what, quiet: quiet)
 end
 
 puts
-clear if ARGV.include?('--clear')
+clear(quiet: true) if ARGV.include?('--clear')
 
 # The terminal's name and version (XTVERSION), asked once, for debug_dump
 # (see MB::Sound::TerminalInfo)

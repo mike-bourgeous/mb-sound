@@ -349,7 +349,8 @@ RSpec.describe(MB::Sound::UI::Keyboard, :aggregate_failures) do
       pane = MB::Sound::UI::Panes::Keyboard.new(kb)
       pane.draw(c, nil, {})
       lines = grid.to_text(:none).lines.map(&:rstrip)
-      expect(lines[0]).to eq('KEYBOARD C3-A5  vel 96  ch 1  auto (release)') # (:auto names itself, ui-api-1)
+      # (:auto names itself, ui-api-1; nothing armed: the arm hint's shortest form, ux-friction-3)
+      expect(lines[0]).to eq('KEYBOARD C3-A5  vel 96  ch 1  auto (release)  arm :name')
       # Scaled (3 columns per white key at 60 wide, 5 rows): letters in the
       # keys, black keys' on their lowest row, C names above the white ones
       expect(lines[3]).to eq(' s  d     g  h  j     l2 ;3    5  6  7     9  0     =')
@@ -409,6 +410,42 @@ RSpec.describe(MB::Sound::UI::Keyboard, :aggregate_failures) do
       expect(lines[roll + 1, 3].map { |l| l[0, 3] }).to eq(%w[G3 E3 C3])
       # At its usual 8 rows only the header, piano, and played lines
       expect(MB::Sound::UI::Sections.allocate(pane.sections(false), 8)).to eq(header: 1, piano: 5, played: 2)
+    end
+    # (ux-friction-3, the maintainer at a 103x8 keyboard pane: "the message
+    # about arming should be shown on smaller keyboard sizes whenever
+    # possible.  I keep forgetting that \"arm\" is a thing.")
+    it 'says arm :name at every size with room for it, and names the armed tracks instead' do
+      none = Struct.new(:armed).new([])
+      lead = Struct.new(:armed).new(%i[lead])
+      pane = MB::Sound::UI::Panes::Keyboard.new(kb)
+      draw = ->(w, h, snap) {
+        grid = MB::Term::Cells.new(w, h)
+        pane.draw(MB::Sound::UI::Canvas.new(grid, 0, 0, w, h), snap, {})
+        grid.to_text(:none).lines.map(&:rstrip)
+      }
+      # His pane: 103 wide, 8 rows (no room for the armed rows): the
+      # header's longest form
+      lines = draw.(103, 8, none)
+      expect(lines[0]).to eq('KEYBOARD C3-A5  vel 96  ch 1  auto (tap) (no key-up)  nothing armed: arm :name plays a track')
+      expect(lines[7]).to eq('NAV K (or ui.keys, F2): play the keyboard')
+      # Narrower: shorter forms, down to the command alone
+      expect(draw.(80, 8, none)[0]).to end_with('(no key-up)  arm :name plays a track')
+      expect(draw.(64, 8, none)[0]).to end_with('(no key-up)  arm :name')
+      # No room in the header: it leads the keys' hint row
+      lines = draw.(50, 8, none)
+      expect(lines[0]).not_to include('arm')
+      expect(lines[7]).to start_with('arm :name plays a track  NAV K')
+      # Ten rows: the armed rows themselves (above the chord and the roll),
+      # and the header keeps to the keyboard
+      lines = draw.(103, 10, none)
+      expect(lines[0]).not_to include('arm')
+      expect(lines[8]).to start_with('nothing armed: the default patch plays; arm :name to play a track')
+      expect(MB::Sound::UI::Sections.allocate(pane.sections(false), 10)).to eq(header: 1, piano: 5, played: 2, armed: 2)
+      # Armed: the header names the track, the hint row is the keys' own
+      lines = draw.(103, 8, lead)
+      expect(lines[0]).to end_with('(no key-up)  -> lead')
+      expect(lines[7]).to eq('NAV K (or ui.keys, F2): play the keyboard')
+      expect(draw.(103, 10, lead)[8]).to eq('armed lead')
     end
   end
 

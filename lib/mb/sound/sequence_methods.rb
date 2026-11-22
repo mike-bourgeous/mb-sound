@@ -544,7 +544,8 @@ module MB
       # journal entry.
       #
       # +target+ is any position spelling (maintainer, 2026-10-18; see
-      # Session::Seeks#seek_position): a bar number counting from 1
+      # Session::Seeks#seek_position): a bar number counting from 1 (seek
+      # 0 is the start too, as seek 1, with a dim line saying so)
       # (fractions are allowed, e.g. 2.5; through the meter map, see
       # Sequence::Transport#meter), with +beat+ a quarter-note beat in it
       # (`seek 11, 2`), or `bar(12)` / `bar(12, beat: 3)`; a length from the
@@ -562,6 +563,16 @@ module MB
       #     seek :drop, in: 2.beats
       def seek(target, beat = nil, at: nil, on: nil, in: nil)
         point = LaunchPoint.of(binding) or return nil
+        if beat.nil? && target.is_a?(Numeric) && target.zero?
+          # (ux-friction-3, the maintainer: "I'd like seek 0 to still work
+          # and print a gray message instead of an error"; ux-friction-1
+          # had made it an error saying bars count from 1): the start, as
+          # seek 1, with a dim line for a line he typed
+          if MB::Sound.live? && !Session.context&.time && Internal.user_call?(caller_locations(1, 1).first)
+            $stdout.puts "\e[2mseek #{target.inspect}: bars count from 1, so seek 0 went to the start (seek 1; seek 0.bars is a length from the start)\e[0m"
+          end
+          target = 1
+        end
         if beat
           return MB::Sound.live_error(ArgumentError.new("seek #{target.inspect}, #{beat.inspect}: a beat goes with a bar number (seek 11, 2)")) unless target.is_a?(Numeric)
           target = LaunchPoint::Bar.new(bar: target, beat: beat)

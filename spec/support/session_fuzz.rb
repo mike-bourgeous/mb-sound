@@ -863,6 +863,17 @@ module SessionFuzz
         "turn :#{t}, release: #{release}, level: #{s.pick([0.4, 1])}, over: #{s.pick(['1/2r', '1'])}#{s.on}"
       end
     },
+    ->(s) {
+      # (ux-friction-3, "this is really effing annoying") a synth track
+      # given a one-shot, then a looping clip swapped in on the next bar
+      # while the one-shot plays (it will have ended by then) or as it
+      # ends: the swap starts the track again with the clip, as bg (it
+      # raised ClipsOver, an INVALID song)
+      next if s.swappable.empty?
+
+      t = s.pick(s.swappable)
+      "bg :#{t}, seq(C5, D5).n16, on: :now; after(in: #{s.pick(['1/16r', '1/8r'])}) { swap :#{t}, #{s.pick(MELODIC.select { |c| c.end_with?('.loop') })}, on: :bar }"
+    },
     # (new commands go here, at the end)
   ].freeze
 

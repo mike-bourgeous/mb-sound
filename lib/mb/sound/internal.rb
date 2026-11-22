@@ -537,6 +537,54 @@ module MB
         nil
       end
 
+      # The console's `clear` (bin/sound.rb): without arguments, clears
+      # the screen ($stdout, which the tiled screen's REPL pane reads too)
+      # and, the first time unless +quiet+, prints one dim line saying
+      # clear_set empties the set; with arguments (`clear :form`, `clear
+      # :tracks`), raises an ArgumentError naming the commands that clear
+      # those (ux-friction-3: the maintainer tried `clear`, `reset`,
+      # `session.clear`, `clear :form`, and `Session.clear` before asking
+      # how to clear everything; `clear :form` said "wrong number of
+      # arguments (given 1, expected 0)").  Returns nil.
+      def console_clear(*what, quiet: false)
+        unless what.empty?
+          raise ArgumentError, "clear clears the screen; #{what.map(&:inspect).join(', ')} goes to another command: clear_set empties the whole set " \
+            '(tracks, scenes, flow, knobs, buses, racks; undo puts it back); for one part: untrack :name (a track), stop or stop :name ' \
+            '(players), forget (stopped players kept for resume), finish (the form to its ending), panic (everything quiet now)'
+        end
+        $stdout.write("\e[H\e[2J")
+        unless quiet || @clear_told
+          @clear_told = true
+          $stdout.write("\e[2mclear clears the screen; clear_set empties the set (tracks, scenes, flow, knobs, buses, racks)\e[0m\n")
+        end
+        $stdout.flush
+        nil
+      end
+
+      # An ArgumentError for console +command+ (swap) given a sound where
+      # the player's name goes (+name+: an instrument, a graph, a clip),
+      # naming the track that plays it when exactly one does, else nil for
+      # names (Symbols, Integers, journal entries) and Hashes.
+      # (ux-friction-3: the maintainer's `swap kit, euclid` with `kit` the
+      # SoundFont on track :drums said "No background player
+      # #<MB::Sound::Sampler::SF2::Font ...> is playing or stopped")
+      def sound_for_name_error(command, name)
+        return nil if name.is_a?(Symbol) || name.is_a?(Integer) || name.is_a?(String) || name.is_a?(Hash) || name.is_a?(Session::Journal::Entry) || name.nil?
+
+        arr = Session.current.arrangement
+        tracks = arr.tracks.values.select { |tr|
+          tr.graph.equal?(name) || tr.clip.equal?(name) ||
+            Arrangement::InstrumentPatch.voice_of(tr.patch).equal?(name) || Arrangement::InstrumentPatch.entry_of(tr.patch).equal?(name)
+        }.map(&:name)
+        what = name.class.name.to_s.sub('MB::Sound::', '')
+        plays = case tracks.length
+                when 1 then "; track #{tracks[0].inspect} plays it: #{command} #{tracks[0].inspect}, clip"
+                when 0 then " (#{command} :drums, clip)"
+                else "; tracks #{tracks.map(&:inspect).join(', ')} play it: #{command} #{tracks[0].inspect}, clip"
+                end
+        ArgumentError.new("#{command} takes a track's or player's name first (a Symbol), not a sound (got a #{what})#{plays}")
+      end
+
       # Library Entry +entry+ given to +command+ (`bg`) for the existing
       # track +name+: a clip or generator entry's clip at its defaults (as
       # `track :x, entry` takes it, so it plays on the track; a
