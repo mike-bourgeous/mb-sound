@@ -1687,7 +1687,10 @@ module MB
           # carrying rebuild's sources go on with the playing clips)
           @session.prepare_clips(@session.timeline_nodes_in(graph), time) unless carry || time.nil?
           @session.add(graph, name: tr.name, start_time: time, fade: fade || 0, description: "#{tr.name}: #{name_of(clip)}",
-                       warm: -> { GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { tr.build(clip) } }, carry: carry, clip: clip,
+                       # (the warm-up's copy reads the sandbox's knobs, so it plays:
+                       # Library::Generators.copy_reading)
+                       warm: -> { GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { tr.build(Library::Generators.copy_reading(clip, Session.current)) } },
+                       carry: carry, clip: clip,
                        spill: spill, full_now: full_now)
           @mutex.synchronize { tr.clip = clip } unless carry
         elsif @session.resumable?(tr.name)

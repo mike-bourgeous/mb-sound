@@ -95,6 +95,22 @@ RSpec.describe(MB::Sound::Session::Warming) do
     expect(warm.map(&:to_a)).to eq(cold.map(&:to_a))
   end
 
+  it 'plays the copy of a track whose generator its track knobs steer, without changing the samples' do
+    # (bg-latency-2: the copy read the live :"gdrums/energy" and swing
+    # knobs, so it was only built, and YJIT compiled the patch where it
+    # landed: Library::Generators.copy_reading)
+    beat = ->(s) {
+      MB::Sound.track(:gdrums) { |clip| clip.trigger * 0.3 }
+      MB::Sound.bg(:gdrums, MB::Sound::L.gen.beat.techno)
+    }
+    cold, = song(false, &beat)
+    warm, list = song(true, &beat)
+    w = list.find { |x| x.name == :gdrums }
+    expect([w.result, w.reason]).to eq([:played, nil])
+    expect(warm.map(&:to_a)).to eq(cold.map(&:to_a))
+    expect(cold[0].abs.max).to be > 0.1
+  end
+
   it 'warms a kind and set of node classes once per process' do
     _, list = song(true) { |s| s.bus(:verb2) { |sig| sig.reverb(:room, mix: 1) } }
     expect(list.find { |w| w.name == :verb2 }.result).to eq(:known)

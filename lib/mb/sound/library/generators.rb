@@ -257,6 +257,26 @@ module MB
         # Clips .track_clip built => { param => knob } (keys weak).
         KNOBS = ObjectSpace::WeakKeyMap.new
 
+        # A copy of track clip +clip+ (.track_clip; or of a clip made from
+        # one by transforms, made again from the copy) whose generator
+        # reads +session+'s knobs of the same names: what a warm-up
+        # sandbox's copy of a track's patch plays (Session::Warming plays
+        # a copy only if it shares no node with the live graph, and the
+        # live track knobs made every warm-up of a generator track only
+        # build, so YJIT compiled the new patch where it landed, 24-45 ms
+        # at 128 and 256 frames; bg-latency-2).  +clip+ itself when it
+        # isn't one, or +session+ lacks one of the knobs.
+        def copy_reading(clip, session)
+          lineage = clip.lineage
+          idx = lineage.index { |c| KNOBS.key?(c) } or return clip
+          root = lineage[idx]
+          built = ORIGINS[root] or return clip
+          knobs = KNOBS[root].transform_values { |k| session.knobs[k.name] }
+          return clip if knobs.value?(nil)
+          copy = run(built.entry, BLOCKS[built.entry], [], built.kwargs, knobs: knobs)
+          lineage[0...idx].reverse.reduce(copy) { |c, step| step.rederive(c) }
+        end
+
         # Clips .track_clip built from a clip => that clip (keys weak; set
         # documents print a track's clip in the place of the clip it was
         # given, so a loaded set saves the same text: fix-batch-1102b).
