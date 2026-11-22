@@ -1153,8 +1153,9 @@ module MB
         last is built: "starting: building 4 tracks ...") and `pause` (NAV
         Space) toggles: the bar stops, sounding notes
         release, loops and drones fade out and hold their place, and
-        echoes and reverbs ring out; playing on doesn't retrigger notes
-        (`start resync: true` puts tempo-synced LFOs back on the grid).
+        echoes and reverbs ring out; playing on (`pause` again, `start`,
+        or a bare `resume`) doesn't retrigger notes (`start resync: true`
+        puts tempo-synced LFOs back on the grid).
         `suspend` is the old freeze (silence, nothing renders).  `outro
         in: 4.bars` and `stop :all` end the flow too; `go :scene` during
         it seeks the flow to the next section playing that scene (else the

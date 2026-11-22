@@ -759,6 +759,12 @@ module MB
       # +:at+, and +:fade+ work the same way).  Returns the change's journal entry (see #bg),
       # or nil if there was nothing to resume.
       #
+      # With no arguments on a paused transport (see TransportMethods#pause) or
+      # a suspended Session, it plays on from there, as `start` (or `play`,
+      # or pause again) does, and returns start's Status; `resume :pad`
+      # still brings back a stopped player (the maintainer, 2026-11-21:
+      # `pause`, then `resume` said "No background player to resume").
+      #
       # Only players with Symbol names are kept after stopping; see
       # #stopped and #forget.  A player a stop is still fading out comes
       # back from where its fade is (the stop is cancelled; its clips play
@@ -769,6 +775,8 @@ module MB
       #     stop :pad      # fades out over four bars
       #     resume :pad    # fades the same graph back in on the next bar
       def resume(name = nil, at: nil, on: nil, in: nil, fade: nil)
+        bare = name.nil? && at.nil? && on.nil? && binding.local_variable_get(:in).nil? && fade.nil?
+        return start if bare && TransportMethods.paused?(Session.current)
         point = LaunchPoint.of(binding) or return nil
         name = player_name(name)
         session_command(name, label: "resume #{name.inspect}", kind: :resume) { |session, time|
