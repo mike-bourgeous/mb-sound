@@ -147,10 +147,21 @@ module MB
       #     piano = sf2('GM.sf2', preset: 0)
       #     synth(midi) { |v| piano.play(v) }
       #     bg :kit, beat.sampler(sf2('GM.sf2', preset: [128, 0]), voices: 8)
-      def sf2(path, selector = nil, preset: selector, name: nil, mips: :octave, attenuation: Sampler::SF2::EMU_ATTENUATION, wheel: true)
+      #
+      # A +path+ without a slash that isn't a file here is a font's name,
+      # found on the SoundFont search path (Sampler::FontPath:
+      # $MB_SOUND_SOUNDFONTS, then the system's SoundFont folders):
+      # `sf2('Black_Pearl')` plays Black_Pearl_4_LV2.sf2 wherever it is
+      # installed, and prints and saves as the name.  A drum kit preset
+      # plays drum roles mapped to its keys (Drums::Roles; +roles+ false
+      # plays the font's own keys).
+      #
+      #     sf2('Black_Pearl')                         # an acoustic kit by name
+      #     sf2('FluidR3_GM', preset: [128, 8])        # GM's Room kit
+      def sf2(path, selector = nil, preset: selector, name: nil, mips: :octave, attenuation: Sampler::SF2::EMU_ATTENUATION, wheel: true, roles: true)
         font = Sampler::SF2.open(path)
-        return font if preset.nil? && name.nil? && mips == :octave && attenuation == Sampler::SF2::EMU_ATTENUATION && wheel
-        font.instrument(preset, name: name, mips: mips, attenuation: attenuation, wheel: wheel, path: path)
+        return font if preset.nil? && name.nil? && mips == :octave && attenuation == Sampler::SF2::EMU_ATTENUATION && wheel && roles
+        font.instrument(preset, name: name, mips: mips, attenuation: attenuation, wheel: wheel, roles: roles, path: path)
       end
       alias soundfont sf2
 

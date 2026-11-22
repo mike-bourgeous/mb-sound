@@ -450,6 +450,15 @@ module MB
 
         Grids join two ways: bars with `|` in one grid (`bd: 'x...x... |
         x.x.x...'`), or whole grids in turn with `seq(verse, fill)`.
+
+        Kits by kind: `kit(:acoustic)` (also `:jazz`, `:hand_percussion`,
+        `:gm`) is the first installed SoundFont kit of its list, else a
+        drum machine (one line in the console names the package:
+        avldrums.lv2-soundfont).  Every kit plays drum roles: GM names
+        plus `half_open_hat`, `hat_swish`, `ride_shank`, `crash3`, chokes,
+        and tom rims, each kit playing what it has for them (a 909's open
+        hat for a half-open one; the acoustic kits' rack tom for GM's high
+        tom).
       TEXT
       commands :tr808, :tr909, :kit, :drum_kit, :grid, :euclid
       note :drums
@@ -714,6 +723,12 @@ module MB
         specification's).
         `mips: :default` reads smoother tables (more memory) than the
         `:octave` default.
+
+        A name without a slash finds an installed font: `sf2('Black_Pearl')`
+        (on $MB_SOUND_SOUNDFONTS, /usr/share/sounds/sf2 and the other
+        SoundFont folders, ~/Library/Audio/Sounds/Banks on a Mac; Tab
+        offers the names), saved as the name.  Drum kit presets map drum
+        roles to their keys (`roles: false` plays the font's own keys).
       TEXT
       commands :sf2, :soundfont
       see :sampler, :sequences

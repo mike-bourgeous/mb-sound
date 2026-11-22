@@ -93,6 +93,27 @@ module MB
         end
 
         class << self
+          # The file Sampler::SF2.open reads for +path+ (drum-gen-1): a path
+          # as .resolve gives it, except that a bare name (no folder
+          # separator; Sampler::FontPath.name?) that isn't a file there is
+          # a font's name, found on the SoundFont search path
+          # (Sampler::FontPath.find).  A document may so name an installed
+          # font, never a path outside its directory or the search path.
+          # Raises ArgumentError for a name no font has.
+          def soundfont(path)
+            s = path.to_s
+            name = Sampler::FontPath.name?(s)
+            if document_string?(path)
+              ctx = path.instance_variable_get(:@graph_io_file_context)
+              return check(s, ctx, 'reading a SoundFont') unless name
+              full = ctx.base_dir && check(s, ctx, 'reading a SoundFont')
+              return full if full && File.exist?(full)
+            else
+              return s if !name || File.exist?(s)
+            end
+            Sampler::FontPath.find(s) || raise(ArgumentError, Sampler::FontPath.missing(s))
+          end
+
           # +path+ (a metadata sidecar, Meta::Formats.read_sidecar) if it
           # may be read: a plain file, not a link, at most
           # Meta::Formats::MAX_TEXT bytes.  nil when there is none; raises
