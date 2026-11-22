@@ -80,6 +80,9 @@ module MB
           on 'x', :close, help: 'close (the REPL stays; u brings it back)'
           on '=', :equalize, help: 'even out sizes'
           %i[left right up down].each do |dir|
+            on [dir, :alt], :swap_dir, dir, help: 'swap with the pane that way (again: on across)', label: 'A-arrows'
+          end
+          %i[left right up down].each do |dir|
             on [dir, :shift], :resize, dir, 1, help: 'resize by 1 (Ctrl-Shift: 5)', label: 'S-arrows'
             on [dir, :shift, :ctrl], :resize, dir, 5, help: 'resize by 1 (Ctrl-Shift: 5)', label: 'S-arrows'
           end
