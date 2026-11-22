@@ -639,7 +639,8 @@ module MB
         #
         #     bass = lead.within(E1..E2)            # the lead's degrees, bass register
         #     motifs(8).within(C4..C5)
-        def within(range)
+        def within(range, *extra)
+          MB::Sound::OctaveFold.check_arguments(range, extra)
           fold = MB::Sound::OctaveFold[range]
           map_clip { |e|
             raise ArgumentError, "Pitch-marked hits (sampler chops) keep their keys; #{self} can't move into #{fold}" if e.pitch

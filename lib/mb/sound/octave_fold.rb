@@ -32,6 +32,33 @@ module MB
       # Semitones per octave (the session Tuning is 12-TET).
       OCTAVE = 12
 
+      # Raises a did-you-mean for `within(E1, E2)` (two ends as separate
+      # arguments) pointing to `within(E1..E2)`; every within calls it.
+      def self.check_arguments(range, extra)
+        return if extra.empty?
+
+        ends = [range, *extra].map { |v| RubyValue.to_ruby(v) rescue v.inspect }
+        hint = ends.length == 2 ? "within(#{ends[0]}..#{ends[1]})" : 'within(E1..E2)'
+        raise ArgumentError, "within takes one Range, not #{ends.length} arguments (within(#{ends.join(', ')})); write #{hint}"
+      end
+
+      # The did-you-mean text for a signal node's range of plain numbers
+      # (read as note numbers, not Hz), or nil when an end is not a plain
+      # Integer or Float (Notes and Pitches are what they say).
+      def self.plain_number_hint(range, tuning = MB::Sound.tuning)
+        return nil unless range.is_a?(Range)
+
+        a = range.begin
+        b = range.end
+        return nil unless [a, b].all? { |v| v.instance_of?(Integer) || v.instance_of?(Float) }
+
+        dots = range.exclude_end? ? '...' : '..'
+        given = "#{RubyValue.to_ruby(a)}#{dots}#{RubyValue.to_ruby(b)}"
+        lo, hi = new(range).hz_bounds(tuning)
+        hz = format('%.1f-%.1f Hz', lo, hi)
+        "within(#{given}) on a signal reads note numbers (#{given} = #{hz}); for Hz write within(#{RubyValue.to_ruby(a)}.hz#{dots}#{RubyValue.to_ruby(b)}.hz)"
+      end
+
       # +range+ as an OctaveFold (OctaveFold instances pass through).
       def self.[](range)
         range.is_a?(OctaveFold) ? range : new(range)

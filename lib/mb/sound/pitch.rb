@@ -459,7 +459,8 @@ module MB
       # is A1), a fixed frequency a Pitch; a changing pitch (a voice's
       # `v.hz`) follows its frequency node through GraphNode#within.  The
       # DSL's #within would read the sine as frequencies.
-      def within(range)
+      def within(range, *extra)
+        OctaveFold.check_arguments(range, extra)
         fold = OctaveFold[range]
         return fold.value(self) if is_a?(Note) || constant?
 

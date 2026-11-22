@@ -12,7 +12,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 
 - `tone` Uses this node as the frequency value for a full-scale oscillator
 - `freq` Converts MIDI note numbers (fractional too) to Hz in the current tuning
-- `within(range)` Moves frequencies (Hz) into range by octaves, keeping pitch classes
+- `within(range, *extra)` Moves frequencies (Hz) into range by octaves, keeping pitch classes
 - `phase_table(table, scan:, interpolation:, ...)` Reads a cycle-mode Wavetable with this node as the phase
 - `wavetable(table, scan:, interpolation:, ...)` See #phase_table (Tone#wavetable makes a wavetable oscillator)
 - `waveshape(table, scan:, interpolation:, ...)` Waveshapes this node through a cycle-mode Wavetable
