@@ -502,11 +502,17 @@ module MB
         end
 
         # A copy of the graph whose outputs are +nodes+ from its recipe, or
-        # nil if it has none (or the recipe can't be loaded back).
+        # nil if it has none (or the recipe can't be loaded back).  The copy
+        # is the graph's document, as saving writes it: its header declares
+        # the Session knobs it reads (racks-r3-2: a graph reading
+        # `knob(:busy)` printed only the body, whose `knob(...)` the loader
+        # refuses outside the header, so its warm-up failed; SessionFuzz
+        # seeds 36 and 78), and named racks load from the sandbox's copies
+        # (see #warm_sandbox).
         def recipe_copy(nodes)
           root = nodes.length == 1 ? nodes[0] : GraphNode::Channels.new(nodes)
           return nil unless root.respond_to?(:to_ruby) && GraphNode::Recipe.record_of(nodes[0])
-          text = root.to_ruby
+          text = GraphIO.dump(root)
           return nil if text.include?('FIXME')
           GraphIO.load(text)
         end

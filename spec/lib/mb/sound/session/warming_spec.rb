@@ -74,7 +74,24 @@ RSpec.describe(MB::Sound::Session::Warming) do
     }
     cold, = song(false, &racks)
     warm, list = song(true, &racks)
-    expect(list.select { |w| %i[dubbed played].include?(w.name) }.map { |w| [w.name, w.result, w.reason] }).to contain_exactly([:dubbed, :played, nil], [:played, :played, nil])
+    # (:known when a warm-up of the same node classes ran before: the
+    # keys track's synth)
+    expect(list.select { |w| %i[dubbed played].include?(w.name) }.map { |w| [w.name, w.result == :known ? :played : w.result, w.reason] }).to contain_exactly([:dubbed, :played, nil], [:played, :played, nil])
+    expect(warm.map(&:to_a)).to eq(cold.map(&:to_a))
+  end
+
+  # (racks-r3-2, found by SessionFuzz's warm-up check, seeds 36 and 78: the
+  # copy printed `knob(:busy)` in its body without the header line that
+  # declares it, which the loader refuses)
+  it 'warms a graph that reads a session knob' do
+    knobbed = ->(s) {
+      MB::Sound.knob(:wbusy, 0.5)
+      MB::Sound.bg(:knobbed, 330.hz.triangle * MB::Sound.knob(:wbusy) * 0.1)
+    }
+    cold, = song(false, &knobbed)
+    warm, list = song(true, &knobbed)
+    w = list.find { |x| x.name == :knobbed }
+    expect([w.result, w.reason]).to eq([:played, nil]).or eq([:known, nil])
     expect(warm.map(&:to_a)).to eq(cold.map(&:to_a))
   end
 
