@@ -201,7 +201,7 @@ Zones, Hash matchers, `within`/`sometimes`, MIDI feedback (R4), crossings (R5-R8
 
 ## Demo
 
-`bin/songs/rack_demo.rb`: an `mrack` (arp + echo) feeding an `irack` (a pluck instrument) through the `:dub` rack (rack knobs `:space`, opened over bars 4-6 with `turn :"dub/space"`, and `:tone` with `.mod`), an `arack` with a sidechain port pumping a pad from the kick track, and a bass through a named effect rack; `--show` prints the racks and their Ruby.  Console help: `help :racks`.  The dub rack is the library rack preset `:dub_echo` (`bin/save_presets.rb`, `LIBRARY_PRESET_RACKS`).  Listening set: `/app/workbench/data/bench/sets/racks-r2/` (bench id racks-r2-2026-10-17).
+`bin/songs/rack_demo.rb`: an `mrack` (arp + echo) feeding an `irack` (a pluck instrument) through the `:dub` rack (rack knobs `:space`, opened over bars 4-6 with `turn :"dub/space"`, and `:tone` with `.mod`), an `arack` with a sidechain port pumping a pad from the kick track, and a bass through a named effect rack; `--show` prints the racks and their Ruby.  Console help: `help :racks`.  The dub rack is the library rack preset `:dub_echo` (`bin/save_presets.rb`, `LIBRARY_PRESET_RACKS`).  Listening set: the private Bench set racks-r2 (bench id racks-r2-2026-10-17).
 
 ## Racks as library entries (library-core-1, 2026-10-26)
 

@@ -71,6 +71,7 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/songs/night_bus_set.rb' => ['--bars', '0.5', '-c', '900'],
     'bin/songs/night_bus_flow.rb' => ['--bars', '0.5', '--seed', '2'],
     'bin/songs/night_bus_capture.rb' => ['--bars', '0.5', '-Q', '0.5'],
+    'bin/songs/n109.rb' => ['--bars', '0.5'], # (version 2; version 1 below)
     'bin/songs/press_and_chop.rb' => ['--bars', '0.5', '-l', 'sp1200'],
     'bin/songs/rack_demo.rb' => ['--bars', '0.5', '--show'],
     'bin/songs/random_drum_pentatonic.rb' => ['--bars', '0.5'],
@@ -155,6 +156,7 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/synths/fm_kick.rb' => [],
     'bin/synths/fm_synth.rb' => [],
     'bin/synths/funk.rb' => ['-p', 'choir', '-d', '1'],
+    'bin/synths/halftime.rb' => ['-p', 'ghost_voice', '--variant', '0.5'],
     'bin/synths/init_voice.rb' => ['--sync', '1', '--tune2', '12', '--fm', '0.5', '--am', '0.5'],
     'bin/synths/jungle.rb' => ['-p', 'breaks', '-c', '4000'],
     'bin/synths/library_voices.rb' => ['-p', 'sync_lead', '--sweep', '5'],
@@ -330,6 +332,19 @@ RSpec.describe('script runner scripts', :smoke) do
 
       data = MB::Sound.read(outfile)
       expect(data[0].length).to be >= (48000 * 60 * 4 * 16 / 112.0).floor # 16 bars at 112 BPM
+    end
+  end
+
+  # N109's first version (n109-1: the maintainer allowed the song only an
+  # "it doesn't crash" test): the other half of --version, half a bar
+  describe 'bin/songs/n109.rb --version 1' do
+    outfile = File.join(out_dir, 'smoke_n109_v1.flac')
+    runs.add('n109 version 1 render', "bin/songs/n109.rb -q -f --bars 0.5 --version 1 #{outfile.shellescape}", env: shared_env)
+
+    it 'renders a short file', smoke_run: 'n109 version 1 render' do
+      text, status = runs.take('n109 version 1 render')
+      expect(status).to be_success, text
+      expect(MB::Sound.read(outfile)[0].length).to be >= 48000 * 0.5
     end
   end
 

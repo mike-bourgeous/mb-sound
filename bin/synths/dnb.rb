@@ -327,11 +327,21 @@ module MB::Sound
   # (Hz; a number or a node), glue compression, +drive+ dB into a
   # softclipper (a number or a node, such as a preset param), and a
   # true-peak limiter at +ceiling+ dBTP (clip, then limit).
-  def self.dnb_master(mix, drive: 11.0, ceiling: -0.5, air: 20)
-    glued = mix.filter(:highpass, cutoff: air, quality: 0.7)
-      .compress(threshold: -14.db, ratio: 2, knee: 6, attack: 0.01, release: 0.12)
+  #
+  # Kez's second master, from "N109" (bin/songs/n109.rb; n109-1,
+  # 2026-11-22), is the same chain with its options: `mono_below: 120`
+  # folds the lows to mono first, `air: nil` and `glue: false` leave the
+  # highpass and the compressor out, +clip+ is the softclipper's limit
+  # (0.94 there), and `release: nil` keeps the limiter's own release:
+  # "CLIP the drum peaks onto the bass (a clipper doesn't ride the gain,
+  # so nothing pumps), limiter last and only for strays".
+  def self.dnb_master(mix, drive: 11.0, ceiling: -0.5, air: 20, glue: true, mono_below: nil, clip: 1.0, release: 0.06)
+    glued = mono_below ? mix.mono_below(mono_below) : mix
+    glued = glued.filter(:highpass, cutoff: air, quality: 0.7) if air
+    glued = glued.compress(threshold: -14.db, ratio: 2, knee: 6, attack: 0.01, release: 0.12) if glue
     gain = drive.is_a?(Numeric) ? drive.db : 10 ** (drive / 20)
-    (glued * gain).softclip(0.6, 1.0).limit(ceiling: ceiling.db, release: 0.06)
+    limit = release ? { ceiling: ceiling.db, release: release } : { ceiling: ceiling.db }
+    (glued * gain).softclip(0.6, clip).limit(**limit)
   end
 
   # The knobs each patch's preset has (library-instruments-1, 2026-10-28:

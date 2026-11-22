@@ -11,6 +11,13 @@ RSpec.describe('spec hygiene') do
       'joins buffers in quadratic time (each step copies the growing result: 12000 64-sample buffers took 2.2 s)',
       'SpecBuffers.join(list) in specs, first.concatenate(*rest) in lib',
     ],
+    [
+      # (fixes-16: library/drum_beats_spec compared a set saved twice as
+      # text, a flake whenever the two saves fell in different seconds)
+      /expect\((?:MB::Sound::)?(?:io|GraphIO)\.dump\([^()]*(?:\([^()]*\)[^()]*)*\)\)\.to eq\(/,
+      'compares a document saved now with another as text, saved: stamps included (they differ when the saves fall in different seconds)',
+      "compare both without the stamp: text.sub(/saved: \"[^\"]*\"/, '') (see rack_documents_spec's without_saved)",
+    ],
   ]
 
   rules.each do |pattern, why, instead|
@@ -69,7 +76,22 @@ RSpec.describe('spec hygiene') do
     s.arrangement.track(:lead) { |c| c.tone.triangle * c.amp_env }
     s.arrangement.scene(:intro, lead: MB::Sound.seq(MB::Sound::C4).n4)
     expect(SessionGuard.leftovers(s)).to eq('tracks :lead; scenes :intro; names :lead (track)')
+    # (as the default Session: its output opened too)
+    expect(SessionGuard.leftovers(s, state: true)).to eq('tracks :lead; scenes :intro; names :lead (track); its output opened (MB::Sound::NullOutput)')
     s.close
     expect(SessionGuard.leftovers(s)).to be_nil
+  end
+
+  # fixes-16: a screen's Space paused the default Session's transport, and
+  # a later example's at_bar block in that Session never ran
+  it 'names a paused transport and an opened output, for the default Session guard' do
+    s = MB::Sound::Session.new(realtime: false)
+    expect(SessionGuard.leftovers(s, state: true)).to be_nil # (not opened by making it)
+    s.pause_transport
+    s.process_buffer(16)
+    expect(SessionGuard.leftovers(s, state: true)).to eq("the transport paused; its output opened (#{s.output.class})")
+    expect(SessionGuard.leftovers(s)).to be_nil # (not the default Session)
+  ensure
+    s&.close
   end
 end

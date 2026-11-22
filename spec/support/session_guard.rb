@@ -8,6 +8,12 @@
 # this guard names the example that left them, like
 # support/transport_guard.rb does for the default transport.
 #
+# The same for a default Session left with its transport paused, suspended,
+# or its output opened (fixes-16: form_pane_spec's screen sent Space to the
+# default Session, whose transport stayed paused, and a later example's
+# at_bar block in that Session waited for a resume that never came; the
+# output the pause opened was the visible trace).
+#
 # MB_SOUND_SESSION_CHECK:
 # - unset or "fail" (default): an example that leaves set state in the
 #   default Session fails, naming what it left (close the Session, or the
@@ -30,9 +36,12 @@ module SessionGuard
     end
 
     # The set state +session+ holds that a fresh Session doesn't, as text
-    # ("tracks :lead, :hum; scenes :intro"), or nil.  Doesn't create the
-    # session's arrangement.
-    def leftovers(session)
+    # ("tracks :lead, :hum; scenes :intro"), or nil, and with +state+ (by
+    # default for the real default Session: a context's Session, which
+    # Session.existing gives inside with_context, is given its output and
+    # closed by its owner) a paused transport, a suspend, and an opened
+    # output.  Doesn't create the session's arrangement.
+    def leftovers(session, state: session.equal?(default_session))
       return nil if session.nil? || session.closed?
 
       out = []
@@ -51,7 +60,19 @@ module SessionGuard
       out << "#{scheduled.length} scheduled blocks" unless scheduled.empty?
       meta = session.metadata
       out << "metadata (#{[*(meta[nil].empty? ? [] : ['the set']), *meta.names.map(&:inspect)].join(', ')})" unless meta.empty?
+      if state
+        out << 'the transport paused' if session.transport_paused?
+        out << 'suspended' if session.realtime? && session.paused?
+        out << "its output opened (#{session.output.class})" if session.output_open?
+      end
       out.empty? ? nil : out.join('; ')
+    end
+
+    # The default Session if it exists and is open, whatever context the
+    # caller runs in (Session.existing gives a with_context Session first).
+    def default_session
+      d = MB::Sound::Session.instance_variable_get(:@default)
+      d unless d.nil? || d.closed?
     end
   end
 end
@@ -59,7 +80,10 @@ end
 unless SessionGuard.mode == 'off'
   RSpec.configure do |config|
     config.after(:each) do |example|
-      what = SessionGuard.leftovers(MB::Sound::Session.existing)
+      existing = MB::Sound::Session.existing
+      what = SessionGuard.leftovers(existing)
+      # (inside with_context, the default Session too)
+      what ||= SessionGuard.leftovers(SessionGuard.default_session) unless existing.equal?(SessionGuard.default_session)
       next unless what
       if SessionGuard.mode == 'fail'
         raise "the example left set state in the default Session (#{what}): close it in an after block " \

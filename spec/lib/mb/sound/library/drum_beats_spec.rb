@@ -151,6 +151,46 @@ RSpec.describe MB::Sound::Library::Generators, 'drum beats', :aggregate_failures
     end
   end
 
+  # gen-morph-1: every ordered pair of the family morphs (Generative::Morph)
+  # at 0, 0.25, 0.5, 0.75, and 1: the ends are each side exactly, hits both
+  # sides play never drop, no slot (drum, step) changes twice over the
+  # sweep (a slot with two hits of one drum, a ghost row and the snare, may
+  # take two steps), and hits per bar stay within the sides' range: 15% past
+  # it at 0.25 and 0.75, 35% past the larger at 0.5, where the anchors of
+  # both sides play (the rule: the skeleton never empties; measured at most
+  # 31%, halftime -> house).
+  it 'morphs every ordered pair of beats: exact ends, shared hits kept, each slot changing once, hits per bar in range' do
+    ts = [0.0, 0.25, 0.5, 0.75, 1.0]
+    bars = 8
+    slots = ->(clip, cy) { clip.events_for(cy).map { |e| [e.value, (e.start * 16).floor] }.tally }
+    beats.product(beats).reject { |a, b| a.equal?(b) }.each do |ea, eb|
+      a = ea.call
+      b = eb.call
+      sa = (0...bars).map { |cy| slots.(a, cy) }
+      sb = (0...bars).map { |cy| slots.(b, cy) }
+      per_t = ts.map { |t| m = a.morph(b, morph: t); (0...bars).map { |cy| slots.(m, cy) } }
+      label = "#{ea.name} -> #{eb.name}"
+      expect(per_t.first).to eq(sa), "#{label} at 0"
+      expect(per_t.last).to eq(sb), "#{label} at 1"
+      bars.times do |cy|
+        shared = sa[cy].keys & sb[cy].keys
+        per_t.each_with_index { |x, i| expect(shared - x[cy].keys).to eq([]), "#{label} bar #{cy + 1} at #{ts[i]} dropped a shared hit" }
+        (sa[cy].keys | sb[cy].keys).each do |k|
+          counts = per_t.map { |x| x[cy].fetch(k, 0) }
+          moves = counts.each_cons(2).count { |p, q| p != q }
+          most = (sa[cy].fetch(k, 0) - sb[cy].fetch(k, 0)).abs > 1 || [sa[cy].fetch(k, 0), sb[cy].fetch(k, 0)].max > 1 ? 2 : 1
+          expect(moves).to be <= most, "#{label} bar #{cy + 1}: #{k.inspect} went #{counts}"
+        end
+      end
+      lo, hi = [sa, sb].map { |s| s.sum { |h| h.values.sum } / bars.to_f }.minmax
+      per_t.each_with_index do |x, i|
+        n = x.sum { |h| h.values.sum } / bars.to_f
+        expect(n).to be >= lo * 0.85, "#{label} at #{ts[i]}: #{n} hits per bar (sides #{lo}..#{hi})"
+        expect(n).to be <= hi * (ts[i] == 0.5 ? 1.35 : 1.15), "#{label} at #{ts[i]}: #{n} hits per bar (sides #{lo}..#{hi})"
+      end
+    end
+  end
+
   it 'swings its odd steps with the swing knob' do
     rock = MB::Sound::L.gen.beat.rock
     straight = rock.call(seed: 3, energy: 1.0, swing: 0.5).events_for(0).map(&:start)
@@ -180,7 +220,9 @@ RSpec.describe MB::Sound::Library::Generators, 'drum beats', :aggregate_failures
       s2 = MB::Sound::Session.new(realtime: false)
       begin
         MB::Sound::Session.with_context(session: s2) { io.load(text) }
-        expect(io.dump(s2.arrangement, name: 'g')).to eq(text)
+        # (without the saved: stamps: two saves a second apart differ there;
+        # fixes-16, spec_hygiene_spec)
+        expect(io.dump(s2.arrangement, name: 'g').sub(/saved: "[^"]*"/, '')).to eq(text.sub(/saved: "[^"]*"/, ''))
       ensure
         s2.close
       end

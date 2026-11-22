@@ -1577,7 +1577,14 @@ module MB
           # (or the time of a scheduled block or the frame of a queued
           # change it kept time for)
           ended = [session.sound_end_frame, session.schedule_ran_frame || 0, session.change_landed_frame].max
-          frames += render_end(session, hold, mix, ended, frames_left.call, buffer_size)
+          # (the tail stops at the end bar's frame as if the timeline had
+          # kept moving through the tempo's cells, not as estimated at the
+          # tempo where the render stopped: fixes-16)
+          left = max_frames - frames + skip
+          if (end_pos = end_time&.call)
+            left = MB::M.min(left, session.frames_to_position(end_pos))
+          end
+          frames += render_end(session, hold, mix, ended, left, buffer_size)
         elsif tail && (bars || seconds || to) && !interrupted
           # The song reached its end; stop anything still playing (and the
           # flow: no section begins in the tail, whose timeline doesn't move)

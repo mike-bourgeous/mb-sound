@@ -126,6 +126,7 @@ RSpec.describe 'Loading SoundFont kits', :aggregate_failures do
         MB::Sound.knob(:tr, 2, range: -12..12)
         MB::Sound.swap(:drums, MB::Sound.grid(16, kick: 'x...x...x...x...').to_clip.loop.transpose(MB::Sound.knob(:tr)))
       },
+      'a morphed generator (both sides\' keys)' => -> { MB::Sound.swap(:drums, MB::Sound::L.gen.beat.rock.morph(:funk, morph: 0.5)) },
       'a generator without values: (the whole kit)' => -> { MB::Sound.swap(:drums, MB::Sound.generate(1.bar) { |_c, _d| [[0r, 1/16r, 36, 1.0], [1/4r, 1/16r, 38, 1.0]] }.loop) },
       'a beats clip with a role the kit plays through a fallback' => -> { MB::Sound.swap(:drums, MB::Sound.beats(16, seed: 3) { half_open_hat [1, 0] * 8; kick [1, 0, 0, 0] * 4 }) },
       'wire (the monitor builds the whole kit)' => -> { MB::Sound.wire(:drums, MB::Sound.grid(16, snare: '....x.......x...').to_clip.loop.stream) },

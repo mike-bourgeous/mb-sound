@@ -230,6 +230,27 @@ RSpec.describe('set documents', :aggregate_failures) do
     expect(s.knobs[:cut].value).to eq(2400.0)
   end
 
+  # fixes-16: a knob following another holds the float32 value its buffer
+  # read, which lands just past a range end without an exact float32
+  # ((-0.3..0.3).at(0.30000001192092896)); the saved line failed to load.
+  # Declarations print values limited to their range.
+  it 'saves a knob following another at its range ends so that it loads' do
+    [[-0.3, -0.3..0.3], [0.3, -0.3..0.3], [0.1, 0.0..0.1]].each do |at, range|
+      s = session
+      within(s) {
+        MB::Sound.knob(:src, at, range: range)
+        MB::Sound.knob(:dst, 0, range: range)
+        MB::Sound.turn(:dst, follow: :src)
+      }
+      4.times { s.process_buffer }
+      text = io.dump(s.arrangement, name: 'k')
+      expect(text).to include("knob :dst, (#{range}).at(#{at})")
+      loaded = session
+      expect { io.load(text, session: loaded) }.not_to raise_error
+      expect(loaded.knobs[:dst].value).to eq(at)
+    end
+  end
+
   # fix-knob-reload (batch 42's soak seed 789008): scheduled blocks run a
   # lookahead early, and a set document loaded in one set its knob values
   # (and ran its commands) then, landing on the first frame of the buffer
