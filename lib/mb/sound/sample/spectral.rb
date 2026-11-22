@@ -22,8 +22,10 @@ module MB
 
         TWO_PI = 2 * Math::PI
 
-        # How much a bin's magnitude must grow from one frame to the next
-        # near an onset for the phase vocoder to reset its phase (2: 6 dB).
+        # How much a peak's region (Spectral.regions) must grow, in
+        # magnitude, from the frame before an attack for the phase
+        # vocoder to reset its phases to the input's (2: 6 dB;
+        # Spectral.rising_regions).
         RESET_RISE = 2.0
 
         module_function
@@ -151,10 +153,14 @@ module MB
         # much output before the wrap.  With +lock+ :shape (#shape_lock;
         # the default, #loop_lock, unless +randomize+ is 1 or +closure+
         # :shift; :peaks for identity locking alone) the frames close
-        # over SHAPE_CLOSING windows before the wrap (or
-        # +closure_length+), unlocked there; report[:shift] is the
-        # pitch change (cents) and report[:residual] what it left.
-        def looped(channels, ratio, passes: 1, window: WINDOW, overlap: OVERLAP, onsets: nil, randomize: 0, seed: 0, link: true, shape: :hann, report: nil, span: 1.0, noise: 0, closure: :spread, closure_length: nil, lock: nil)
+        # over a span before the wrap (+closure_length+ samples, or
+        # :auto: SHAPE_CLOSING_ATTACK seconds at +sample_rate+ ending
+        # before the frames of an attack at the loop point, else
+        # SHAPE_CLOSING windows; at most a quarter of the loop), unlocked
+        # there; report[:closing] is the span [from, to] (output
+        # samples), report[:shift] the pitch change (cents) and
+        # report[:residual] what it left.
+        def looped(channels, ratio, passes: 1, window: WINDOW, overlap: OVERLAP, onsets: nil, randomize: 0, seed: 0, link: true, shape: :hann, report: nil, span: 1.0, noise: 0, closure: :spread, closure_length: nil, lock: nil, sample_rate: 48000)
           raise ArgumentError, "Stretch ratios are positive (got #{ratio})" unless ratio > 0
           passes = Integer(passes)
           raise ArgumentError, "passes: is 1 or more (got #{passes})" unless passes >= 1
@@ -193,10 +199,34 @@ module MB
           # where they run free (their phases are the input's, moved in
           # time, until then).
           free_span = lock == :shape
-          closure_length = MB::M.min(out_len / 4, SHAPE_CLOSING * n) if free_span && closure_length.nil?
-          from = closure_length.nil? ? 0 : out_len - MB::M.clamp(Integer(closure_length.round), 1, out_len)
+          closure_length = nil if closure_length == :auto
+          to = out_len
+          if free_span
+            # (which frames hold an attack: an onset at the loop point
+            # makes the frames before the wrap attack frames, which
+            # rebuild it from the input; shape-locked frames close before
+            # them, since a closing phase step there smeared the attack)
+            attack_until = nil
+            ri = 0
+            flags = centers.map { |_, center|
+              while ri < resets.length && center + n / 2 > resets[ri]
+                attack_until = resets[ri] + n / 2
+                ri += 1
+              end
+              !attack_until.nil? && center < attack_until
+            }
+            j = centers.length - 2
+            j -= 1 while j > 0 && flags[j]
+            attack_at_wrap = j < centers.length - 2
+            to = MB::M.max(MB::M.max(1, centers[j + 1][0]), out_len * 3 / 4) if attack_at_wrap
+            # (closure_length: :auto: a short span where the loop point
+            # is an attack, the long one where a tone is held through it)
+            closure_length ||= MB::M.min(out_len / 4, attack_at_wrap ? (SHAPE_CLOSING_ATTACK * sample_rate).round : SHAPE_CLOSING * n)
+          end
+          from = closure_length.nil? ? 0 : MB::M.max(0, to - MB::M.clamp(Integer(closure_length.round), 1, to))
+          report[:closing] = [from, to] if report
           shares = centers.each_with_index.map { |(pos, _), m|
-            m.zero? ? 0.0 : MB::M.max(0, pos - MB::M.max(centers[m - 1][0], from)).to_f / (out_len - from)
+            m.zero? ? 0.0 : MB::M.max(0, MB::M.min(pos, to) - MB::M.max(centers[m - 1][0], from)).to_f / (to - from)
           }
 
           run = ->(extra, sums, scale = nil, track = false) {
@@ -213,7 +243,7 @@ module MB
               hop = m.zero? ? hs : pos - centers[m - 1][0]
               closing = m == centers.length - 1
               part = extra && shares[m] > 0 ? extra * shares[m] : nil
-              ys = voc.frame(m, center, attack: attack, hop: hop, extra: part, synth: !sums.nil? && !closing, scale: scale, track: track, free: free_span && shares[m] > 0)
+              ys = voc.frame(m, center, attack: attack, hop: hop, extra: part, synth: !sums.nil? && !closing, scale: scale, track: track, free: free_span && pos > from)
               sums.add_wrapped(pos, ys, voc, attack) if sums && !closing
               last = voc.rotation if closing
             end
@@ -394,6 +424,7 @@ module MB
             @mag = nil
             @center = nil
             @advance = nil
+            @before = nil
           end
 
           # The last frame's phase rotation (output phase minus input
@@ -418,11 +449,17 @@ module MB
           # The next frame, centered on input sample +center+ and +hop+
           # output samples after the last: each channel's windowed output
           # (to overlap-add; nil without +synth+, when only the phases
-          # are wanted).  +attack+ says the frame holds an onset: bins
-          # whose level jumps (the attack) take their input phases, so
-          # the attack is rebuilt as it was; steady bins (a bass note
+          # are wanted).  +attack+ says the frame holds an onset: the
+          # peaks' regions that hold RESET_RISE times the level they had
+          # in the frame before the attack (the sounds it starts;
+          # Spectral.rising_regions) take their input phases, so the
+          # attack is rebuilt as it was; steady regions (a bass note
           # ringing through) keep theirs, so nothing cancels; and the
-          # frame is not randomized.  +extra+ (radians per bin) is added
+          # frame is not randomized.  (Whole regions, measured against
+          # the frame before the attack: resets bin by bin from one frame
+          # to the next split a new note's partial between bins reset and
+          # bins locked to an old peak, and frame by frame it flipped
+          # back, a dip of up to 15 dB at a note change, stretch-attacks-1.)  +extra+ (radians per bin) is added
           # to the phase advance before locking (Spectral.looped's
           # closing).  +index+ numbers the frame for the random phases.
           def frame(index, center, attack: false, hop: @hop, extra: nil, synth: true, scale: nil, track: false, free: false)
@@ -460,14 +497,17 @@ module MB
               winst_h += extra if extra
               advanced = @theta + winst_h
               advanced = Spectral.shape_lock(advanced, phi, mag, omega_inst, @window / 4) if @shape_lock && !free
-              @theta = Spectral.lock(advanced, phi, mag)
               if attack
-                rising = mag.gt(@mag * RESET_RISE)
-                if rising.count_true > 0
-                  @theta[rising] = phi[rising]
+                @before ||= @mag
+                rising = Spectral.rising_regions(mag, @before)
+                if rising && rising.count_true > 0
+                  advanced[rising] = phi[rising]
                   @advance[rising] = 0 if track
                 end
+              else
+                @before = nil
               end
+              @theta = Spectral.lock(advanced, phi, mag)
             end
             @phi = phi
             @mag = mag
@@ -741,6 +781,32 @@ module MB
           peaks[marker.cumsum]
         end
 
+        # The bins of +mag+ whose peak's region (#regions) holds
+        # RESET_RISE times the level (in magnitude; RESET_RISE squared in
+        # power) it held in +before+, the frame before an attack: the
+        # sounds the attack starts, which the vocoder resets to their
+        # input phases whole (a Numo::Bit, or nil without peaks).
+        def rising_regions(mag, before)
+          owner = regions(mag)
+          return nil if owner.nil? || before.nil?
+
+          nb = mag.length
+          now = Numo::DFloat.zeros(nb + 1)
+          now[1..] = (mag * mag).cumsum
+          pre = Numo::DFloat.zeros(nb + 1)
+          pre[1..] = (before * before).cumsum
+          cut = owner[1..].ne(owner[0...-1]).where + 1
+          starts = Numo::Int64[0].concatenate(cut)
+          ends = cut.concatenate(Numo::Int64[nb])
+          rose = (now[ends] - now[starts]).gt((pre[ends] - pre[starts]) * RESET_RISE**2)
+          return nil if rose.count_true == 0
+
+          # (each bin takes its region's verdict)
+          region = Numo::Int64.zeros(nb)
+          region[cut] = 1
+          rose[region.cumsum]
+        end
+
         # Phase locking modes (Vocoder, lock:): :peaks, identity locking
         # around each peak; :shape, peaks also kept in their input's
         # relative phases (Spectral.shape_lock).
@@ -882,9 +948,20 @@ module MB
         SHAPE_AROUND = 4
 
         # Shape-locked loops (lock: :shape, closure: :spread) close
-        # their phases over this many windows before the wrap (at most a
-        # quarter of the loop), running free there.
+        # their phases before the wrap (at most a quarter of the loop),
+        # running free there, over SHAPE_CLOSING windows (0.51 s at
+        # 4096) where a tone is held through the loop point, and over
+        # SHAPE_CLOSING_ATTACK seconds, ending before the attack's
+        # frames, where the loop point is an attack (closure_length:
+        # :auto, the default).  The maintainer, stretch-attacks-1
+        # (2026-11-22): 50 ms picked on a saw bass and a two-note loop
+        # (0.51 s changed the waveform for 380 ms before each wrap), and
+        # "Per material", since on a held pad 50 ms changes the tone at
+        # the wrap (spectral flux 2.6 times the median inside the pass at
+        # 1.25x, as the pre-roll he heard as a discontinuity in
+        # stretch-fixes-1).
         SHAPE_CLOSING = 6
+        SHAPE_CLOSING_ATTACK = 0.05
 
         # Peaks below this share of a frame's top magnitude (-40 dB), and
         # beyond this many of the strongest, set no shape (shape_lock).

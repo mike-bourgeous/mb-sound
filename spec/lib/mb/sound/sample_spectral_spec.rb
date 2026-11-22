@@ -68,6 +68,30 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
     end
   end
 
+  it "keeps a new note's attack where it takes over the old note's bins: no dip at a note change" do
+    # Two bass notes a fourth apart (55 and 73.4 Hz: under two bins apart
+    # in the 4096-sample window), the second starting on a step at 1 s.
+    # Resets bin by bin split the new note between bins taking their
+    # input phases and bins locked to the old note's peak, flipping from
+    # frame to frame: up to 15 dB down for its first 10 ms at some
+    # ratios, looped or not, in every lock (stretch-attacks-1)
+    n = 96_000
+    tt = Numo::DFloat.new(n).seq / 48000
+    env = 0.6 + 0.4 * Numo::NMath.exp(-(tt % 1.0) * 30)
+    f = Numo::DFloat.new(n).fill(55.0)
+    f[48000..] = 73.42
+    x = env * Numo::NMath.sin(tt * f * (2 * Math::PI)) * 0.5
+    s = MB::Sound::Sample[Numo::SFloat.cast(x)].looped
+    first10 = ->(d, at) { rms(d[at...(at + 480)]) }
+    src = first10.(x, 48000)
+    [0.9, 1.285].each do |r|
+      [{}, { lock: :peaks }, { wrap: false }].each do |kw|
+        d = Numo::DFloat.cast(s.stretch(r, mode: :spectral, **kw).data(0))
+        expect(20 * Math.log10(first10.(d, (48000 * r).round) / src)).to be_within(1.5).of(0), "ratio #{r} #{kw}"
+      end
+    end
+  end
+
   it 'Paulstretches with seeded random phases at the input level' do
     a = pad.stretch(8, mode: :paul)
     b = pad.stretch(8, mode: :paulstretch)
@@ -290,6 +314,37 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
       expect(plain.looped.stretch(2, mode: :paul).data(0)).not_to eq(plain.stretch(2, mode: :paul, wrap: false).data(0))
     end
 
+    it 'reads the loop point as a circle for its attack: a cut from a loud end into a quieter pluck' do
+      # A loud bass to the end, cut by a click whose most lies in the
+      # last samples (where no frame of one pass reaches), into a quieter
+      # pluck: a bass loop's own first attack.  The loop point needed a
+      # rise from the end's frames to the start's alone, found none, and
+      # the looped stretch smeared the pluck (stretch-attacks-1: 2 dB
+      # lower over its first 10 ms here, 3 dB on a real bass loop)
+      n = 48_040
+      tt = Numo::DFloat.new(n).seq / 48000
+      x = Numo::NMath.sin(tt * (2 * Math::PI * 55)) * (tt / 0.2).clip(0, 1) * 0.5
+      x += Numo::NMath.sin(tt * (2 * Math::PI * 220)) * Numo::NMath.exp(-tt / 0.005) * 0.2
+      k = Numo::DFloat.new(48).seq
+      click = Numo::NMath.sin(k * (2 * Math::PI * 3000 / 48000.0)) * (0.5 - 0.5 * Numo::NMath.cos(k * (2 * Math::PI / 48))) * 0.4
+      x[-36..] += click[0...36]
+      x[0...12] += click[36..]
+      s = MB::Sound::Sample[Numo::SFloat.cast(x)].looped
+      expect(s.onsets(wrap: true)).to eq([0])
+      [1.285, 0.8].each do |r|
+        d = Numo::DFloat.cast(s.stretch(r, mode: :spectral).data(0))
+        expect(20 * Math.log10(rms(d[0...480]) / rms(x[0...480]))).to be_within(0.5).of(0), "ratio #{r}"
+        expect((d[0...240] - x[0...240]).abs.max).to be < 0.02, "ratio #{r}"
+      end
+      # (an attack placed within a window of the loop point is the loop
+      # point's; one before it is not found twice)
+      y = x.dup
+      y[-36..] -= click[0...36]
+      y[0...12] -= click[36..]
+      y[200...248] += click
+      expect(MB::Sound::Sample[Numo::SFloat.cast(y)].looped.onsets(wrap: true)).to eq([0])
+    end
+
     it 'stretches for loop players as a loop' do
       player = MB::Sound::GraphNode::LoopPlayer
       expect(player.loop_stretch({ mode: :spectral })).to eq({ mode: :spectral, wrap: true })
@@ -472,6 +527,39 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
       expect(a[0...2048]).not_to eq(b[0...2048])
       expect(a[(a.length - 6000)..]).not_to eq(b[(b.length - 6000)..])
       expect(out[:closure][1]).to be < 0.01
+    end
+
+    it 'closes over 50 ms before an attack at the loop point and over 0.51 s through a held tone (closure_length: :auto)' do
+      # (the maintainer, stretch-attacks-1: "Per material"; 50 ms picked
+      # on loops with an attack there, while on a held tone 50 ms changed
+      # the tone at the wrap)
+      held = {}
+      described_class.looped([saw], 1.285, report: held)
+      n = (saw.length * 1.285).round
+      expect(held[:closing]).to eq([n - [n / 4, 6 * 4096].min, n])
+
+      tt = Numo::DFloat.new(96000).seq / 48000
+      f = Numo::DFloat.new(96000).fill(55.0)
+      f[48000..] = 73.42
+      plucks = MB::Sound::Sample[Numo::SFloat.cast((0.6 + 0.4 * Numo::NMath.exp(-(tt % 1.0) * 30)) * Numo::NMath.sin(tt * f * (2 * Math::PI)) * 0.5)].looped
+      expect(plucks.onsets(wrap: true).first).to eq(0)
+      hit = {}
+      x = plucks.to_a.map { |c| Numo::DFloat.cast(c) }
+      a = described_class.looped(x, 1.285, onsets: plucks.onsets(wrap: true), report: hit)[0]
+      from, to = hit[:closing]
+      expect(to - from).to eq(2400)
+      # (it ends before the frames holding the attack: within half a
+      # window before the loop point, on a frame)
+      expect(to).to be < a.length - 1024
+      expect(to).to be > a.length - 2048 - 1024
+      expect(hit[:closure][1]).to be < 0.01
+
+      # Sample#stretch: :auto is the default and does not print; a length forces the span
+      expect(plucks.stretch(1.285, mode: :spectral, closure_length: :auto).data(0)).to eq(plucks.stretch(1.285, mode: :spectral).data(0))
+      expect(plucks.stretch(1.285, mode: :spectral, closure_length: :auto).lineage.last).to eq({ mode: :spectral })
+      forced = {}
+      described_class.looped([saw], 1.285, closure_length: 2400, report: forced)
+      expect(forced[:closing]).to eq([n - 2400, n])
     end
 
     it 'takes the options through Sample#stretch, printing them, and checks them' do
