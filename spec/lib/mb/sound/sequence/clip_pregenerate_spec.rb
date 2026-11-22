@@ -48,8 +48,8 @@ RSpec.describe(MB::Sound::Sequence::Clip, '#pregenerate', :aggregate_failures) d
     counts = Hash.new(0)
     allow(MB::Sound::Sequence::Clip::EdgeTable).to receive(:new).and_wrap_original { |m, **kw| counts[:tables] += 1 if counting; m.call(**kw) }
     allow(MB::Sound::Sequence::Clip::UnitEvents).to receive(:new).and_wrap_original { |m, **kw| counts[:units] += 1 if counting; m.call(**kw) }
-    gens = []
-    allow(MB::Sound::Generative::Generator).to receive(:new).and_wrap_original { |m, *a, **kw, &b| m.call(*a, **kw, &b).tap { |g| gens << g } }
+    # (cycles computed: any generator's, a morph's included)
+    allow_any_instance_of(MB::Sound::Generative::Generator).to receive(:compute).and_wrap_original { |m, *a| counts[:cycles] += 1 if counting; m.call(*a) }
     run = ->(code) { MB::Sound::Session.with_context(session: s) { code.(self) } }
     run.(->(x) {
       MB::Sound.knob :e, 0.6, range: 0.0..1.0
@@ -63,12 +63,10 @@ RSpec.describe(MB::Sound::Sequence::Clip, '#pregenerate', :aggregate_failures) d
       run.(command) if frame <= BAR * 3 / 2 && frame + n > BAR * 3 / 2
       run.(between) if between && frame <= BAR * 7 / 4 && frame + n > BAR * 7 / 4
       counting = frame <= land && frame + n > land
-      cycles = gens.sum { |g| g.stats[:cycles] }
       objects = GC.stat(:total_allocated_objects)
       buf = s.process_buffer[0]
       @landing_objects = GC.stat(:total_allocated_objects) - objects if counting
       out << buf.dup
-      counts[:cycles] += gens.sum { |g| g.stats[:cycles] } - cycles if counting
     end
     [SpecBuffers.join(out), counts.reject { |_, v| v == 0 }]
   ensure
@@ -105,14 +103,27 @@ RSpec.describe(MB::Sound::Sequence::Clip, '#pregenerate', :aggregate_failures) d
     end
   end
 
-  it 'lands each library drum beat, steered by its track knobs, computing nothing', render_budget: { seconds: 120, reason: 'seven beats, each rendered twice for 4 bars' } do
-    %i[rock pop halftime funk house dnb techno].each do |name|
-      bg = ->(_) { MB::Sound.bg :d, MB::Sound::L.gen.beat.public_send(name) }
+  it 'lands each library drum beat and a morph, steered by their track knobs, computing nothing', render_budget: { seconds: 150, reason: 'eight beats, each rendered twice for 4 bars' } do
+    beats = %i[rock pop halftime funk house dnb techno].to_h { |name| [name, -> { MB::Sound::L.gen.beat.public_send(name) }] }
+    beats[:morph] = -> { MB::Sound::L.gen.beat.dnb.morph(:house, morph: 0.3) }
+    beats.each do |name, make|
+      bg = ->(_) { MB::Sound.bg :d, make.call }
       audio, counts = render(800, bg, bars: 4)
       before, = render_unprepared(800, bg, bars: 4)
       expect(counts).to eq({}), name.to_s
       expect(audio.to_binary.hash).to eq(before.to_binary.hash), name.to_s
     end
+  end
+
+  it 'lands a morph whose morph knob turns between the command and the landing as the path before does' do
+    # (the morph's Steer reads its morph and both sides' params: a turn of
+    # :"d/morph" after the command remakes the beats decided after it)
+    bg = ->(_) { MB::Sound.bg :d, MB::Sound::L.gen.beat.dnb.morph(:house, morph: 0.3) }
+    turn = ->(_) { MB::Sound.turn :"d/morph", 0.9 }
+    audio, counts = render(800, bg, between: turn, bars: 4)
+    before, old = render_unprepared(800, bg, between: turn, bars: 4)
+    expect(audio.to_binary.hash).to eq(before.to_binary.hash)
+    expect(counts[:units]).to be <= old[:units]
   end
 
   it 'lands a swap of a plain generator computing nothing' do
