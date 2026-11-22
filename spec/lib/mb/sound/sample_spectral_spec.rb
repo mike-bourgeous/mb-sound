@@ -417,6 +417,41 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
       expect(b).to be > a + 0.05
     end
 
+    it 'finds the shape lock\'s time shift by FFT: the exhaustive search\'s shift, or one that fits as well' do
+      i = Numo::DFloat.new(48000).seq / 48000
+      chord = [110.0, 138.6, 164.8].sum { |f| (1..30).sum { |k| Numo::NMath.sin(i * (2 * Math::PI * f * k)) / k } } * 0.15
+      frames = []
+      allow(described_class).to receive(:shape_shift).and_wrap_original { |m, *args|
+        frames << args
+        m.call(*args)
+      }
+      described_class.looped([saw], 1.285)
+      described_class.vocoder([chord], 0.8, lock: :shape)
+      expect(frames.length).to be > 40
+      RSpec::Mocks.space.proxy_for(described_class).reset
+
+      same = frames.count { |w, dev, om, reach|
+        fast = described_class.shape_shift(w, dev, om, reach)
+        slow = described_class.shape_shift_exhaustive(w, dev, om, reach)
+        score = ->(t) { described_class.shape_fits(w, dev, om, Numo::DFloat[t.round])[0] - t.round.abs * 0.02 * w.sum / reach }
+        expect(fast.abs).to be <= reach + 1
+        expect(score.(fast)).to be >= score.(slow) - 1e-3 * w.sum
+        (fast - slow).abs <= 1
+      }
+      expect(same).to be >= frames.length * 0.95
+
+      # A tone moved by a known shift: found within a sample
+      om = Numo::DFloat.new(20).seq(1) * (2 * Math::PI * 220 / 48000)
+      w = 1.0 / (Numo::DFloat.new(20).seq + 1)
+      [-700.25, -3.5, 0.0, 41.0, 333.75].each do |tau|
+        dev = described_class.princarg(om * tau)
+        expect(described_class.shape_shift(w, dev, om, 1024)).to be_within(1).of(described_class.shape_shift_exhaustive(w, dev, om, 1024))
+        # (the shortest shift of those a whole period apart)
+        period = 48000 / 220.0
+        expect(described_class.shape_shift(w, dev, om, 1024)).to be_within(0.6).of(tau - (tau / period).round * period)
+      end
+    end
+
     it 'closes a harmonic tone with a small pitch change instead with closure: :shift' do
       report = {}
       y = described_class.looped([saw], 1.285, closure: :shift, report: report)[0]

@@ -766,29 +766,7 @@ module MB
           return advanced if peaks.length < 2
 
           strong = peaks[mag[peaks].sort_index.reverse[0...MB::M.min(peaks.length, SHAPE_PEAKS)]]
-          w = mag[strong]
-          dev0 = princarg(advanced[strong] - phi[strong])
-          om = omega[strong]
-          fits = ->(taus) { Numo::NMath.cos(dev0.reshape(1, dev0.length) - taus.reshape(taus.length, 1) * om.reshape(1, om.length)).dot(w) }
-          # (a coarse grid as fine as the highest peak needs, then every
-          # sample around its best; of nearly equal shifts, a whole
-          # period apart, the shortest)
-          stride = MB::M.clamp((0.25 / (om.abs.max.to_f + 1e-30)).floor, 1, reach)
-          coarse = Numo::DFloat.new(2 * (reach / stride) + 1).seq(-(reach / stride)) * stride
-          best = coarse[(fits.call(coarse) - coarse.abs * (0.02 * w.sum / reach)).max_index].to_f
-          taus = Numo::DFloat.new(2 * stride + 1).seq(best - stride)
-          raw = fits.call(taus)
-          i = (raw - taus.abs * (0.02 * w.sum / reach)).max_index
-          tau = taus[i].to_f
-          if i > 0 && i < taus.length - 1
-            # (between the grid's samples: the top of a parabola through
-            # the best and its neighbours, so shifts are not rounded)
-            a = raw[i - 1]
-            b = raw[i]
-            cc = raw[i + 1]
-            den = a - 2 * b + cc
-            tau += MB::M.clamp(0.5 * (a - cc) / den, -0.5, 0.5) if den < 0
-          end
+          tau = shape_shift(mag[strong], princarg(advanced[strong] - phi[strong]), omega[strong], reach)
           dev = princarg(advanced[peaks] - phi[peaks] - omega[peaks] * tau)
           fit = dev.abs.lt(Math::PI / 2)
           return advanced unless fit.count_true > 0
@@ -798,6 +776,110 @@ module MB
           out[p] = advanced[p] - dev[fit]
           out
         end
+
+        # The time shift tau (|tau| <= +reach+ samples, between samples
+        # by a parabola) that fits the peaks best: the largest
+        # sum(w * cos(dev - tau * om)) less a small cost per sample of
+        # shift (of nearly equal shifts, a whole period apart, the
+        # shortest).  +w+ are the peaks' magnitudes, +dev+ their advanced
+        # phases less the input's, +om+ their frequencies (radians per
+        # sample).  The scores of every shift come from one FFT of the
+        # peaks placed on a grid of SHAPE_GRID frequencies (a
+        # cross-correlation in the frequency domain), the SHAPE_CANDIDATES
+        # best local maxima are scored exactly around them, the best
+        # climbed to on the exact score.  Against #shape_shift_exhaustive
+        # (12298 frames of seven loops at four ratios, stretch-live-1):
+        # the same shift in 98.6% of frames; the others are ties a whole
+        # period apart (scores within 0.1%, the exhaustive search's coarse
+        # grid stepping two samples for low sounds; this one's pick scores
+        # higher in most) and one frame 2% below; a third of the time.
+        def shape_shift(w, dev, om, reach)
+          m = SHAPE_GRID
+          m *= 2 while m < 16 * reach
+          pen = 0.02 * w.sum / reach
+          bins = Numo::Int64.cast((om * (m / TWO_PI)).round) % m
+          z = Numo::DComplex.cast(w * Numo::NMath.cos(dev)) + Numo::DComplex.cast(w * Numo::NMath.sin(dev)) * Complex::I
+          c = Numo::DComplex.zeros(m)
+          sorted = bins.sort
+          if sorted.length < 2 || (sorted[1..] - sorted[0...-1]).min > 0
+            c[bins] = z
+          else
+            # (peaks whose frequencies round to one grid bin add up)
+            bins.to_a.each_with_index { |b, j| c[b] += z[j] }
+          end
+          s = Numo::Pocketfft.fft(c).real # (s[t] = sum(c[b] e^(-2 pi i b t / m)): the score of a shift by t)
+          sc = Numo::DFloat.zeros(2 * reach + 1)
+          sc[reach..] = s[0..reach]
+          sc[0...reach] = s[(m - reach)..]
+          sc -= Numo::DFloat.new(2 * reach + 1).seq(-reach).abs * pen
+
+          # (local maxima, the ends of the reach too)
+          up = Numo::Bit.zeros(2 * reach + 1)
+          up[1...-1] = (sc[1...-1] >= sc[0...-2]) & (sc[1...-1] > sc[2..])
+          up[0] = 1 if sc[0] > sc[1]
+          up[-1] = 1 if sc[-1] >= sc[-2]
+          loc = up.where
+          loc = loc[sc[loc].sort_index.reverse[0...SHAPE_CANDIDATES]] if loc.length > SHAPE_CANDIDATES
+          loc = Numo::Int64[sc.max_index] if loc.empty?
+          taus = Numo::DFloat.cast((Numo::Int64.cast(loc).reshape(loc.length, 1) + Numo::Int64.new(1, 2 * SHAPE_AROUND + 1).seq(-SHAPE_AROUND) - reach).flatten).clip(-reach, reach)
+          best = taus[(shape_fits(w, dev, om, taus) - taus.abs * pen).max_index].to_f
+          # (the grid's rounded frequencies can move a broad maximum a few
+          # samples: climb on the exact score while the best is at the
+          # edge of the five shifts around it, within the reach)
+          8.times do
+            break if best.abs >= reach
+            t = Numo::DFloat.new(5).seq(best - 2).clip(-reach, reach)
+            i = (shape_fits(w, dev, om, t) - t.abs * pen).max_index
+            break if t[i] == best
+            best = t[i].to_f
+          end
+          shape_refine(w, dev, om, reach, best, 1)
+        end
+
+        # #shape_shift by scoring the shifts one by one (the reference
+        # its spec compares with; Spectral.shape_lock's search until
+        # stretch-live-1): a coarse grid as fine as the highest peak
+        # needs, then every sample around its best.
+        def shape_shift_exhaustive(w, dev, om, reach)
+          stride = MB::M.clamp((0.25 / (om.abs.max.to_f + 1e-30)).floor, 1, reach)
+          coarse = Numo::DFloat.new(2 * (reach / stride) + 1).seq(-(reach / stride)) * stride
+          best = coarse[(shape_fits(w, dev, om, coarse) - coarse.abs * (0.02 * w.sum / reach)).max_index].to_f
+          shape_refine(w, dev, om, reach, best, stride)
+        end
+
+        # The shape lock's fit of each shift of +taus+ (see #shape_shift).
+        def shape_fits(w, dev, om, taus)
+          Numo::NMath.cos(dev.reshape(1, dev.length) - taus.reshape(taus.length, 1) * om.reshape(1, om.length)).dot(w)
+        end
+
+        # The best shift of every sample within +half+ of +best+, then
+        # the top of a parabola through it and its neighbours (so shifts
+        # are not rounded to samples).
+        def shape_refine(w, dev, om, reach, best, half)
+          taus = Numo::DFloat.new(2 * half + 1).seq(best - half)
+          raw = shape_fits(w, dev, om, taus)
+          i = (raw - taus.abs * (0.02 * w.sum / reach)).max_index
+          tau = taus[i].to_f
+          if i > 0 && i < taus.length - 1
+            a = raw[i - 1]
+            b = raw[i]
+            cc = raw[i + 1]
+            den = a - 2 * b + cc
+            tau += MB::M.clamp(0.5 * (a - cc) / den, -0.5, 0.5) if den < 0
+          end
+          tau
+        end
+
+        # #shape_shift's frequency grid (the smallest; doubled until it is
+        # 16 times the reach, so a peak's phase at a shift of the reach is
+        # off by at most a 32nd of a cycle before the exact scores), how
+        # many of its best local maxima are scored exactly, and how many
+        # shifts on each side of each (stretch-live-1: with 2 a side,
+        # 8192 and 8 missed the exhaustive search's pick in 14 of 2068
+        # frames of four loops; with 4, 16384 and 8 match it but for ties).
+        SHAPE_GRID = 16384
+        SHAPE_CANDIDATES = 8
+        SHAPE_AROUND = 4
 
         # Shape-locked loops (lock: :shape, closure: :spread) close
         # their phases over this many windows before the wrap (at most a
