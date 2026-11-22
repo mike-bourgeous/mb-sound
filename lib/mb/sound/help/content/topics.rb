@@ -458,7 +458,10 @@ module MB
         plus `half_open_hat`, `hat_swish`, `ride_shank`, `crash3`, chokes,
         and tom rims, each kit playing what it has for them (a 909's open
         hat for a half-open one; the acoustic kits' rack tom for GM's high
-        tom).
+        tom).  Tune one in semitones on its track with its knob (`track
+        :drums, kit(:jazz)`, then `turn :"drums/tune", -3`: every drum
+        lower, each key the same drum); the machines' voices have tune
+        knobs of their own, in Hz (`tr909(clip, kick: { tune: 50 })`).
       TEXT
       commands :tr808, :tr909, :kit, :drum_kit, :grid, :euclid
       note :drums

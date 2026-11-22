@@ -45,6 +45,18 @@ module MB
         # Sampler voices a SoundFont kit plays with.
         VOICES = 16
 
+        # The kits' one setting (ux-friction-4, the maintainer's take of
+        # 2026-11-21: `L.kit.jazz.tune(-3)` and `.transpose(-3)`, to pitch
+        # the kit down without changing which drum a key plays): every
+        # drum's pitch in semitones (fractions are cents), the sampler
+        # voices' +transpose:+.  A track playing the kit gets it as the
+        # knob :"drums/tune" (Arrangement::TrackKnobs; read while the kit
+        # builds, so a turn rebuilds the track).  The fallback drum
+        # machines keep their pitch (their voices have tune knobs of their
+        # own, in Hz).
+        TUNE = Param.declare(:tune, 0.0, range: -24.0..24.0, unit: 'semitones',
+                             description: 'Pitch of every drum in semitones (which drum each key plays stays)')
+
         class << self
           # Whether #notice prints (live mode only, once per kind and
           # process; spec_helper turns it off before each example).
@@ -84,14 +96,43 @@ module MB
 
         # The kit +kind+ playing +source+ (a clip, MIDI source): the
         # SoundFont kit's sampler, else the fallback machine, printing the
-        # notice once (see #notice).
-        def play(kind, source)
+        # notice once (see #notice).  +tune+ (semitones: a number, or a
+        # param or knob read now; see TUNE) pitches every drum of a
+        # SoundFont kit; the machines play at their own pitch, saying so
+        # once in the console (#tune_notice).
+        def play(kind, source, tune: 0)
+          tune = GraphNode.build_value(tune).to_f
           inst = instrument(kind)
           if inst.is_a?(Symbol)
             notice(kind)
+            tune_notice(kind, inst) unless tune.zero?
             return MB::Sound.public_send(inst, source)
           end
-          inst.sampler(source, voices: VOICES)
+          tune.zero? ? inst.sampler(source, voices: VOICES) : inst.sampler(source, voices: VOICES, transpose: tune)
+        end
+
+        # How to tune kit +kind+ by +tune+ semitones on a track, as words
+        # to add to a message ("; tuned: ..."), or '' for a zero tune.
+        def tune_hint(kind, tune)
+          t = (Float(tune) rescue 0.0)
+          return '' if t.zero?
+          v = RubyValue.text(t == t.round ? t.round : t)
+          "; tuned: track :drums, L.kit.#{kind}, then turn :\"drums/tune\", #{v} (the kit's tune knob), " \
+            "or in a patch track(:drums) { |c| L.kit.#{kind}.(c, tune: #{v}) }"
+        end
+
+        # The line saying the fallback +machine+ playing +kind+ keeps its
+        # pitch, printed once per kind and process in live mode (as
+        # #notice).  Returns the message printed, or nil.
+        def tune_notice(kind, machine)
+          return nil unless enabled && MB::Sound.live?
+          key = :"#{kind}/tune"
+          first = LOCK.synchronize { (@noticed ||= {}).key?(key) ? false : (@noticed[key] = true) }
+          return nil unless first
+          msg = "kit(#{kind.to_sym.inspect}): tune pitches SoundFont kits; the #{machine} playing instead keeps its pitch " \
+                "(its voices have tune knobs in Hz: #{machine}(clip, kick: { tune: 50 }))"
+          warn msg
+          msg
         end
 
         # The line saying +kind+ has no installed font: the package to
@@ -131,10 +172,16 @@ module MB
     Drums::InstalledKits::KINDS.each do |name, k|
       Library.index.register(Library::Entry.new(
         name: name, kind: :kit, family: :installed, tags: %i[soundfont], about: k[:about],
+        params: { tune: Drums::InstalledKits::TUNE },
         location: "lib/mb/sound/drums/installed_kits.rb:#{__LINE__}",
-        builder: ->(source = nil, **kw) {
-          raise ArgumentError, "kit(#{name.inspect}) plays a clip or MIDI source (track :drums, kit(#{name.inspect}))" if source.nil? || !kw.empty?
-          Drums::InstalledKits.play(name, source)
+        builder: ->(source = nil, tune: 0, **kw) {
+          if source.nil?
+            raise ArgumentError, "kit(#{name.inspect}) plays a clip or MIDI source (track :drums, kit(#{name.inspect}))#{Drums::InstalledKits.tune_hint(name, tune)}"
+          end
+          unless kw.empty?
+            raise ArgumentError, "kit(#{name.inspect}) takes tune: only (got #{kw.keys.map { |key| "#{key}:" }.join(', ')})#{Library.suggest(kw.keys.first, [:tune])}"
+          end
+          Drums::InstalledKits.play(name, source, tune: tune)
         }
       ))
     end
