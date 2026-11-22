@@ -26,6 +26,7 @@ RSpec.describe(MB::Sound::Session::Context, :aggregate_failures) do
     mb_sound_inspecting: 'GraphNode::Inspect: no nested one-line inspects',
     mb_sound_pry_command: 'the running Pry command, for the pager',
     mb_steer_origin: 'Generative::Steer.origin while a ClipSource reads (render path)',
+    mb_steer_pregen: 'Generative::Steer.pregenerating: the epoch and values of a pass making a clip\'s first reads ahead (Clip#pregenerate)',
     sound_io_log_depth: 'nesting depth of sound I/O logs',
     mb_sound_ui_repl: 'the UI REPL host on its thread',
     mb_sound_clamp_notes: 'the notes of knob turns limited to their ranges, while a screen runs a pane\'s turn line (UI::Tiles#run_turn_line)',
