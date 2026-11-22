@@ -224,7 +224,7 @@ Methods of every node (`node.lp4(800)`; `lib/mb/sound/graph_node/*_methods.rb`);
 - `:buses` Buses, sends, sidechains: bus buses feed routes sidechain sidechains
 - `:cue` CUE: audition in the phones, then launch: cue launch uncue cues cue_output cue_mix
 - `:racks` Racks: reusable graphs with typed ports: rack racks mrack irack arack lrack modrack
-- `:midi` MIDI: midi midi_file midi_stream synth per_voice close_midi mod_sum mod_scale .gate .trigger .velocity .amp_env .hz .cutoff ...
+- `:midi` MIDI: midi midi_file midi_stream synth per_voice close_midi mod_sum mod_scale sysex .gate .trigger .velocity .amp_env .hz ...
 - `:midi_files` MIDI files as clips and kits: midi_tracks midi_clip midi_kit midi_file
 - `:wire` Wiring streams into tracks: wire unwire wires
 - `:templates` Rhythm and feel templates: rhythm_template groove_template midi_clip .rhythm .groove

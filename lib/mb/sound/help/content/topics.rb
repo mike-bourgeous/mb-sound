@@ -1562,9 +1562,10 @@ module MB
         Stuck note on live input (a keyboard dropped a note-off)?  Press
         the key again and let go: live input restrikes held keys
         (`same_key: :restrike`; files and clips count overlaps,
-        `same_key: :count`).
+        `same_key: :count`).  `sysex.capture` saves patch dumps from
+        hardware to .syx files in the background (`sysex.load` reads them).
       TEXT
-      commands :midi, :midi_file, :midi_stream, :synth, :per_voice, :close_midi, :mod_sum, :mod_scale
+      commands :midi, :midi_file, :midi_stream, :synth, :per_voice, :close_midi, :mod_sum, :mod_scale, :sysex
       dsl :gate, :trigger, :velocity, :amp_env, :hz, :cutoff, :reso, :arp, :echo, :chord
       note :midi
       see :record, :midi_files, :wire

@@ -121,6 +121,7 @@ require_relative 'sound/sampler_methods'
 require_relative 'sound/tracker'
 require_relative 'sound/tracker_methods'
 require_relative 'sound/dropout_methods'
+require_relative 'sound/sysex_methods'
 require_relative 'sound/fit_patch'
 require_relative 'sound/hand_tune'
 require_relative 'sound/reference'
@@ -175,6 +176,7 @@ module MB
     extend SamplerMethods
     extend TrackerMethods
     extend DropoutMethods
+    extend SysExMethods
     extend HelpAutoload
 
     # Speed of sound for wavelength calculations, in meters per second.
