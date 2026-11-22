@@ -121,10 +121,15 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
 
       [0.2, 0.4, 0.4].each do |wait|
         grown = o.queue_limit
-        t = MB::U.clock_now
+        # (the wait counts from the output's own last change, the grow:
+        # timed from here instead, the expectations in between took longer
+        # than the wait under Valgrind, so the shrink came at the first
+        # write, 0.0007 s later, fixes-18)
+        grew_at = o.adapt_state[:last_change]
         write_until.() { o.queue_limit < grown }
         expect(o.queue_limit).to be < grown
-        expect(MB::U.clock_now - t).to be >= o.shrink_wait * 0.9
+        expect(o.adapt_state[:last_adapt]).to eq(:shrink)
+        expect(o.adapt_state[:last_change] - grew_at).to be >= o.shrink_wait
         drop_out(o, pause: 0.08) # right after the shrink
         expect(o.shrink_wait).to eq(wait)
         expect(notes.last).to match(/\AAudio dropout: raising the output queue to \d+ ms(?: \(#{wait} s without dropouts before lowering it again\))?\z/)
