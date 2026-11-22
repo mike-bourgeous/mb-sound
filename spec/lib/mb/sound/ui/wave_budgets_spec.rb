@@ -4,9 +4,21 @@ require_relative '../../../../support/allocation_budget'
 # :plot_wave kernel, Plot::Live redraws of previews whose title moves, and
 # the live preview pane's frame (UI::WaveView), so a slower kernel or a
 # display that starts allocating fails here instead of costing frames.
-# Times are thread CPU medians scaled by this machine's speed against a
-# fixed workload measured on the Linux desktop (7950X); objects are counted
-# exactly (ALLOC_REPORT=1 prints the top sites).
+# Times are thread CPU medians in the reference machine's milliseconds (the
+# Mac container, the performance reference): each timed call alternates
+# with a fixed calibration workload, and budgets scale by how much slower
+# that workload ran than on the idle reference, so a slower machine and
+# load that comes and goes (other spec processes sharing cores and caches)
+# scale the budget alike.  Objects are counted exactly (ALLOC_REPORT=1
+# prints the top sites; TIMING_REPORT=1 the times).
+#
+# fix-wave-budgets (2026-11-22): the calibration used to run once after
+# the timing, against a 0.9 ms "reference" the Mac ran in 0.26-0.35 ms, so
+# its slowdown was always 1 and the budgets were absolute: the title-only
+# redraw (0.13 ms idle on the Mac against a 0.15 ms budget) failed in most
+# loaded spec:quick runs (0.16-0.37 ms).  Measured interleaved on the Mac
+# at load 0-18, the redraw over the calibration stayed 0.46-0.61 idle and
+# at most 0.83 loaded, while each alone ran up to 3x slower.
 RSpec.describe('wave display budgets', :aggregate_failures) do
   let(:wv) { MB::Sound::UI::WaveView }
 
@@ -16,31 +28,53 @@ RSpec.describe('wave display budgets', :aggregate_failures) do
     wv.feed = nil
   end
 
-  # The fixed workload's thread CPU on the reference machine (ms).
-  REFERENCE_MS = 0.9
+  # The calibration workload's median thread CPU on the idle reference
+  # machine (ms; the Mac container, i9-9880H, no YJIT: 0.26-0.35, 2026-11-22).
+  WAVE_CALIBRATION_MS = 0.28
 
   def cpu = Process.clock_gettime(Process::CLOCK_THREAD_CPUTIME_ID)
 
-  # Median thread CPU (ms) of +n+ calls of the block.
-  def median_ms(n = 60)
-    3.times { yield }
-    t = Array.new(n) { c = cpu; yield; (cpu - c) * 1000 }.sort
-    t[n / 2]
+  # The fixed calibration workload: Numo and plain Ruby arithmetic.
+  def calibration_work
+    a = Numo::SFloat.new(20_000).seq
+    s = 0.0
+    2000.times { |i| s += (i * 0.5) % 3 }
+    (a * 2 + 1).sum + s
   end
 
-  # How much slower this machine is than the reference (at least 1).
-  def slowdown
-    work = -> { a = Numo::SFloat.new(20_000).seq; s = 0.0; 2000.times { |i| s += (i * 0.5) % 3 }; (a * 2 + 1).sum + s }
-    [median_ms(15, &work) / REFERENCE_MS, 1.0].max
+  # Times +n+ calls of the block, each followed by one run of the
+  # calibration workload.  Returns [the block's median thread CPU (ms), the
+  # slowdown: the calibration's median over WAVE_CALIBRATION_MS, at least 1].
+  def timed(n = 60)
+    3.times { yield; calibration_work }
+    t = Array.new(n, 0.0)
+    c = Array.new(n, 0.0)
+    n.times do |k|
+      t0 = cpu
+      yield
+      t1 = cpu
+      calibration_work
+      t[k] = (t1 - t0) * 1000
+      c[k] = (cpu - t1) * 1000
+    end
+    [t.sort[n / 2], [c.sort[n / 2] / WAVE_CALIBRATION_MS, 1.0].max]
+  end
+
+  # Expects the [ms, slowdown] from #timed within +budget+ reference
+  # milliseconds times the slowdown.
+  def expect_within((ms, slow), budget)
+    msg = "#{ms.round(4)} ms at slowdown #{slow.round(2)} (budget #{budget} ms on the reference)"
+    puts "#{RSpec.current_example.description}: #{msg}" if ENV['TIMING_REPORT']
+    expect(ms).to be <= budget * slow, msg
   end
 
   it 'draws a 120x30 wave from 2048 points in the kernel in a few microseconds, allocating nothing' do
     g = MB::Sound::Plot::Text::NativeCells.new(120, 30)
     data = Numo::SFloat.cast(Numo::NMath.sin(Numo::DFloat.linspace(0, 6.28, 2048)))
-    ms = median_ms(200) { MB::Sound::FastUI.wave(g, data, 0, 0, 120, 30, -1.0, 1.0, 0xffffff, 10, 0x808080) }
-    slow = slowdown
-    # (measured 2026-11-16 on the 7950X: ~0.01 ms)
-    expect(ms).to be <= 0.05 * slow, "#{ms.round(4)} ms at slowdown #{slow.round(2)}"
+    t = timed(200) { MB::Sound::FastUI.wave(g, data, 0, 0, 120, 30, -1.0, 1.0, 0xffffff, 10, 0x808080) }
+    # (measured 2026-11-16 on the 7950X: ~0.01 ms; 2026-11-22 on the idle
+    # Mac: 0.022, so this fails above ~2.3x)
+    expect_within(t, 0.05)
     m = AllocationBudget.measure(buffers: 100) { MB::Sound::FastUI.wave(g, data, 0, 0, 120, 30, -1.0, 1.0, 0xffffff, 10, 0x808080) }
     expect(m.objects_per_buffer).to be <= 0.2, m.report # (the measuring loop's own few objects)
   end
@@ -64,10 +98,11 @@ RSpec.describe('wave display budgets', :aggregate_failures) do
     # (measured 2026-11-16: 164 objects; 1023 before the title-only redraw)
     expect(m.objects_per_buffer).to be <= 300, m.report
     expect(live.layouts).to eq(1)
-    ms = median_ms(64) { live.draw(charts[(i += 1) % 16], grid, x: 0, y: 0) }
-    slow = slowdown
-    # (measured: 0.054 ms; 0.205 before)
-    expect(ms).to be <= 0.15 * slow, "#{ms.round(4)} ms at slowdown #{slow.round(2)}"
+    t = timed(64) { live.draw(charts[(i += 1) % 16], grid, x: 0, y: 0) }
+    # (measured 2026-11-16 on the 7950X: 0.054 ms, 0.205 before the
+    # title-only redraw; 2026-11-22 on the idle Mac: 0.13-0.15, so this
+    # fails above ~2.4x there, and loaded runs keep 1.5x of headroom)
+    expect_within(t, 0.35)
   end
 
   # The live preview pane's frame for +node+ (a Tone or four-pole) whose
@@ -120,7 +155,9 @@ RSpec.describe('wave display budgets', :aggregate_failures) do
 
   # (measured 2026-11-16 on the 7950X, values moving every frame: 0
   # objects a frame for every kind, 0.012-0.031 ms; before round 2 of
-  # ui-wave-perf-1: 40 for a PWM cycle, 39 wavetable, 20 LFO, 173 four-pole)
+  # ui-wave-perf-1: 40 for a PWM cycle, 39 wavetable, 20 LFO, 173 four-pole;
+  # 2026-11-22 on the idle Mac: 0.04 LFO to 0.10 wavetable, 2.5-6x under
+  # the budget)
   {
     'a PWM oscillator cycle' => [-> { MB::Sound::Tone.new(wave_type: :square, frequency: 110).pwm(0.3.constant) }, :tone,
                                  ->(k, i) { [110.0, 0.1 + 0.8 * (k % 40) / 40.0, Float::NAN][i] }],
@@ -140,9 +177,7 @@ RSpec.describe('wave display budgets', :aggregate_failures) do
       move, draw = live_frames(node, kind, display, values)
       objects, m = frame_objects(move, draw)
       expect(objects).to be <= 0.1, m.report
-      ms = median_ms(80, &draw)
-      slow = slowdown
-      expect(ms).to be <= 0.25 * slow, "#{ms.round(4)} ms at slowdown #{slow.round(2)}"
+      expect_within(timed(80, &draw), 0.25)
     end
   end
 
@@ -172,8 +207,6 @@ RSpec.describe('wave display budgets', :aggregate_failures) do
     m = AllocationBudget.measure(buffers: 80, &draw)
     # (measured 2026-11-16: 0 objects, 0.016 ms; 3 before round 2)
     expect(m.objects_per_buffer).to be <= 0.1, m.report
-    ms = median_ms(80, &draw)
-    slow = slowdown
-    expect(ms).to be <= 0.25 * slow, "#{ms.round(4)} ms at slowdown #{slow.round(2)}"
+    expect_within(timed(80, &draw), 0.25)
   end
 end
