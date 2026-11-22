@@ -131,6 +131,11 @@ RSpec.describe(MB::Sound::UI::Panes::Tuner, :aggregate_failures) do
     ui.run_line('turn :"kick/mix", 0.3', @session)
     2.times { @session.process_buffer } # (the turn lands on a frame)
     expect(wait_until { MB::Sound::HandTune.unsaved(@session, :kick).length == 1 }).to eq(true)
+    # (S and w act on the inspected track, which reaches the screen with
+    # the painter's next poll, every 0.25 s: pressed before it, S said
+    # "nothing to inspect" and saved nothing, in 5 of about 20 runs after
+    # a faster GC, fixes-18)
+    wait_until!('the inspector on :kick') { !text.include?('nothing to inspect') }
     expect(text).to include('1 unsaved (S saves)', 'S save', 'E reload')
     key('w')
     expect(@tiles.layout_name).to eq(:tuning)
