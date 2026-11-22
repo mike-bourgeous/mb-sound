@@ -28,13 +28,19 @@ RSpec.describe(MB::Sound::GraphNode::LoopPlayer::Restretch) do
     lp.new(loop, stretch: { mode: :spectral }.merge(stretch), transport: transport)
   end
 
-  it 'makes stretches at once without a live render thread (offline renders as before)' do
+  it 'makes stretches at once without a live render thread, crossfading to each (offline renders)' do
     expect(described_class.background?).to eq(false)
+    fade = (lp::SWAP_FADE * 48000).round
     t = MB::Sound::Sequence::Transport.new(bpm: 120)
     p = player(t)
     expect(described_class).not_to receive(:submit)
-    y = render(p, t, 4800, change: 1600, bpm: 100)
-    expect(y[1600...4800]).to eq(loop.stretch(1.2, mode: :spectral, wrap: true).data(0)[1920...5120])
+    y = render(p, t, 9600, change: 1600, bpm: 100)
+    # (after the crossfade: the new stretch at the loop's place)
+    expect(y[(1600 + fade)...9600]).to eq(loop.stretch(1.2, mode: :spectral, wrap: true).data(0)[(1920 + fade)...(1920 + 8000)])
+    # (stretches for two tempos have unrelated phases: the hard switch
+    # offline renders made clicked, stretch-attacks-1)
+    steady = y[0...1600].diff.abs.max
+    expect(y[1500...(1700 + fade)].diff.abs.max).to be < 1.5 * steady
   end
 
   it 'plays what it played, then the interim, then the new stretch, crossfading, when simulated as live' do
