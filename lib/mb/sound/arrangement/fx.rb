@@ -105,6 +105,16 @@ module MB
           k = entry.kind.to_s
           "#{k.match?(/\A[aeiou]/) ? 'an' : 'a'} #{k}"
         end
+
+        # Why +command+ (e.g. "fx :drums") can't put effects on track
+        # +name+, which plays a graph (no patch), and what works.  (Sampler
+        # instruments and SoundFonts given to `track` are patch tracks, so
+        # they take inserts: InstrumentPatch.voice?; the maintainer's take,
+        # 2026-11-21: "Why can I not put effects on a soundfont track?")
+        def graph_track_message(command, name, _graph)
+          "#{command}: effect inserts go on tracks with an instrument or a patch block, and #{name.inspect} plays a graph: " \
+            "its effects go in its graph (track #{name.inspect}, graph.reverb(...)), or give it a patch block that builds the graph from its clip"
+        end
       end
 
       # Gives track +name+ the effect insert +value+ (see Fx; :off takes it
@@ -115,7 +125,7 @@ module MB
       # entry, or the track's name when nothing was playing.
       def fx(name, value, point = LaunchPoint::NONE)
         tr = tracks[name] or raise ArgumentError, "fx #{name.inspect}: no track #{name.inspect}#{GraphIO.suggest(name, tracks.keys)}"
-        raise Fx::Error, "fx #{name.inspect}: effect inserts go on tracks with a patch or an instrument; a graph track's effects go in its graph" unless tr.patch?
+        raise Fx::Error, Fx.graph_track_message("fx #{name.inspect}", name, tr.graph) unless tr.patch?
         chain = Fx.chain(value, track: name)
         chain = nil if chain.empty?
         playing = tr.clip && @session.playing_after_queue?(name)

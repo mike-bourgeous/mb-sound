@@ -200,12 +200,13 @@ module MB
           focus!(names[((names.index(focus) || 0) + dir) % names.length])
         end
 
-        # Focus the nearest pane in direction +dir+ (:left, :right, :up,
-        # :down) that overlaps the focused pane's span.
-        def focus_dir(dir)
+        # The nearest pane in direction +dir+ (:left, :right, :up, :down)
+        # that overlaps +name+'s span, or nil: what "the pane to the left"
+        # means for #focus_dir and #swap_dir alike.
+        def neighbor(dir, name = focus)
           r = rects
-          me = r[focus] or return self
-          best = r.reject { |n, _| n == focus }.select { |_, o|
+          me = r[name] or return nil
+          best = r.reject { |n, _| n == name }.select { |_, o|
             case dir
             when :left then o.x + o.w <= me.x && o.y < me.y + me.h && me.y < o.y + o.h
             when :right then o.x >= me.x + me.w && o.y < me.y + me.h && me.y < o.y + o.h
@@ -221,7 +222,25 @@ module MB
             else [o.y - (me.y + me.h), (o.x - me.x).abs]
             end
           }
-          best ? focus!(best[0]) : self
+          best&.first
+        end
+
+        # Focus the nearest pane in direction +dir+ (see #neighbor).
+        def focus_dir(dir)
+          (n = neighbor(dir)) ? focus!(n) : self
+        end
+
+        # Swaps pane +name+ (the focused one) with its neighbor in direction
+        # +dir+ (see #neighbor; sizes stay with the slots, as #swap), the
+        # focus following the moved pane, so repeats walk it across the
+        # screen; one undo step.  A pane in a tab group trades places with
+        # the neighbor as #swap does.  Returns the neighbor's name, or nil
+        # (no pane that way: nothing changes).
+        def swap_dir(dir, name = focus)
+          n = neighbor(dir, name) or return nil
+          swap(name, n)
+          focus!(name) unless focus == name
+          n
         end
 
         # The next (+dir+ 1) or previous tab of the tabs holding +name+.

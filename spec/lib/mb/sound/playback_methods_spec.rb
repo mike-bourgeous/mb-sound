@@ -420,6 +420,30 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         MB::Sound.stop(:all, fade: 0)
       end
 
+      # (the maintainer's take, 2026-11-21: `fadeout over: 8.bars` was an
+      # unknown keyword, `fadeout in: 8.bars` started a 4-bar fade 8 bars
+      # later, and "fadeout help does not describe arguments and does not
+      # show fade length")
+      it 'takes the fade as over: (a length, as level and turn name a span) and says how long it is and where it ends' do
+        s = MB::Sound::Session.new(realtime: false, fade_out: MB::Sound::Session::DEFAULT_FADE_OUT) # (the console's default four bars)
+        MB::Sound::Session.with_context(session: s) do
+          %i[fa fb fc fd].each { |n| MB::Sound.bg(n, 220.hz.sine) }
+          4.times { s.process_buffer }
+          expect(MB::Sound.fadeout(:fa, over: 8.bars).to_s).to match(/\Astop :fa landed 1:([\d.]+), fading over 8 bars to 9:\1\z/)
+          expect(MB::Sound.fadeout(:fb, over: 2.seconds).to_s).to match(/fading over 1 bar to 2:/) # (120 bpm)
+          expect(MB::Sound.fadeout(:fc, in: 2.bars).to_s).to match(/\Astop :fc lands 3:[\d.]+ \(queued\), fading over 4 bars to 7:/)
+          expect(MB::Sound.stop(:fd, fade: 0).to_s).to match(/\Astop :fd landed 1:[\d.]+\z/)
+          expect { MB::Sound.fadeout(:fc, fade: 2, over: 2.bars) }.to raise_error(ArgumentError, /fadeout: give the fade once, fade: \(bars\) or over:/)
+          expect { MB::Sound.outro(fade: 2, over: 2.bars) }.to raise_error(ArgumentError, /outro: give the fade once/)
+        end
+        page = MB::U.remove_ansi(MB::Sound.help(:fadeout).to_s)
+        expect(page).to include('fadeout(*names, fade:, over:, at:, on:, in:)').and include('over: 8.bars').and include('fading over 8')
+        expect(page).to match(/in:\s.*is not the\s+fade's length/m)
+      ensure
+        s&.close
+        MB::Sound.rewind
+      end
+
       it 'no longer has #hush' do
         expect(MB::Sound).not_to respond_to(:hush)
       end

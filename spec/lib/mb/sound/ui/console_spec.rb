@@ -112,6 +112,39 @@ RSpec.describe(MB::Sound::UI::UIMethods, :aggregate_failures) do
       expect(c.names_for('fo', 'fo', session)).to be_nil
     end
 
+    # (the maintainer's UI note, 2026-11-21, after typing an sf2 path by
+    # hand: "Would like tab completion and/or a filesystem navigator for
+    # loading fonts")
+    it "completes file paths inside a file command's quotes, on Tab only" do
+      dir = File.dirname(tmp_path('x'))
+      Dir.mkdir(File.join(dir, 'fonts'))
+      File.write(File.join(dir, 'fonts', 'Black.sf2'), '')
+      File.write(File.join(dir, 'fonts', 'Blue.sf2'), '')
+      File.write(File.join(dir, 'kick.flac'), '')
+      File.write(File.join(dir, '.hidden'), '')
+      c = described_class
+      expect(c.paths_for("#{dir}/fonts/Bl", "kit = sf2('#{dir}/fonts/Bl")).to eq(["#{dir}/fonts/Black.sf2", "#{dir}/fonts/Blue.sf2"])
+      expect(c.paths_for("#{dir}/ki", "x = read \"#{dir}/ki")).to eq(["#{dir}/kick.flac"])
+      expect(c.paths_for("#{dir}/ki", "Sample['#{dir}/ki")).to eq(["#{dir}/kick.flac"])
+      expect(c.paths_for("#{dir}/ki", "bg :a, play(\"#{dir}/ki")).to eq(["#{dir}/kick.flac"])
+      # (one directory: its entries, so Reline doesn't close the quote after it)
+      expect(c.paths_for("#{dir}/fo", "sf2('#{dir}/fo")).to eq(["#{dir}/fonts/Black.sf2", "#{dir}/fonts/Blue.sf2"])
+      # (hidden files only for a dotted prefix)
+      expect(c.paths_for("#{dir}/", "sf2('#{dir}/")).to eq(["#{dir}/fonts/", "#{dir}/kick.flac"])
+      expect(c.paths_for("#{dir}/.h", "sf2('#{dir}/.h")).to eq(["#{dir}/.hidden"])
+      # not a file command, not in quotes, nothing there
+      expect(c.paths_for("#{dir}/ki", "puts('#{dir}/ki")).to be_nil
+      expect(c.paths_for('ki', 'sf2(ki')).to be_nil
+      expect(c.paths_for("#{dir}/zz", "sf2('#{dir}/zz")).to be_nil
+      expect(c.paths_for('/no/such/dir/x', "sf2('/no/such/dir/x")).to be_nil
+
+      # through the completer Pry calls on Tab
+      c.install_pry
+      completer = Pry::InputCompleter.new(Reline, Pry.new(target: binding))
+      allow(Reline).to receive(:line_buffer).and_return("kit = sf2('#{dir}/fonts/Bla")
+      expect(completer.call("#{dir}/fonts/Bla")).to eq(["#{dir}/fonts/Black.sf2"])
+    end
+
     # (session-2: pane_keys_spec's random keys, seed 55214, typed
     # `seq(Tie).n8` and Tab; Reline's word `Tie).n8` sent Pry's completer
     # to evaluate `Tie).methods`, and Ruby's parser warned about the

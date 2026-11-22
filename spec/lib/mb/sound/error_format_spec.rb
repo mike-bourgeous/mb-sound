@@ -85,6 +85,19 @@ RSpec.describe(MB::Sound::ErrorFormat) do
       expect(sig.blend(0.5) { it.then(&circle) }).to be_a(MB::Sound::GraphNode)
     end
 
+    # (the maintainer's take, 2026-11-21: `bg :drums, L.gen.techno_beat.transpose(4)`)
+    it 'names .call for a clip method on a generator entry that was not called (ux-friction-2)' do
+      gen = MB::Sound::L.gen.techno_beat
+      e = (gen.transpose(4) rescue $!)
+      expect(described_class.summary(e)).to include('did you mean L.gen.techno_beat.call.transpose(4) (a library generator gives its clip when called; L.gen.techno_beat(...) takes its params)?')
+      e = (gen.echo(3, 1.n32, pitch: 10) rescue $!)
+      expect(described_class.summary(e)).to include('L.gen.techno_beat.call.echo(3, 1.n32, pitch: 10)')
+      e = (gen.frobnicate rescue $!)
+      expect(described_class.summary(e)).not_to include('.call.')
+      e = (MB::Sound::L.fx.reverb.hall.transpose(4) rescue $!)
+      expect(described_class.summary(e)).not_to include('.call.')
+    end
+
     it "points the maintainer's LFO, scale, and note guesses at what exists (ux-friction-1 round 2)" do
       lfo = 2.bars.lfo.ramp
       expect(described_class.summary((lfo.exp rescue $!))).to include('did you mean at(D3.number..B6.number).freq (an LFO swept in notes')
