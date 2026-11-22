@@ -169,8 +169,8 @@ RSpec.describe(MB::Sound::Session::Undo) do
       session.process_buffer while session.frame < to
     end
 
-    def define(cutoff)
-      MB::Sound.track(:t, q: 1) { |clip| clip.hz.ramp.at(-20.db).filter(:lowpass, cutoff: cutoff, quality: 2) }
+    def define(cutoff, q: 1)
+      MB::Sound.track(:t, q: q) { |clip| clip.hz.ramp.at(-20.db).filter(:lowpass, cutoff: cutoff, quality: 2) }
     end
 
     before do
@@ -178,15 +178,42 @@ RSpec.describe(MB::Sound::Session::Undo) do
         define(1200)
         MB::Sound.bg(:t, MB::Sound.seq(MB::Sound::A2).n1.loop)
       end
-      bars(1.5) # (mid-bar: the redefinitions wait for bar 3)
-      within { [1201, 1202, 1203].each { |c| define(c) } }
+      bars(1.5) # (mid-bar: the redefinitions wait for their launch points)
     end
 
     after { MB::Sound.rewind }
 
+    it 'lands the last of several redefinitions queued behind one for an earlier launch point, and undoes one at a time' do
+      # (1201 lands on the next beat, 1202 and 1203 on bar 3: 1202 follows
+      # 1201, carrying from its graph, and 1203, superseding 1202, follows
+      # 1201 too; before, 1203 carried from 1200, which 1201 replaced
+      # first, so it was dropped and 1201 played on)
+      bars(1/8r) # (between beats)
+      within do
+        define(1201, q: 1/4r)
+        expect(session.queued(:t).length).to eq(1)
+        define(1202)
+        define(1203)
+      end
+      bars(1)
+      expect(playing).to eq([1203])
+
+      within { MB::Sound.undo }
+      bars(2)
+      expect(playing).to eq([1202])
+      within { MB::Sound.undo }
+      bars(2)
+      expect(playing).to eq([1201])
+      within { 2.times { MB::Sound.redo! } }
+      bars(2)
+      expect(playing).to eq([1203])
+    end
+
     [800, 367].each do |size|
       context "at #{size}-frame buffers" do
         let(:buffer_size) { size }
+
+        before { within { [1201, 1202, 1203].each { |c| define(c) } } }
 
         it 'undoes and redoes one queued redefinition at a time before any lands' do
           expect(session.queued(:t).length).to eq(1) # (each superseded the one before)

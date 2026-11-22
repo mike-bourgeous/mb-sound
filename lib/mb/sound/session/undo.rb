@@ -456,16 +456,23 @@ module MB
         # change of the step being undone), if given, else the name's own.
         def restore_superseded(subject, superseded, original, time)
           before = original&.before
-          graph = PendingGraph.new(input: superseded.graph, description: superseded.entry.data[:description], timeline_nodes: superseded.starts || [])
-          clips = graph.timeline_nodes.grep(MIDI::ClipSource).to_h { |n| [n, n.ring_clip || n.pending_clip || n.clip] }.compare_by_identity
-          muted, soloed = before.is_a?(PlayerState) ? [before.muted, before.soloed] : [nil, nil] # (nil: left as they are)
-          state = PlayerState.new(player: graph, stopped: nil, clips: clips, muted: muted, soloed: soloed)
+          state = pending_state(superseded, flags: before.is_a?(PlayerState) ? before : nil)
           spill = !!(original || superseded).spill
           # (+graph+: kept in step with shared nodes while it waits, see
           # Strip#catch_up_waiting)
-          change(:restore, subject.name, time, data: {}, undoes: (original || superseded).seq, starts: graph.timeline_nodes, graph: superseded.graph) { |t|
+          change(:restore, subject.name, time, data: {}, undoes: (original || superseded).seq, starts: state.player.timeline_nodes, graph: superseded.graph) { |t|
             restore_player(subject.name, state, t, spill: spill)
           }
+        end
+
+        # A PlayerState whose player is the graph queued change +c+ starts
+        # (a PendingGraph), with +flags+' mute and solo flags (nil: left as
+        # they are).  For #restore_superseded, and as Change#base of a
+        # rebuild that follows +c+ (Session#add): the state it replaces.
+        def pending_state(c, flags: nil)
+          graph = PendingGraph.new(input: c.graph, description: c.entry.data[:description], timeline_nodes: c.starts || [])
+          clips = graph.timeline_nodes.grep(MIDI::ClipSource).to_h { |n| [n, n.ring_clip || n.pending_clip || n.clip] }.compare_by_identity
+          PlayerState.new(player: graph, stopped: nil, clips: clips, muted: flags&.muted, soloed: flags&.soloed)
         end
 
         # The subject whose state change +c+ snapshots for undo (a subject
