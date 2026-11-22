@@ -235,16 +235,19 @@ module MB
         #
         # +assets+ (an Assets) names files for tables and sound or MIDI
         # files the graph reads (bundles; see .save); without it they raise
-        # DumpError (tables) or keep their paths (file names).
-        def dump(graph, name: nil, kind: nil, inputs: {}, params: {}, options: {}, from: nil, meta: {}, assets: nil)
+        # DumpError (tables) or keep their paths (file names).  +stand_ins+
+        # (racks only) are options for the rack's stand-in build (see
+        # Rack#build_on_stand_ins and Session::MasterRack).
+        def dump(graph, name: nil, kind: nil, inputs: {}, params: {}, options: {}, from: nil, meta: {}, assets: nil, stand_ins: nil)
           # (values that set a set up save as that set: Tracker::Set)
           graph = graph.to_arrangement if graph.respond_to?(:to_arrangement)
           if graph.is_a?(Rack)
             unless inputs.empty? && params.empty? && options.empty? && kind.nil?
               raise ArgumentError, 'rack documents take their inputs from the rack\'s ports (no inputs, params, options, or kind)'
             end
-            return RackWriter.new(graph, name: name, from: from, meta: meta, assets: assets).to_s
+            return RackWriter.new(graph, name: name, from: from, meta: meta, assets: assets, stand_ins: stand_ins || {}).to_s
           end
+          raise ArgumentError, 'stand_ins: goes with racks (how a rack document builds its body)' if stand_ins
           if graph.is_a?(Arrangement)
             unless inputs.empty? && params.empty? && options.empty? && kind.nil?
               raise ArgumentError, 'set documents take no inputs, params, options, or kind'

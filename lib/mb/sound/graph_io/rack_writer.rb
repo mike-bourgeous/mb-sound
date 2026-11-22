@@ -19,10 +19,14 @@ module MB
       # GraphIO.load gives the Rack back (each application makes its own
       # knobs from the knob lines), or applies it when inputs are given.
       class RackWriter
-        def initialize(rack, name: nil, from: nil, meta: {}, assets: nil)
+        # +stand_ins+ are options for the rack's stand-in build
+        # (Rack#build_on_stand_ins: +channels:+, +knobs:+), e.g. a master
+        # chain's capture on the Session's channels (Session::MasterRack).
+        def initialize(rack, name: nil, from: nil, meta: {}, assets: nil, stand_ins: {})
           raise DumpError.new("#{rack.label} is composed (>>); save its parts") if rack.composed?
 
           @rack = rack
+          @stand_ins = stand_ins
           @doc = GraphIO.rack_document(rack)
           @name = name || @doc&.name || rack.name&.to_s
           @from = from || @doc&.from
@@ -31,7 +35,7 @@ module MB
         end
 
         def to_s
-          result, stand, app = @rack.build_on_stand_ins
+          result, stand, app = @rack.build_on_stand_ins(**@stand_ins)
           rack_knobs = app.knobs
           knob_nodes = rack_knobs.each_with_object({}.compare_by_identity) { |(n, k), h| h[k] = n.to_s }
           inputs = stand.transform_keys(&:to_s)
