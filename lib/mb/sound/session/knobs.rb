@@ -95,6 +95,29 @@ module MB
           k
         end
 
+        # Defines knob +name+ (see #knob) and, if the Session had it, moves
+        # it to the new +default+ (a set document's `knob` line over a knob
+        # the session has; GraphIO::Loader#session_knob): the new options
+        # and the value land together as one :turn change (journaled,
+        # undoable) at the issuing context's time (a scheduled block's: its
+        # exact frame at any buffer size; fix-knob-reload, batch 42's soak
+        # seed 789008, where the value landed on the first frame of the
+        # buffer running the block, ahead of its time), else now.  Options
+        # are checked here, before the change lands.  Returns the knob
+        # (nil if the name is taken, as #knob).
+        def redefine_knob(name, default, **spec)
+          k = @knob_lock.synchronize { @knobs[name] }
+          return knob(name, default, **spec) unless k
+
+          value = k.spec.respec(default: default, **spec).default
+          time = Session.context&.time_for(self)
+          knob_change(k, time, { value: value }) { |kn, frame, _t|
+            knob(name, default, **spec)
+            kn.set(value, frame: frame) if kn.target != value
+          }
+          k
+        end
+
         # The default of a knob read before it was defined (live; see
         # #implicit_knob).
         IMPLICIT_DEFAULT = 0.5

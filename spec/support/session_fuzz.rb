@@ -824,6 +824,18 @@ module SessionFuzz
         "arack(:tfx) { |sig| sig.lp4(1200) * knob(:mix, 0.7) }; fx :#{s.pick(s.instruments)}, :tfx#{s.on}"
       end
     },
+    ->(s) {
+      # (fix-knob-reload, batch 42's soak seed 789008) a set document
+      # loaded in a scheduled block lands its lines at the block's time,
+      # as the same lines typed in the block do: a base tempo, and the
+      # song's knob :cut declared again with a new range and value (they
+      # landed on the first frame of the buffer running the block, a
+      # lookahead early)
+      # (knob lines are the header: before the body's bpm)
+      body = "bpm #{s.pick([120, 132, 140])}"
+      body = "knob :cut, (100.hz..5000.hz).at(#{s.pick(%w[600 3000])}.hz)\\n#{body}" if s.knob
+      "GraphIO.load(%(graph \#{GraphIO::FORMAT}, name: \"tempo\", kind: :set\\n#{body}\\n), session: Session.current)"
+    },
     # (form-knobs-1) a track hash on an instrument track: a scene setting
     # the track's knobs (and sometimes its clip) in one key, launched; or
     # a turn of several of its knobs with one ramp

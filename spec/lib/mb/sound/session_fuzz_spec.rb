@@ -321,6 +321,21 @@ RSpec.describe('session fuzzing') do
         'at_bar(1, beat: 4) { level :t2, 0, on: :bar }',
       ], 2,
     ],
+    # (fix-knob-reload, batch 42's soak seed 789008: a set document
+    # declaring the song's knob :cut again, loaded in a scheduled block,
+    # set the knob's new value on the next buffer's first frame instead
+    # of the block's own: 0.042 apart at 367 and 800 frames from bar 3
+    # beat 2)
+    'a set document redeclaring a knob, loaded mid-song (seed 789008)' => [
+      :buffer_size, ['bpm 126', 'knob :busy, 0.5'], [
+        'knob :cut, 1200.0, range: 200.0..4000.0',
+        'track(:t1, q: 1/4r) { |clip| clip.synth(voices: 2) { |v| v.hz.square * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'track(:t2, q: 1/2r) { |clip| clip.synth(voices: 1) { |v| v.hz.sine * v.amp_env(0.002, 0.05, 0.6, 0.02) }.filter(:lowpass, cutoff: knob(:cut), quality: 2) * 0.3 }',
+        'scene :s1, t1: melody(scale(:minor).weights, 8, rest: knob(:busy), vary: true, seed: 2).loop, t2: seq(A3, R, C4.n4, E4).n16.loop, fade: 1/4r',
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(3, beat: 2) { GraphIO.load(%(graph #{GraphIO::FORMAT}, name: "cut", kind: :set\nknob :cut, (100.hz..5000.hz).at(600.hz)\n), session: Session.current) }',
+      ], 2,
+    ],
     # (fuzz-fixes-2: after the seek back to bar 2, the flow's pass there
     # launched :s1 now, and the stop of :t1's cue that the scene's start
     # of :t1 makes (Session::Cue#end_cue_at_start) cancelled the cue
@@ -524,7 +539,7 @@ RSpec.describe('session fuzzing') do
   # limiter on and the offline reference doesn't; a song louder than -1
   # dBFS, its tr909 kit peaking at 1.01)
   it 'holds form_start for a song louder than the live safety limiter (seed 788010)', render_budget: { seconds: 30, reason: 'one random song, one relation' } do
-    song = SessionFuzz.generate(Random.new(788010))
+    song = SessionFuzz.generate(Random.new(788010), commands: 35) # (the 35 commands of fix-knob-reload; each new command changes every seed's song)
     expect(SessionFuzz.check(:form_start, song)).to be_nil
   end
 
@@ -554,7 +569,7 @@ RSpec.describe('session fuzzing') do
   # dropped where the track may have stopped by the time they land)
   it 'drops swaps of tracks that may have stopped (seeds 776002, 776003, 776046)', render_budget: { seconds: 90, reason: 'three random songs' } do
     [776002, 776003, 776046].each do |seed|
-      song = SessionFuzz.generate(Random.new(seed))
+      song = SessionFuzz.generate(Random.new(seed), commands: 35)
       # (track swaps: the bg graph swaps of gen-ux-1 round 2's command
       # start or replace their graph, so they may stay)
       expect(song.code).not_to match(/swap :t\d/), "seed #{seed}"
