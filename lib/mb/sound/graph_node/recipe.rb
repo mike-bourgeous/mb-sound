@@ -159,7 +159,7 @@ module MB
 
         @enabled = ENV['MB_SOUND_RECIPES'] != '0'
         @block_iseqs = ObjectSpace::WeakKeyMap.new
-        @bundles = ObjectSpace::WeakKeyMap.new
+        @other_bundles = ObjectSpace::WeakMap.new # (see .bundle_of)
         @seq = 0
         @wrapped = Hash.new { |h, k| h[k] = Set.new }
 
@@ -191,13 +191,22 @@ module MB
           end
 
           # The recorded bundle (a Channels a recorded call returned:
-          # ping_pong, multitap, chorus) whose output +node+ is, or nil.
-          # Kept beside the nodes (a weak map; no instance variable, so
-          # node shapes don't vary), so bind and the inspector find a
-          # bundle's call from its outputs when nothing took them by index
-          # (#note_elements; fixes-1030).
+          # ping_pong, multitap, chorus) whose output +node+ is, or nil, so
+          # bind and the inspector find a bundle's call from its outputs
+          # when nothing took them by index (#note_elements; fixes-1030).
+          # Kept in the node's @graph_bundle (preset on every GraphNode, so
+          # node shapes don't vary).  (fixes-18: it was a WeakKeyMap from
+          # output to bundle, but a WeakKeyMap's values are strong and a
+          # bundle holds its outputs, so every recorded bundle and the
+          # graph behind it stayed alive for good: 0.8 million objects left
+          # by one spec file, and major GCs 10x slower in long processes.)
+          # A frozen node or an output that isn't a GraphNode can't take the
+          # variable: a WeakMap (weak keys and values) finds its bundle while
+          # something else holds the bundle.
           def bundle_of(node)
-            @bundles[node]
+            return @other_bundles[node] unless node.is_a?(GraphNode) && !node.frozen?
+
+            node.instance_variable_get(:@graph_bundle)
           end
 
           # The Call that made +obj+ as seen from block scope +scope+ (the
@@ -386,9 +395,20 @@ module MB
             bundle.instance_variable_get(:@outputs).each do |o|
               next if o.is_a?(Numeric)
 
-              @bundles[o] = bundle unless @bundles.key?(o)
-              owner = GraphNode.climb_tee_tree(o)
-              @bundles[owner] = bundle unless @bundles.key?(owner)
+              note_bundle(o, bundle)
+              note_bundle(GraphNode.climb_tee_tree(o), bundle)
+            end
+          end
+
+          # Makes +bundle+ the bundle of +node+ (see .bundle_of) unless it
+          # has one.
+          def note_bundle(node, bundle)
+            return if node.nil? || node.is_a?(Numeric) || !bundle_of(node).nil?
+
+            if node.is_a?(GraphNode) && !node.frozen?
+              node.instance_variable_set(:@graph_bundle, bundle)
+            else
+              @other_bundles[node] = bundle
             end
           end
 

@@ -109,7 +109,7 @@ module MB
       # Set lazily by GraphNode's modules and the plan layer (see IvarPreset).
       IvarPreset.declare(
         self,
-        :@node_type_name, :@graph_node_name, :@named, :@carried_meta, :@graph_recipe, :@graph_io_document,
+        :@node_type_name, :@graph_node_name, :@named, :@carried_meta, :@graph_recipe, :@graph_bundle, :@graph_io_document,
         :@channel_group, :@internal_tee, :@feedback_sources, :@handled_spies,
         :@plan_bypass, :@plan_installations, :@plan_member, :@plan_region,
         :@plan_observed, :@plan_handoff, :@plan_restart, :@plan_excluded
