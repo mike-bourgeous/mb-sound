@@ -250,6 +250,9 @@ module GraphSweep
       }],
       ['proc', ->(c) { c.sig.proc { |buf| buf * 0.5 } }],
       ['tee and branches', ->(c) { t = c.sig; t.softclip + t.delay(10.samples) + t }],
+      # (midi-out-1: a MIDI out track's graph, sending a clip's notes to a
+      # logging destination; its audio is silence)
+      ['MIDI out to a destination', ->(c) { MB::Sound.midi_out(log: true, channel: 3).play(c.clip) + c.sig * 0.5 }],
       ['with_buffer (BufferAdapter)', ->(c) { c.sig.with_buffer(37.samples) }],
       ['until and and_then (TimeLimit, NodeSequence, Silence)', ->(c) { c.sig.until(0.002).and_then(c.s.silence(0.001), c.sig(220)) }],
       ['ringdown', ->(c) { c.sig.until(0.003).ringdown }],

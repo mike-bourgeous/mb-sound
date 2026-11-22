@@ -34,6 +34,12 @@ module MB
             "#{direction == :out ? 'out' : 'in '}  #{name}#{" (#{flags.join(', ')})" unless flags.empty?}#{conn}  [#{api}]"
           end
           alias_method :inspect, :to_s
+
+          # One line in pp too (MB::Sound::OneLinePrint's way, without
+          # reaching outside the I/O layer)
+          def pretty_print(q)
+            q.text(inspect)
+          end
         end
 
         # Raised by .find when several ports match.  #candidates lists them.

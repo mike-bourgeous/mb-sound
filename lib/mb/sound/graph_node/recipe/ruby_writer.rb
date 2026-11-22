@@ -1133,6 +1133,7 @@ module MB
             when MB::Sound::Sample then return sample_text(v, indent)
             when MB::Sound::Sample::Slices then return slices_text(v, indent)
             when MB::Sound::Sampler::Instrument then return instrument_text(v, indent)
+            when MB::Sound::MIDI::Destination then return v.to_ruby
             when MB::Sound::Sampler::ZoneMap then return zone_map_text(v, indent)
             when MB::Sound::Generative::Dice then return "dice(#{[v.seed, *v.path].map { |x| value(x, indent) }.join(', ')})"
             when MB::Sound::Sequence::Seq::Step then return step_text(v)
