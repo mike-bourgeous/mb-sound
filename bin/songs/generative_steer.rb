@@ -40,7 +40,7 @@
 #     knob :energy, 0.4
 #     bg :d, tr909(beats(16, hold: 2, energy: knob(:energy)) { kick [1, 0, 0, 0] * 4, keep: [0, 4, 8, 12]; hat euclid(10, 16), mutate: 0.5 })
 #     turn :energy, 0 => 0.1, 4.bars => 0.95     # a gesture: the beat grows from nothing
-#     bg :d, tr909(L.gen.techno_beat(energy: knob(:energy)))    # the song's beat from the library (L.gen.generative_steer lists its parts)
+#     bg :d, tr909(L.gen.beat.techno(energy: knob(:energy)))    # the song's beat from the library (L.gen.generative_steer lists its parts)
 #     knob :busy, 0.3
 #     bg :h, tr909(generate(1.bar, busy: knob(:busy), values: [F2s]) { |cycle, dice, busy:|
 #       16.times.filter_map { |i| [i * 1/16r, 1/32r, F2s, 0.6] if dice.rand(:hat, i) < busy }
@@ -58,7 +58,7 @@ module MB::Sound
 
   # The generators are library entries (lib-gen-1; defined in
   # lib/mb/sound/library/generators/generative_steer.rb): the drums
-  # L.gen.techno_beat (an evolving techno beat, thinned and filled by
+  # L.gen.beat.techno (an evolving techno beat, thinned and filled by
   # energy), the bass L.gen.acid_rhythm (one melodic row walking the
   # chord tones low, D2..D3), the lead L.gen.phrygian_motif (one-bar
   # phrases of sixteenths with phrase memory, density and mutate
@@ -81,7 +81,7 @@ module MB::Sound
     track(:lead) { |clip| clip.synth(voices: 3) { |v| pluck_voice(v, sustain: 1.2, brightness: 9) }.delay(3.n16, feedback: 0.3, wet: 0.25) * 3.2 }
     track(:pad) { |clip| stereo(*fifth_pad(clip, voices: 2, cutoff: 700, release: 2)) * 0.4 }
 
-    drums = L.gen.techno_beat(seed: seed, energy: knob(:energy))
+    drums = L.gen.beat.techno(seed: seed, energy: knob(:energy))
     bass = L.gen.acid_rhythm(seed: seed + 1, energy: knob(:energy))
     lead = L.gen.phrygian_motif(seed: seed + 2, density: knob(:density), mutate: knob(:wander))
     pad = seq(*Library::Generators::GenerativeSteer.chords).len(2.bars).loop

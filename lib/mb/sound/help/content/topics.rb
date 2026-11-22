@@ -966,7 +966,7 @@ module MB
         :VII)` is a chord a bar on degrees of the key, so the lines re-voice
         into each chord and move when the key does.  The demo
         songs' and genre templates' generators are in the library:
-        `L.gen` (`L.gen.koto_motif(seed: 3)`, `play L.gen.techno_beat`)
+        `L.gen` (`L.gen.koto_motif(seed: 3)`, `play L.gen.beat.techno`)
         and `L.flow` for their section chains (`help :library`);
         `lesson :generative` puts them on tracks step by step.
       TEXT
@@ -1871,16 +1871,16 @@ module MB
         (note effects), `L.analyze` (audio to notes or control), `L.mod`,
         `L.all`.
 
-        Generators are entries too: `L.gen.techno_beat(seed: 3, energy:
+        Generators are entries too: `L.gen.beat.techno(seed: 3, energy:
         knob(:energy))` is the demo songs' evolving beat as a clip (a word
-        given keywords builds; `L.gen.techno_beat.()` at the defaults,
-        printed back with its seed: `L.gen.techno_beat(seed: 5)`),
-        `track :drums, L.gen.techno_beat` plays it on its kit, `track :lead,
+        given keywords builds; `L.gen.beat.techno.()` at the defaults,
+        printed back with its seed: `L.gen.beat.techno(seed: 5)`),
+        `track :drums, L.gen.beat.techno` plays it on its kit, `track :lead,
         L.gen.phrygian_motif, :tine_piano` on another instrument.  On a
         track, the params the call leaves out that steer it (energy,
         density, mutate, ...) are the track's knobs: `turn :"drums/energy",
         0.9, over: 4.bars`, read once a bar (scenes, MIDI learn, and the
-        inspector's notes row too); `L.gen.techno_beat(energy: 0.8)` keeps
+        inspector's notes row too); `L.gen.beat.techno(energy: 0.8)` keeps
         its number.
         `L.flow.techno_chain(seed: 4)` is a genre template's section chain;
         `flow L.flow.techno_chain` plays it over the session's scenes, and

@@ -434,7 +434,7 @@ module MB
           list = list.each_with_index.sort_by { |c, i| [GraphNode::Recipe.call_of(Library::Generators.given_clip(c) || c)&.seq || 0, i] }.map(&:first)
 
           @clip_names = {}.compare_by_identity
-          # (unnamed ones a track holds after the track: `drums = L.gen.techno_beat(seed: 5)`)
+          # (unnamed ones a track holds after the track: `drums = L.gen.beat.techno(seed: 5)`)
           list.each { |c| @clip_names[c] = unique(c.respond_to?(:name) && c.name ? c.name.to_s : (@track_clip_owner[c] || 'clip').to_s) }
 
           list.flat_map { |c|

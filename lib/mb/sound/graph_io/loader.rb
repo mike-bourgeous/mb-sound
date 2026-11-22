@@ -166,6 +166,10 @@ module MB
           # (documents before format 12, whose rootless scales didn't follow
           # the session key; see GraphIO::FORMAT)
           @old_scales = false
+          # Whether library words renamed since are followed to their new
+          # names (documents before format 14, which named
+          # L.gen.techno_beat; Library::Heads::RENAMED)
+          @old_names = false
           @path = path
           @label = path || '(graph document)'
           @given_inputs = inputs.transform_keys(&:to_sym)
@@ -555,6 +559,7 @@ module MB
               @old_shift = !GraphIO.since?(version, :clip_shift)
               @old_tempo = !GraphIO.since?(version, :tempo_live)
               @old_scales = !GraphIO.since?(version, :following_scales)
+              @old_names = !GraphIO.since?(version, :beat_family)
               @comment_notes = GraphIO.since?(version, :metadata)
               @document.read_graph_line(kwargs, offsets: @header_offsets || {})
             when :inputs
@@ -1189,9 +1194,13 @@ module MB
             if @header && !receiver.is_a?(Numeric) && !(receiver.is_a?(Range) && name == :at)
               raise error(node, "the header holds values only (#{name} isn't one)")
             end
+            if @old_names && receiver.is_a?(Library::Heads::Query) && (moved = Library::Heads.renamed_word(receiver, name))
+              receiver, name = moved
+            end
             unless Registry.allowed?(receiver, name)
               names = Registry.names_for(receiver)
               hint = GraphIO.suggest(name, names.to_a)
+              hint = "#{Library::Heads.renamed_hint(receiver.kind, name)}#{hint}" if receiver.is_a?(Library::Heads::Query)
               raise error(node, "#{name} isn't a graph method of #{describe(receiver)}#{hint}")
             end
           end

@@ -91,9 +91,9 @@ module MB
         ### Families and registration (code)
 
         # Declares a family (see Family); returns it.
-        def define_family(name, kind:, about: nil, owner: nil, apply: nil, code: nil, document: nil)
+        def define_family(name, kind:, about: nil, owner: nil, apply: nil, code: nil, document: nil, namespace: false)
           @lock.synchronize do
-            f = Family.new(name: name, kind: kind, about: about, owner: owner, apply: apply, code: code, document: document)
+            f = Family.new(name: name, kind: kind, about: about, owner: owner, apply: apply, code: code, document: document, namespace: namespace)
             old = @families[name]
             raise Collision, "family #{name.inspect} is declared twice (#{old.owner.inspect} and #{owner.inspect})" if old && old.owner && owner && !old.owner.equal?(owner)
             @families[name] = f
@@ -495,15 +495,23 @@ module MB
           if families.include?(entry.name)
             return "#{entry.label} (#{entry.location}) is named like the #{entry.name} family under L.#{HEADS.key(entry.kind)}; rename it (e.g. :#{entry.name}_#{entry.family})"
           end
-          if (o = same.find { |x| x.tags.include?(entry.name) })
+          # (a sub-namespace's names live in their family: under the head
+          # they narrow like tags, so a tag of the same word is no clash)
+          if !namespaced?(entry) && (o = same.find { |x| x.tags.include?(entry.name) })
             return "#{entry.label} (#{entry.location}) is named like a tag of #{o.label} (#{o.location}); rename it (e.g. :#{entry.name}_#{entry.family}) or the tag (tags are adjectives and roles, names nouns)"
           end
           entry.tags.each do |t|
-            if (o = same.find { |x| x.name == t })
+            if (o = same.find { |x| x.name == t && !namespaced?(x) })
               return "#{entry.label} (#{entry.location}) has tag #{t.inspect}, the name of #{o.label} (#{o.location}); rename the tag or the entry (e.g. :#{t}_#{o.family})"
             end
           end
           nil
+        end
+
+        # True when +entry+'s family is a sub-namespace (Family#namespace;
+        # read from the families without Library.families' lock copy).
+        def namespaced?(entry)
+          @families[entry.family]&.namespace || false
         end
 
         # Records a problem; on shelves other than the shipped one it also

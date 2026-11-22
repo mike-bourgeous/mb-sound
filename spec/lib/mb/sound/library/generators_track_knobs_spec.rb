@@ -13,6 +13,10 @@ RSpec.describe MB::Sound::Library::Generators, 'track knobs', :aggregate_failure
   }
 
   # Cycles 0...n of +clip+'s events.
+  # The shipped L.gen entry named +name+ (its family :generator, or
+  # :beat for the drum beats).
+  def gen_entry(name) = MB::Sound::L.gen.entries.find { |e| e.name == name }
+
   def cycles(clip, n = 6)
     (0...n).map { |c| clip.events_for(c) }
   end
@@ -36,21 +40,21 @@ RSpec.describe MB::Sound::Library::Generators, 'track knobs', :aggregate_failure
 
   # The shipped entries with steering params, and those params.
   GEN_KNOB_ENTRIES = {
-    ambient_motif: %i[density mutate], ambient_figure: %i[density mutate], techno_beat: %i[energy],
+    ambient_motif: %i[density mutate], ambient_figure: %i[density mutate], techno: %i[energy],
     acid_rhythm: %i[energy], phrygian_motif: %i[density mutate], blur_cloud: %i[chance],
   }.freeze
 
   it 'are the ranged params that steer, named per track, apart from the instruments\' knobs' do
     got = MB::Sound::L.gen.entries.to_h { |e| [e.name, gens.knob_params(e)] }.reject { |_, v| v.empty? }
     expect(got).to eq(GEN_KNOB_ENTRIES)
-    expect(MB::Sound::Arrangement::TrackKnobs.entry_params(MB::Sound::L.gen.techno_beat)).to eq(%i[energy])
+    expect(MB::Sound::Arrangement::TrackKnobs.entry_params(MB::Sound::L.gen.beat.techno)).to eq(%i[energy])
     got.each do |name, ks|
-      inst = MB::Sound::Arrangement::InstrumentPatch.entry_for(lib.index.lookup(:generator, name).settings[:instrument], track: :x)
+      inst = MB::Sound::Arrangement::InstrumentPatch.entry_for(gen_entry(name).settings[:instrument], track: :x)
       expect(ks & inst.params.keys).to eq([]), "#{name}'s knobs share names with #{inst.name}'s"
     end
     s, _ = run(:d2, -> {
-      MB::Sound.track(:drums, MB::Sound::L.gen.techno_beat(energy: 0.8))
-      MB::Sound.track(:d2, MB::Sound::L.gen.techno_beat)
+      MB::Sound.track(:drums, MB::Sound::L.gen.beat.techno(energy: 0.8))
+      MB::Sound.track(:d2, MB::Sound::L.gen.beat.techno)
       MB::Sound.track(:lead, MB::Sound::L.gen.phrygian_motif(mutate: 0.3))
     }, buffers: 1)
     expect(s.knobs.keys.grep(%r{/(energy|density|mutate)\z})).to contain_exactly(:"d2/energy", :"lead/density")
@@ -66,7 +70,7 @@ RSpec.describe MB::Sound::Library::Generators, 'track knobs', :aggregate_failure
     @sessions << s
     MB::Sound::Session.with_context(session: s) do
       GEN_KNOB_ENTRIES.each do |name, ks|
-        entry = lib.index.lookup(:generator, name)
+        entry = gen_entry(name)
         plain = entry.call(**ks.to_h { |k| [k, entry.params[k].default] })
         steered = gens.track_clip(entry, name, s)
         expect(steered).to be_steered
@@ -81,7 +85,7 @@ RSpec.describe MB::Sound::Library::Generators, 'track knobs', :aggregate_failure
   # (each 2.5 s; the cycle example above covers 16 cycles)
   GEN_KNOB_ENTRIES.each do |name, ks|
     it "render #{name} on a track bit for bit with its knobs (#{ks.join(', ')}) and with the plain defaults" do
-      entry = lib.index.lookup(:generator, name)
+      entry = gen_entry(name)
       s, got = run(:t, -> { MB::Sound.track(:t, entry) }, buffers: 150)
       expect(s.knobs.keys).to include(*ks.map { |k| :"t/#{k}" })
       _, ref = run(:t, -> { MB::Sound.track(:t, entry.call(**ks.to_h { |k| [k, entry.params[k].default] })) }, buffers: 150)
@@ -91,11 +95,11 @@ RSpec.describe MB::Sound::Library::Generators, 'track knobs', :aggregate_failure
   end
 
   it 'turn: a knob at 0.9 renders what energy: 0.9 renders' do
-    turned = -> { MB::Sound.track(:t, MB::Sound::L.gen.techno_beat); MB::Sound.turn(:"t/energy", 0.9) }
+    turned = -> { MB::Sound.track(:t, MB::Sound::L.gen.beat.techno); MB::Sound.turn(:"t/energy", 0.9) }
     s, got = run(:t, turned, buffers: 150)
     expect(s.knobs[:"t/energy"].value).to eq(0.9)
-    _, ref = run(:t, -> { MB::Sound.track(:t, MB::Sound::L.gen.techno_beat(energy: 0.9)) }, buffers: 150)
-    _, plain = run(:t, -> { MB::Sound.track(:t, MB::Sound::L.gen.techno_beat) }, buffers: 150)
+    _, ref = run(:t, -> { MB::Sound.track(:t, MB::Sound::L.gen.beat.techno(energy: 0.9)) }, buffers: 150)
+    _, plain = run(:t, -> { MB::Sound.track(:t, MB::Sound::L.gen.beat.techno) }, buffers: 150)
     expect(got).to eq(ref)
     expect(got).not_to eq(plain)
   end
@@ -131,12 +135,12 @@ RSpec.describe MB::Sound::Library::Generators, 'track knobs', :aggregate_failure
 
   it 'save in set documents as the calls, the knobs as knob lines, and load back steered' do
     s, _ = run(:drums, -> {
-      MB::Sound.track(:drums, MB::Sound::L.gen.techno_beat)
-      MB::Sound.scene(:b, drums: MB::Sound::L.gen.techno_beat(seed: 3))
+      MB::Sound.track(:drums, MB::Sound::L.gen.beat.techno)
+      MB::Sound.scene(:b, drums: MB::Sound::L.gen.beat.techno(seed: 3))
       MB::Sound.knob(:"drums/energy").set(0.7, frame: 0)
     }, buffers: 1)
     text = MB::Sound::GraphIO.dump(s.arrangement, name: 'g')
-    expect(text).to include('knob :"drums/energy", (0.0..1.0).at(0.7)', '= L.gen.techno_beat(seed: 3)', 'scene :b, drums: ')
+    expect(text).to include('knob :"drums/energy", (0.0..1.0).at(0.7)', '= L.gen.beat.techno(seed: 3)', 'scene :b, drums: ')
     s2 = MB::Sound::Session.new(realtime: false)
     @sessions << s2
     MB::Sound::Session.with_context(session: s2) { MB::Sound::GraphIO.load(text) }

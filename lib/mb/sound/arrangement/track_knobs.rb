@@ -38,6 +38,7 @@ module MB
           # (generators' ranged params, read once a cycle; the clip, not the
           # patch, reads them: Library::Generators.track_clip; gen-knobs-1)
           generator: ->(entry) { MB::Sound::Library::Generators.knob_params(entry) },
+          beat: ->(entry) { MB::Sound::Library::Generators.knob_params(entry) },
         }.freeze
 
         module_function

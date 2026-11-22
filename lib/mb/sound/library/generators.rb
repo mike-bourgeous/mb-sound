@@ -9,10 +9,10 @@ module MB
       # material for a track) and section chains (kind and family :flow,
       # under L.flow: markov and lsystem sources that drive a flow).
       #
-      #     L.gen.techno_beat                                  # the Entry
-      #     L.gen.techno_beat(seed: 3, energy: knob(:energy))  # its Clip
-      #     L.gen.techno_beat.()                               # the Clip at the entry's defaults (prints L.gen.techno_beat(seed: 5))
-      #     track :drums, L.gen.techno_beat                    # on its kit (the TR-909), energy the knob :"drums/energy"
+      #     L.gen.beat.techno                                  # the Entry
+      #     L.gen.beat.techno(seed: 3, energy: knob(:energy))  # its Clip
+      #     L.gen.beat.techno.()                               # the Clip at the entry's defaults (prints L.gen.beat.techno(seed: 5))
+      #     track :drums, L.gen.beat.techno                    # on its kit (the TR-909), energy the knob :"drums/energy"
       #     track :lead, L.gen.phrygian_motif, :tine_piano     # on another instrument
       #     flow L.flow.techno_chain                           # the chain over this session's scenes
       #     L.flow.techno_chain(seed: 4)                       # the chain, reseeded
@@ -21,8 +21,8 @@ module MB
       # with defaults; given keywords replace them, unknown ones raise with
       # did-you-mean), and records the call on what it built, so recipes,
       # graph documents, set documents, and template code print it back
-      # as `L.gen.techno_beat(seed: 3, energy: energy)` (the defaults with
-      # their seed: `L.gen.techno_beat(seed: 5)`) and load it again (the
+      # as `L.gen.beat.techno(seed: 3, energy: energy)` (the defaults with
+      # their seed: `L.gen.beat.techno(seed: 5)`) and load it again (the
       # loader walks `L.gen`/`L.flow` chains, GraphIO::Registry).  On a
       # track, the steering params a call leaves out are the track's knobs
       # (.track_clip).
@@ -35,7 +35,7 @@ module MB
       # `flow :x, bars: { ... } do |seed: 1| markov(...) end`; FileLoader).
       module Generators
         # The receiver of a recorded entry call, printed as its text
-        # ("L.gen" in `L.gen.techno_beat(seed: 3)`; RubyWriter and
+        # ("L.gen.beat" in `L.gen.beat.techno(seed: 3)`; RubyWriter and
         # RubyValue print it; the graph document loader reads the chain
         # back through the heads).
         Path = Data.define(:text) do
@@ -94,8 +94,21 @@ module MB
         # +describe+ overrides DESCRIPTIONS; +instrument+ (an instrument or
         # kit name, e.g. :tr909) is what plays it on a track given no other
         # and in `play`/`audition`.
-        def generator(name, tags: [], about: nil, instrument: nil, params: -> { {} }, describe: {}, &block)
-          define(:generator, name, tags: tags, about: about, params: params, describe: describe, settings: { instrument: instrument }, block: block)
+        # +family+ puts it in a sub-namespace of L.gen (:beat for
+        # L.gen.beat.rock; see .beat).
+        def generator(name, tags: [], about: nil, instrument: nil, family: :generator, params: -> { {} }, describe: {}, &block)
+          define(:generator, name, tags: tags, about: about, params: params, describe: describe, settings: { instrument: instrument },
+                 family: family, block: block)
+        end
+
+        # Registers a drum beat generator +name+ in the L.gen.beat family
+        # (drum-gen-1, the maintainer's "families: L.gen.beat.rock"):
+        # `L.gen.beat.rock`, printed and saved so; `L.gen.rock` reaches it
+        # too (a sub-namespace's name narrows like a tag under the head).
+        # +kit+ (a kit name: :acoustic, :tr909) is what plays it on a
+        # track given no other; the rest as .generator.
+        def beat(name, kit:, **opts, &block)
+          generator(name, instrument: kit, family: :beat, **opts, &block)
         end
 
         # Registers a section chain +name+ (an L.flow entry): +block+ takes
@@ -110,22 +123,23 @@ module MB
         end
 
         # Registers an entry of +kind+ (see .generator and .flow).
-        def define(kind, name, tags:, about:, params:, describe:, settings:, block:)
+        def define(kind, name, tags:, about:, params:, describe:, settings:, block:, family: kind)
           raise ArgumentError, "#{kind} #{name.inspect} needs a block" unless block
           file, line = block.source_location
           Library.index.register(entry(
             kind, name, tags: tags, about: about, location: "#{file.delete_prefix("#{ROOT}/")}:#{line}",
-            params: -> { declare(MB::Sound.instance_exec(&params), describe) }, settings: settings, block: block
+            params: -> { declare(MB::Sound.instance_exec(&params), describe) }, settings: settings, family: family, block: block
           ))
         end
 
-        # An Entry of +kind+ (:generator or :flow) building with +block+
-        # (see .run); +params+ is { name => Param } or a Proc making it;
-        # the rest as Entry.new takes it.
-        def entry(kind, name, params:, settings:, block:, **rest)
+        # An Entry of +kind+ (:generator or :flow; +family+ the kind, or a
+        # sub-namespace such as :beat) building with +block+ (see .run);
+        # +params+ is { name => Param } or a Proc making it; the rest as
+        # Entry.new takes it.
+        def entry(kind, name, params:, settings:, block:, family: kind, **rest)
           built = nil
           builder = ->(*args, **kw, &b) { run(built, block, args, kw, b) }
-          built = Entry.new(name: name, kind: kind, family: kind, params: params, settings: settings.compact, builder: builder, **rest)
+          built = Entry.new(name: name, kind: kind, family: family, params: params, settings: settings.compact, builder: builder, **rest)
           BLOCKS[built] = block
           built
         end
@@ -194,7 +208,7 @@ module MB
         # defaults, or with the keywords the call gave) with the session
         # knobs :"track/param" steering the .knob_params the call didn't
         # give (Arrangement::TrackKnobs.knob_for: made at the param's value
-        # with its range, or reused), so `track :drums, L.gen.techno_beat`
+        # with its range, or reused), so `track :drums, L.gen.beat.techno`
         # turns with :"drums/energy" and renders like the plain values
         # until it is turned.  +reuse+ (scenes, bg, swap) keeps an existing
         # knob as it is instead of TrackKnobs' rules for a track's new
@@ -248,7 +262,7 @@ module MB
         GIVEN = ObjectSpace::WeakKeyMap.new
 
         # The clip .track_clip built +clip+ from (`track :drums, drums`
-        # with `drums = L.gen.techno_beat(seed: 5)`), or nil.
+        # with `drums = L.gen.beat.techno(seed: 5)`), or nil.
         def given_clip(clip)
           GIVEN[clip]
         end
@@ -303,8 +317,8 @@ module MB
         # walked block) with the params' defaults and the given values,
         # recording the call on the result (see the module comment).  The
         # call records its seed written out (the maintainer, 2026-11-02:
-        # "Write the seed"): `L.gen.techno_beat.()` prints back as
-        # `L.gen.techno_beat(seed: 5)`.  +knobs+ ({ param => knob }, from
+        # "Write the seed"): `L.gen.beat.techno.()` prints back as
+        # `L.gen.beat.techno(seed: 5)`.  +knobs+ ({ param => knob }, from
         # .track_clip) steer the params a track gives knobs to: the block
         # gets them, the call records only +kwargs+ (a track gives the
         # knobs again when it plays the call).
@@ -345,7 +359,7 @@ module MB
           raise ArgumentError, "flow #{entry.name.inspect} (#{entry.location}) built #{result.class}, not a markov(...) or lsystem(...)"
         end
 
-        # [Path of the head, word] of +path+ ("L.gen.techno_beat").
+        # [Path of the head, word] of +path+ ("L.gen.beat.techno").
         def split_path(path)
           head, _, word = path.rpartition('.')
           [Path.new(head), word.to_sym]
@@ -398,7 +412,7 @@ module MB
           "#{path}(#{kwargs.map { |k, v| "#{k}: #{value_text.call(v)}" }.join(', ')})"
         end
 
-        # Ruby for +entry+ built at its defaults: `L.gen.techno_beat(seed:
+        # Ruby for +entry+ built at its defaults: `L.gen.beat.techno(seed:
         # 5)` (the family's code form; `L.gen.x.()` without a seed param).
         def default_call_text(entry)
           call_text(Built.new(entry, {}.freeze))
@@ -483,8 +497,11 @@ module MB
       end
 
       index.define_family(:generator, kind: :generator, owner: Generators,
-                                      about: 'Clip generators: note material for a track (L.gen.techno_beat(seed: 3))',
+                                      about: 'Clip generators: note material for a track (L.gen.beat.techno(seed: 3))',
                                       code: ->(e) { Generators.default_call_text(e) })
+      index.define_family(:beat, kind: :generator, owner: Generators, namespace: true,
+                                 about: 'Drum beat generators: rows of drum roles steered by energy and swing (L.gen.beat.rock(seed: 3))',
+                                 code: ->(e) { Generators.default_call_text(e) })
       index.define_family(:flow, kind: :flow, owner: Generators,
                                  about: 'Section chains a flow plays (flow L.flow.techno_chain; generate L.flow.techno_chain.(), bars: ...)',
                                  code: ->(e) { Generators.default_call_text(e) })

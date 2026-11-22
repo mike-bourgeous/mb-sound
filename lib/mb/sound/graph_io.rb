@@ -69,7 +69,7 @@ module MB
       # as before (`3r/4` and `3/4r` are the same Rational, and their
       # Integers stay Integers).  Format 8 (lib-gen-1, 2026-10-31) calls
       # the library's generators: a clip or chain an L.gen or L.flow entry
-      # built prints as that call (`L.gen.techno_beat(seed: 3)`,
+      # built prints as that call (`L.gen.beat.techno(seed: 3)`,
       # `L.flow.techno_chain.()`), which older mb-sound can't read (it
       # stops at the format line instead of an unknown name `L`).  Format
       # 9 (tempo-3, 2026-11-01; "bpm = base, tempo = live") writes a
@@ -102,6 +102,7 @@ module MB
         11 => :metadata,
         12 => :following_scales,
         13 => :rack_slots,
+        14 => :beat_family,
       }.freeze
       FORMAT = FORMATS.keys.max
 
