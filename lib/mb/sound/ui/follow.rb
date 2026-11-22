@@ -77,8 +77,10 @@ module MB
           # frame: up to half a period ahead, so a heard time just after a
           # frame starts doesn't wait a whole frame; an output latency near
           # a frame period otherwise made the visible updates 33 ms apart
-          # now and then, ui-perf-1)
-          wall = MB::U.clock_now + (FrameRate.snapshot_timed && @pacer ? @pacer.period * 0.5 : 0.0)
+          # now and then, ui-perf-1); +now+ is the frame's clock time (a
+          # second clock read here made the choice depend on how long the
+          # frame took to get this far)
+          wall = now + (FrameRate.snapshot_timed && @pacer ? @pacer.period * 0.5 : 0.0)
           i = ring.length - 1
           while i >= 0
             x = ring[i]
