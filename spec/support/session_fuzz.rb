@@ -863,6 +863,18 @@ module SessionFuzz
         "turn :#{t}, release: #{release}, level: #{s.pick([0.4, 1])}, over: #{s.pick(['1/2r', '1'])}#{s.on}"
       end
     },
+    # gen-morph-1: a morph of two drum beats swapped onto a clip track,
+    # its knob :"track/morph" starting somewhere, then held, ramped, or
+    # moved by a square LFO (read per beat; buffer sizes and plans must not
+    # change what lands)
+    ->(s) {
+      next if s.swappable.empty?
+
+      t = s.pick(s.swappable)
+      a, b = %i[rock pop funk house dnb techno halftime].sample(2, random: s.rng)
+      turn = s.pick(['', "; turn :\"#{t}/morph\", 1, over: 1", "; turn :\"#{t}/morph\", 2.beats.lfo.square.at(0..1)"])
+      "swap :#{t}, L.gen.beat.#{a}.morph(:#{b}, morph: #{s.pick([0, 0.25, 0.5, 1])})#{s.on}#{turn}"
+    },
     # (new commands go here, at the end)
   ].freeze
 
