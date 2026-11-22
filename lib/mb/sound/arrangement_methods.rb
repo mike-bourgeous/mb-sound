@@ -102,7 +102,9 @@ module MB
 
       # Gives track +name+ the effect insert +effects+ (Arrangement::Fx): a
       # library effect (`L.fx.reverb.hall`, `:hall`, `{ reverb: :plate }`),
-      # a Proc taking the signal, or a list of those, processing what its
+      # an effect rack (`rack(:glue)`, `arack { |sig| ... }`, or a named
+      # rack's name: `:glue`, also one `master.save_rack :glue` saved), a
+      # Proc taking the signal, or a list of those, processing what its
       # instrument or patch plays; `:off` takes it out.  On a playing track
       # it lands at the track's launch point (or +on:+/+in:+/+at:+), the
       # instrument's notes carrying on and the old effect's tail ringing
@@ -112,6 +114,7 @@ module MB
       #
       #     fx :keys, L.fx.reverb.hall
       #     fx :keys, [:juno1, :hall], on: :bar
+      #     fx :keys, :glue                # a rack (master.save_rack :glue)
       #     fx :keys, :off
       #
       # A block is not an effect: Ruby would drop it silently (the
