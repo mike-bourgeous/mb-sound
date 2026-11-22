@@ -161,8 +161,8 @@ module MB
       # for its main out) route a named player (see BusMethods).
       #
       # On a track (see ArrangementMethods#track), a clip or generator
-      # entry is its clip at the defaults: `bg :drums, L.gen.techno_beat`
-      # plays `L.gen.techno_beat.()` on the track, steered by the track's
+      # entry is its clip at the defaults: `bg :drums, L.gen.beat.techno`
+      # plays `L.gen.beat.techno.()` on the track, steered by the track's
       # knobs (:"drums/energy"; a new player auditions the entry, as #play
       # does).
       #
@@ -187,7 +187,7 @@ module MB
         # A library entry given to a track: a clip or generator entry is its
         # clip at the defaults (as `track :x, entry` takes it), played on
         # the track; instruments and effects say how to change the track's
-        # (lesson-fixes-1: `bg :drums, L.gen.techno_beat` played the 8-bar
+        # (lesson-fixes-1: `bg :drums, L.gen.beat.techno` played the 8-bar
         # audition in place of the track; `play` and new players keep it)
         if sound.is_a?(Library::Entry) && name && Session.current.arrangement.tracks[name]
           sound = Internal.entry_for_track('bg', name, sound)

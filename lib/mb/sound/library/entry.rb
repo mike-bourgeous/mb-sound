@@ -160,10 +160,22 @@ module MB
 
         # The head path that reaches it: "L.fx.hall" when the name is
         # unique under its head, else with the family ("L.fx.reverb.plate").
+        # An entry of a family that is a sub-namespace of its head (see
+        # Family) always prints with its family: "L.gen.beat.rock".
         def head_path(index = Library.index)
           head = HEADS.key(kind)
+          return [*(head ? ['L', head] : ['L.all']), family, name].join('.') if namespaced?
           same = index.entries(kind: kind).count { |e| e.name == name }
           [*(head ? ['L', head] : ['L.all']), (family if same > 1 && family != :preset), name].compact.join('.')
+        end
+
+        # True when the entry's family is a sub-namespace of its head
+        # (L.gen.beat: see Family's +namespace+): its name lives inside
+        # the family, so under the head alone the name narrows like a tag
+        # (`L.gen.rock` is the one entry left, `L.gen.techno` the beat and
+        # the entries tagged techno).
+        def namespaced?
+          Library.families[family]&.namespace || false
         end
 
         # How to chain effects +a+ then +b+ (head paths), for the errors of
@@ -274,8 +286,14 @@ module MB
       # track knobs), so `glass` under L.inst is the struck wine glass
       # (maintainer, 2026-10-31: "Struck glass wins"); `sq80(:glass)` and
       # the family's own lookups still read the class presets.
-      Family = Data.define(:name, :kind, :about, :owner, :apply, :code, :document) do
-        def initialize(name:, kind:, about: nil, owner: nil, apply: nil, code: nil, document: nil)
+      #
+      # +namespace+ (true or false) makes the family a sub-namespace of its
+      # head (drum-gen-1, the maintainer's "families: L.gen.beat.rock"):
+      # its entries print as `L.gen.beat.rock`, `L.gen.beat.` lists them,
+      # and their names don't clash with tags under the head (see
+      # Entry#namespaced?).
+      Family = Data.define(:name, :kind, :about, :owner, :apply, :code, :document, :namespace) do
+        def initialize(name:, kind:, about: nil, owner: nil, apply: nil, code: nil, document: nil, namespace: false)
           raise ArgumentError, "Unknown entry kind #{kind.inspect} (#{KINDS.join(', ')})" unless KINDS.include?(kind)
           super
         end

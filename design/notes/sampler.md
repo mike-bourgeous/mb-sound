@@ -14,6 +14,8 @@ Sampler and audio capture, stage 1 of "Sampler + second drum machine" (maintaine
 
 The panel's asks, in their words (`research-persona-panel` 0c08a17d, jungle friction F1-F6): "`rec = bounce(drums, 2.bars, bpm: 138.75)` for the record, `rec.slices(16)` to cut it, slice and pitch kept as separate things, `rec.at(7.n16)` for tracker 9xx offsets, and reverse per hit"; "`node.bounce(1.bar, root: F1)`, then reverse and slices on top"; "build the sampler like a tracker, with slices you can see, offsets you can type, and pitch kept separate from slice, because in jungle the chop is the instrument"; S950-style lofi and a cyclic timestretch as the first effects; `help :sampler` and a chop lesson.
 
+- Fonts by name and drum kits by role (drum-gen-1): `sf2('Black_Pearl')` searches `Sampler::FontPath`; drum presets move their keys by `Drums::Roles` maps (`Instrument#remap_keys`, `#drum_map`, `sf2(..., roles: false)`); `kit(:acoustic)`.  Details in drums.md, "Drum roles and kits by name".
+
 ## At a glance
 
 - `Sample['x.flac']` (files cached; tags keep settings), `Sample[narray]`, `bounce(graph, 2.bars, bpm:)` / `node.bounce(1.bar, root: F1)` (offline at a private tempo), `capture_audio(4.bars, from: :master | node)` (live, `Session#capture_audio`); loop modes `:one_shot`/`:no_loop`/`:forward`/`:ping_pong`/`:release`.  Views share audio and playback tables (`slices(16)`, `slices(:onsets)`, `.rev`, `.at(7.n16)`, `.looped`, `.fade`, `.gain`, `.transpose`); edits make new audio (`.bits`, `.lofi(:s950 | :sp1200 | :mpc60)`, `.stretch(r, cycle:)`, `.mono`).

@@ -732,7 +732,7 @@ module MB
             elsif args.any?
               text += "(#{args.join(', ')})"
             elsif c.receiver.is_a?(MB::Sound::Library::Generators::Path)
-              # A library entry's call at its defaults: `L.gen.techno_beat.()`
+              # A library entry's call at its defaults: `L.gen.beat.techno.()`
               # (the bare head path is the Entry)
               text += '.()'
             elsif recv.nil? && @used.include?(name)

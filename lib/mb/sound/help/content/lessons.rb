@@ -336,16 +336,16 @@ module MB
 
       step 'A beat' do
         say <<~TEXT
-          `L.gen.techno_beat` evolves: an anchored kick and clap, drifting
+          `L.gen.beat.techno` evolves: an anchored kick and clap, drifting
           ghost snares, mutating Euclidean hats, a fill every 8 bars.  It
           plays on the TR-909 and joins at the next bar.
         TEXT
         type do
-          track :l_drums, L.gen.techno_beat
+          track :l_drums, L.gen.beat.techno
           level :l_drums, -21.db
           bg :l_drums
         end
-        check('L.gen.techno_beat playing on :l_drums') { Session.current.playing_after_queue?(:l_drums) && Help.track_built(:l_drums)&.entry&.name == :techno_beat }
+        check('L.gen.beat.techno playing on :l_drums') { Session.current.playing_after_queue?(:l_drums) && Help.track_built(:l_drums)&.entry&.then { |e| e.family == :beat && e.name == :techno } }
       end
 
       step 'Seeds' do
@@ -355,10 +355,10 @@ module MB
           too), and another seed is a variation of the same recipe.  `bg`
           gives a track a new clip at its next bar.  Calls print back with
           their seed written out (a saved set shows the default as
-          `L.gen.techno_beat(seed: 5)`), so a set knows which line it
+          `L.gen.beat.techno(seed: 5)`), so a set knows which line it
           played.
         TEXT
-        type { bg :l_drums, L.gen.techno_beat(seed: 3) }
+        type { bg :l_drums, L.gen.beat.techno(seed: 3) }
         check('the beat at seed 3') { Help.track_built(:l_drums)&.kwargs&.[](:seed) == 3 }
       end
 
@@ -370,7 +370,7 @@ module MB
           scenes take them).  A generator reads them once a bar just before
           it starts, so a turn steers the next bar: below 0.5 the parts
           thin out, above it they fill in (raising it only adds hits).  A
-          call that gives one keeps it: `L.gen.techno_beat(energy: 0.8)`, or
+          call that gives one keeps it: `L.gen.beat.techno(energy: 0.8)`, or
           `energy: knob(:x)` for one knob over several parts.
         TEXT
         type do
@@ -442,7 +442,7 @@ module MB
           lesson's own shelf, not yours; save again afterwards to keep them.
         TEXT
         type do
-          save :l_beat, L.gen.techno_beat(seed: 3)
+          save :l_beat, L.gen.beat.techno(seed: 3)
           save :l_moods, @l_moods, bars: { l_dark: 4, l_lift: [4, 8], l_hush: 2 }
           bg :l_drums, L.gen.l_beat
         end

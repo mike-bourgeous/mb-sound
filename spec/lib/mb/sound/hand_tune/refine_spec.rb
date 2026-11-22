@@ -169,7 +169,10 @@ RSpec.describe(MB::Sound::RefineMethods, :aggregate_failures) do
       expect(knob(:"lead/cutoff")).to eq(1000.0)
       expect(knob(:"lead/resonance")).to eq(0.25)
       expect { MB::Sound.turn(:lead, cutof: 500.0) }.to raise_error(ArgumentError, /:lead has no knob cutof \(did you mean cutoff:\?\) \(its knobs: cutoff, resonance\)/)
-      expect { MB::Sound.turn(:lead, cutoff: 500.0, over: 1) }.to raise_error(ArgumentError, /take plain values/)
+      # (form-knobs-1: over: applies to each knob, one command)
+      entries = MB::Sound.turn(:lead, cutoff: 500.0, resonance: 0.5, over: 1)
+      expect(entries.map(&:data)).to all(include(over: 1))
+      expect { MB::Sound.turn(:lead, cutoff: 500.0, follow: 1.constant) }.to raise_error(ArgumentError, /follow: turns one knob/)
     end
   end
 end

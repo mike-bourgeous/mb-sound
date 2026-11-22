@@ -103,9 +103,12 @@ RSpec.describe MB::Sound::Library do
         expect(e.builder || e.settings).not_to be_nil, e.label
         expect(e.to_ruby).to be_a(String)
         expect(e.head_path).to start_with('L.')
-        # Every tag is a word, and no name is another entry's tag under the same head
+        # Every tag is a word, and no name is another entry's tag under the
+        # same head (a sub-namespace's names live in their family, L.gen.beat.techno,
+        # and narrow like tags under the head: Entry#namespaced?)
         others = shipped.select { |o| o.kind == e.kind && !o.equal?(e) }
-        expect(others.flat_map(&:tags)).not_to include(e.name), e.label
+        expect(others.flat_map(&:tags)).not_to include(e.name), e.label unless e.namespaced?
+        expect(e.head_path).to eq("L.#{lib::HEADS.key(e.kind)}.#{e.family}.#{e.name}") if e.namespaced?
       end
     end
 

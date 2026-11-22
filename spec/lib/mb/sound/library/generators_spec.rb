@@ -15,7 +15,7 @@ module MB
       # name: ->(seed) { clip }.  Each entry's build with the same seed must
       # give the same events, cycle for cycle.
       INLINE = {
-        techno_beat: ->(seed) {
+        techno: ->(seed) {
           beats(16, hold: 2, swing: 0.53, energy: 0.5, over: 4, seed: seed) do
             kick [1, 0, 0, 0] * 4, keep: [0, 4, 8, 12], drift: 0.1
             clap [0, 0, 0, 0, 1, 0, 0, 0] * 2, keep: [4, 12], level: 0.85
@@ -202,6 +202,10 @@ RSpec.describe MB::Sound::Library::Generators do
   end
 
   # Cycles 0...n of +clip+'s events.
+  # The shipped L.gen entry named +name+ (its family :generator, or
+  # :beat for the drum beats).
+  def gen_entry(name) = MB::Sound::L.gen.entries.find { |e| e.name == name }
+
   def cycles(clip, n = 6)
     (0...n).map { |c| clip.events_for(c) }
   end
@@ -214,13 +218,13 @@ RSpec.describe MB::Sound::Library::Generators do
       expect(flow.map(&:name)).to match_array(refs::CHAINS.keys)
       (gen + flow).each do |e|
         expect(e).to be_frozen
-        expect(e.family).to eq(e.kind)
+        expect(e.family).to eq(e.kind == :generator && e.namespaced? ? :beat : e.kind)
         expect(e.about).to be_a(String)
         expect(e.tags).not_to be_empty
         expect(e.params).not_to be_empty
         expect(e.params.values).to all(be_a(MB::Sound::Param))
         expect(e.params.keys).to include(:seed)
-        expect(e.head_path).to eq("L.#{e.kind == :flow ? 'flow' : 'gen'}.#{e.name}")
+        expect(e.head_path).to eq("L.#{e.kind == :flow ? 'flow' : 'gen'}.#{'beat.' if e.family == :beat}#{e.name}")
         expect(e.location).to match(%r{\Alib/mb/sound/.*\.rb:\d+\z})
       end
       gen.each { |e| expect(MB::Sound::Arrangement::InstrumentPatch.entry_for(e.settings[:instrument], track: :x)).to be_a(lib::Entry) }
@@ -231,7 +235,7 @@ RSpec.describe MB::Sound::Library::Generators do
     it 'build the clips the inline code built, cycle for cycle, for each seed' do
       refs::INLINE.merge(refs::DEMO_INLINE, refs::AMBIENT_INLINE, refs::BLUR_INLINE).each do |name, inline|
         [nil, 3].each do |seed|
-          entry = lib.index.lookup(:generator, name)
+          entry = gen_entry(name)
           seed ||= entry.params[:seed].default
           built = entry.call(seed: seed)
           expect(built).to be_a(MB::Sound::Sequence::Clip)
@@ -245,10 +249,10 @@ RSpec.describe MB::Sound::Library::Generators do
     end
 
     it 'steer like the inline code with other values (a knob-steered beat renders the same through a document)' do
-      ref = MB::Sound.instance_exec(4, &refs::INLINE[:techno_beat])
-      expect(cycles(MB::Sound::L.gen.techno_beat(seed: 4, energy: 0.5))).to eq(cycles(ref))
+      ref = MB::Sound.instance_exec(4, &refs::INLINE[:techno])
+      expect(cycles(MB::Sound::L.gen.beat.techno(seed: 4, energy: 0.5))).to eq(cycles(ref))
       hot = MB::Sound.instance_exec { beats(16, hold: 2, swing: 0.53, energy: 0.9, over: 4, seed: 4) { kick [1, 0, 0, 0] * 4; hat euclid(10, 16), mutate: 0.5 } }
-      expect(cycles(MB::Sound::L.gen.techno_beat(seed: 4, energy: 0.9))).not_to eq(cycles(MB::Sound::L.gen.techno_beat(seed: 4)))
+      expect(cycles(MB::Sound::L.gen.beat.techno(seed: 4, energy: 0.9))).not_to eq(cycles(MB::Sound::L.gen.beat.techno(seed: 4)))
       expect(hot).to be_a(MB::Sound::Sequence::Clip)
     end
 
@@ -279,27 +283,27 @@ RSpec.describe MB::Sound::Library::Generators do
       amb = MB::Sound.genre(:ambient)
       expect(amb.generator.sections).to eq(12)
       { drone: :ambient_roots, motif: :ambient_motif, harp: :ambient_figure }.each do |clip, name|
-        expect(cycles(amb.clips[clip], 4)).to eq(cycles(MB::Sound.instance_exec(lib.index.lookup(:generator, name).params[:seed].default, &refs::AMBIENT_INLINE[name]), 4))
-        expect(amb.to_ruby).to include("clip #{clip.inspect}, L.gen.#{name}(seed: #{lib.index.lookup(:generator, name).params[:seed].default})")
+        expect(cycles(amb.clips[clip], 4)).to eq(cycles(MB::Sound.instance_exec(gen_entry(name).params[:seed].default, &refs::AMBIENT_INLINE[name]), 4))
+        expect(amb.to_ruby).to include("clip #{clip.inspect}, L.gen.#{name}(seed: #{gen_entry(name).params[:seed].default})")
       end
     end
   end
 
   describe 'calls' do
     it 'print back as the library call and load again (graph documents walk L.gen chains)' do
-      expect(MB::Sound::L.gen.techno_beat(seed: 3).to_ruby).to eq('L.gen.techno_beat(seed: 3)')
+      expect(MB::Sound::L.gen.beat.techno(seed: 3).to_ruby).to eq('L.gen.beat.techno(seed: 3)')
       # (a call at its defaults prints its seed: the maintainer, 2026-11-02, "Write the seed")
-      expect(MB::Sound::L.gen.techno_beat.().to_ruby).to eq('L.gen.techno_beat(seed: 5)')
-      expect(MB::Sound::L.gen.techno_beat(energy: 0.8).to_ruby).to eq('L.gen.techno_beat(seed: 5, energy: 0.8)')
-      expect(MB::Sound::L.gen.techno_beat.to_ruby).to eq('L.gen.techno_beat(seed: 5)')
+      expect(MB::Sound::L.gen.beat.techno.().to_ruby).to eq('L.gen.beat.techno(seed: 5)')
+      expect(MB::Sound::L.gen.beat.techno(energy: 0.8).to_ruby).to eq('L.gen.beat.techno(seed: 5, energy: 0.8)')
+      expect(MB::Sound::L.gen.beat.techno.to_ruby).to eq('L.gen.beat.techno(seed: 5)')
       expect(MB::Sound::L.flow.techno_chain(seed: 4).to_ruby).to eq('L.flow.techno_chain(seed: 4)')
       expect(MB::Sound::L.flow.techno_chain.().reseed(5).to_ruby).to eq('L.flow.techno_chain(seed: 5)')
       expect(MB::Sound::L.flow.techno_chain(seed: 4).reseed(132).to_ruby).to eq('L.flow.techno_chain(seed: 132)')
       expect(MB::Sound::L.flow.techno_chain.().to_ruby).to eq('L.flow.techno_chain(seed: 132)')
 
-      g = MB::Sound.tr909(MB::Sound::L.gen.techno_beat(seed: 3, energy: 0.8))
+      g = MB::Sound.tr909(MB::Sound::L.gen.beat.techno(seed: 3, energy: 0.8))
       text = MB::Sound::GraphIO.dump(g, name: 'beat')
-      expect(text).to include('tr909(L.gen.techno_beat(seed: 3, energy: 0.8)')
+      expect(text).to include('tr909(L.gen.beat.techno(seed: 3, energy: 0.8)')
       g2 = MB::Sound::GraphIO.load(text)
       a = SpecBuffers.join(4.times.map { g.sample(2400).dup })
       b = SpecBuffers.join(4.times.map { g2.sample(2400).dup })
@@ -311,24 +315,24 @@ RSpec.describe MB::Sound::Library::Generators do
     end
 
     it 'remember what built a clip or chain through garbage collection (an ObjectSpace::WeakMap would forget its values)' do
-      c = MB::Sound::L.gen.techno_beat(seed: 3)
+      c = MB::Sound::L.gen.beat.techno(seed: 3)
       m = MB::Sound::L.flow.techno_chain(seed: 3)
       2.times { GC.start(full_mark: true, immediate_sweep: true) }
       expect(gens.instrument(c)).to eq(:tr909)
-      expect(c.to_ruby).to eq('L.gen.techno_beat(seed: 3)')
+      expect(c.to_ruby).to eq('L.gen.beat.techno(seed: 3)')
       expect(gens.origin(m).entry.name).to eq(:techno_chain)
     end
 
     it 'take keywords only, with did-you-mean for typos, and words with arguments call their entry' do
-      expect { MB::Sound::L.gen.techno_beat(enrgy: 0.3) }.to raise_error(ArgumentError, /unknown keyword enrgy:.*energy:/m)
-      expect { MB::Sound::L.gen.techno_beat.(3) }.to raise_error(ArgumentError, /takes its params as keywords/)
+      expect { MB::Sound::L.gen.beat.techno(enrgy: 0.3) }.to raise_error(ArgumentError, /unknown keyword enrgy:.*energy:/m)
+      expect { MB::Sound::L.gen.beat.techno.(3) }.to raise_error(ArgumentError, /takes its params as keywords/)
       expect { MB::Sound::L.gen.generative_steer(seed: 3) }.to raise_error(ArgumentError, /name one/)
-      expect(MB::Sound::L.gen.techno_beat).to be_a(lib::Entry)
-      expect(MB::Sound::L.gen.techno_beat.words).not_to include(:generator)
+      expect(MB::Sound::L.gen.beat.techno).to be_a(lib::Entry)
+      expect(MB::Sound::L.gen.beat.techno.words).not_to include(:generator)
     end
 
     it 'complete under L.gen and L.flow without running anything' do
-      expect(lib::Heads.completions('L.gen.tec')).to eq(['L.gen.techno', 'L.gen.techno_beat']) # (a tag, then the entry)
+      expect(lib::Heads.completions('L.gen.tec')).to eq(['L.gen.techno', 'L.gen.beat.techno']) # (a tag, then the entry)
       expect(lib::Heads.completions('L.flow.techno_')).to eq(['L.flow.techno_chain'])
       expect(lib::Heads.completions('L.')).to include('L.gen', 'L.flow')
     end
@@ -359,9 +363,9 @@ RSpec.describe MB::Sound::Library::Generators do
     end
 
     it 'play a generator entry on its instrument, or on the one given (either order), as the clip with that instrument' do
-      s, got = run(:drums, -> { MB::Sound.track(:drums, MB::Sound::L.gen.techno_beat) })
-      expect(s.arrangement.tracks[:drums].clip.to_ruby).to eq('L.gen.techno_beat(seed: 5)')
-      _, ref = run(:drums, -> { MB::Sound.track(:drums, MB::Sound::L.gen.techno_beat.(), :tr909) })
+      s, got = run(:drums, -> { MB::Sound.track(:drums, MB::Sound::L.gen.beat.techno) })
+      expect(s.arrangement.tracks[:drums].clip.to_ruby).to eq('L.gen.beat.techno(seed: 5)')
+      _, ref = run(:drums, -> { MB::Sound.track(:drums, MB::Sound::L.gen.beat.techno.(), :tr909) })
       expect(got.abs.max).to be > 0.01
       expect(got).to eq(ref)
 
@@ -377,15 +381,15 @@ RSpec.describe MB::Sound::Library::Generators do
       expect(got).to eq(ref)
     end
 
-    # (lesson-fixes-1: `bg :drums, L.gen.techno_beat` played the 8-bar
-    # audition in place of the track, while `bg :drums, L.gen.techno_beat()`
+    # (lesson-fixes-1: `bg :drums, L.gen.beat.techno` played the 8-bar
+    # audition in place of the track, while `bg :drums, L.gen.beat.techno()`
     # played on it)
     it 'bg of a bare entry on a track plays its clip at the defaults on the track; instruments and effects point to track and fx' do
-      track = -> { MB::Sound.track(:drums, MB::Sound::L.gen.techno_beat(seed: 3)) }
-      s, got = run(:drums, -> { track.(); MB::Sound.bg(:drums, MB::Sound::L.gen.techno_beat, on: :now) })
-      expect(s.arrangement.tracks[:drums].clip.to_ruby).to eq('L.gen.techno_beat(seed: 5)')
+      track = -> { MB::Sound.track(:drums, MB::Sound::L.gen.beat.techno(seed: 3)) }
+      s, got = run(:drums, -> { track.(); MB::Sound.bg(:drums, MB::Sound::L.gen.beat.techno, on: :now) })
+      expect(s.arrangement.tracks[:drums].clip.to_ruby).to eq('L.gen.beat.techno(seed: 5)')
       expect(s.players[:drums]).not_to include('8 bars')
-      _, ref = run(:drums, -> { track.(); MB::Sound.bg(:drums, MB::Sound::L.gen.techno_beat.(), on: :now) })
+      _, ref = run(:drums, -> { track.(); MB::Sound.bg(:drums, MB::Sound::L.gen.beat.techno.(), on: :now) })
       expect(got.abs.max).to be > 0.01
       expect(got).to eq(ref)
 
@@ -396,7 +400,7 @@ RSpec.describe MB::Sound::Library::Generators do
       }, buffers: 1)
 
       # A new player still auditions it
-      s, _ = run(:drums, -> { track.(); MB::Sound.bg(:x, MB::Sound::L.gen.techno_beat, on: :now) }, buffers: 1)
+      s, _ = run(:drums, -> { track.(); MB::Sound.bg(:x, MB::Sound::L.gen.beat.techno, on: :now) }, buffers: 1)
       expect(s.players[:x]).to include('8 bars')
     end
 
@@ -485,19 +489,19 @@ RSpec.describe MB::Sound::Library::Generators do
     end
 
     it 'writes a generator clip and a chain as library statements, knobs read becoming params' do
-      clip = MB::Sound::L.gen.techno_beat(seed: 3)
+      clip = MB::Sound::L.gen.beat.techno(seed: 3)
       path = nil
       expect { path = MB::Sound.save(:beat3, clip, tags: %i[mine], about: 'Seed 3') }.to output(/Saved beat3/).to_stdout
       expect(path).to eq(File.join(save_dir, 'gen', 'beat3.rb'))
       # (the steering params the call left out stay params: on a track,
       # knobs again; gen-knobs-1)
-      energy = MB::Sound::L.gen.techno_beat.params[:energy].to_ruby
+      energy = MB::Sound::L.gen.beat.techno.params[:energy].to_ruby
       expect(energy).to start_with('param :energy, (0.0..1.0).at(0.5), description: ')
       expect(File.read(path)).to eq(<<~RUBY)
         library 1
         generator :beat3, instrument: :tr909, tags: %i[mine], about: "Seed 3" do
           #{energy}
-          L.gen.techno_beat(seed: 3, energy: energy)
+          L.gen.beat.techno(seed: 3, energy: energy)
         end
       RUBY
       expect(MB::Sound::L.gen.beat3.params[:energy].range).to eq(0.0..1.0)
@@ -559,7 +563,7 @@ RSpec.describe MB::Sound::Library::Generators do
       File.write(File.join(project, 'Gemfile'), "gem 'mb-sound'\n")
       path = File.join(user, 'gen/mine.rb')
       FileUtils.mkdir_p(File.dirname(path))
-      File.write(path, "generator :mine, tags: %i[test] do |seed: 1|\n  L.gen.techno_beat(seed: seed)\nend\n")
+      File.write(path, "generator :mine, tags: %i[test] do |seed: 1|\n  L.gen.beat.techno(seed: seed)\nend\n")
       Dir.chdir(project) do
         lib.reload!
         lib.index.clear_uses
@@ -568,7 +572,7 @@ RSpec.describe MB::Sound::Library::Generators do
         expect { out = MB::Sound.collect }.to output(/Collected generator :mine from the user shelf to presets\/gen\/mine\.rb/).to_stdout
         expect(File.read(File.join(project, 'presets/gen/mine.rb'))).to include("generator :mine, tags: %i[test] do |seed: 1|")
         pins = File.read(File.join(project, 'presets/pins.rb'))
-        expect(pins).to match(/pin :generator, :techno_beat, mb_sound: ".*", fingerprint: "\h{16}"/)
+        expect(pins).to match(/pin :beat, :techno, mb_sound: ".*", fingerprint: "\h{16}"/)
         expect(out.map { |e, _| e.name }).to include(:mine)
       end
       expect(lib::Pins.fingerprint_text(lib.index.lookup(:flow, :techno_chain))).to start_with('Library::Generators.flow :techno_chain')

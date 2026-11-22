@@ -49,7 +49,7 @@ module MB
           seed = Integer(seed)
           if @loop
             name = "humanize(#{Duration.format(amount)}, seed: #{seed}#{vary ? '' : ', vary: false'})"
-            with_events(@events, variations: @variations + [Variation.new(name: name, block: ->(events, cycle, clip) {
+            with_events(@events, variations: @variations + [Variation.new(name: name, early: amount.abs, block: ->(events, cycle, clip) {
               Clip.humanized(events, amount, velocity.to_f, vary ? Clip.cycle_seed(seed, cycle) : seed, clip.length)
             })])
           else
