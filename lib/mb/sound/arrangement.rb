@@ -1124,8 +1124,8 @@ module MB
         short = yield(section, t.bar_length)
         steps = short.steps.sum { |_, times| times }
         Session.with_context(session: box) {
-          rehearsal_setup(box, names, section)
-          box.arrangement.launch_form(short, LaunchPoint::NONE, 0)
+          others = rehearsal_setup(box, names, section)
+          box.arrangement.launch_form(rehearsal_sections(short, box, others), LaunchPoint::NONE, 0)
         }
         frames = t.frames_of((steps + 1/2r) * section.to_r, box.sample_rate).to_f
         (frames / box.buffer_size).ceil.times { box.process_buffer }
@@ -1160,7 +1160,8 @@ module MB
       # Gives sandbox +box+ (current) the session's master chain, buses,
       # routes, and clocks, and the tracks named +names+ with the scenes
       # (other tracks left out of them), launching on multiples of
-      # +length+ (a section's), for #rehearse.
+      # +length+ (a section's), for #rehearse.  Returns the names of the
+      # tracks left out.
       def rehearsal_setup(box, names, length)
         s = @session
         box.master(s.master_preset, &s.master_block) if s.master_preset || s.master_block
@@ -1193,8 +1194,37 @@ module MB
         end
 
         others = @mutex.synchronize { @tracks.keys } - names
-        scenes = self.scenes.transform_values { |sc| sc.dup.tap { |c| c.values = sc.values.except(*others).freeze; c.q = nil } }
+        scenes = self.scenes.transform_values { |sc| sc.dup.tap { |c| c.values = rehearsal_values(sc.values, box, others).freeze; c.q = nil } }
         box.arrangement.adopt_rehearsal(tracks, scenes, length)
+        others
+      end
+
+      # Scene or section +values+ without what names a track left out of
+      # rehearsal sandbox +box+ (+others+, see #rehearsal_setup): the
+      # track's own key, and its strip keys (:"pad/level", :"kick/key",
+      # from a track hash's level:), which name a control only while the
+      # track is there (Session::Knobs#track_strip_knob?).  Knobs the box
+      # has copies of (a track's param knobs, :"pad/cutoff") stay, so the
+      # rehearsal turns them as the live form does.  (fixes-17: every
+      # section of a flow whose scenes faded a left-out track's level
+      # failed in the console's warm-up, "Scene :weather names
+      # :"vinyl/level", which is not a track or knob", 13 lines at
+      # `start`, and rehearsed nothing.)
+      def rehearsal_values(values, box, others)
+        return values if others.empty?
+        values.reject { |k, _|
+          next true if others.include?(k)
+          next false unless k.is_a?(Symbol)
+          others.include?(Session::Name[k].owner) && box.names.kind(k) != :knob
+        }
+      end
+
+      # Rehearsal copy +form+ (see #rehearsal_form) with its sections' knob
+      # values filtered as #rehearsal_values filters the scenes'.
+      def rehearsal_sections(form, box, others)
+        return form if others.empty?
+        sections = form.sections.transform_values { |sec| sec.knobs.empty? ? sec : sec.with(knobs: rehearsal_values(sec.knobs, box, others)) }
+        Form.new(sections: sections, order: form.order, phrase_fills: form.phrase_fills)
       end
 
       # Builds +tr+'s patch with +clip+ in sandbox Sessions and plays it
@@ -1682,8 +1712,15 @@ module MB
           @mutex.synchronize { (@built ||= {})[tr.name] = graph }
           set_ahead(tr, graph)
           time = early(tr, musical) # (an attack lead is measured on the new graph)
+          # (a generator clip's first cycles, edge tables, and chase, made
+          # here, not where the graph lands: Session#prepare_clips; a
+          # carrying rebuild's sources go on with the playing clips)
+          @session.prepare_clips(@session.timeline_nodes_in(graph), time) unless carry || time.nil?
           @session.add(graph, name: tr.name, start_time: time, fade: fade || 0, description: "#{tr.name}: #{name_of(clip)}",
-                       warm: -> { GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { tr.build(clip) } }, carry: carry, clip: clip,
+                       # (the warm-up's copy reads the sandbox's knobs, so it plays:
+                       # Library::Generators.copy_reading)
+                       warm: -> { GraphNode::Mixer.with_ring(@session.ring || GraphNode::Mixer.ring_mode) { tr.build(Library::Generators.copy_reading(clip, Session.current)) } },
+                       carry: carry, clip: clip,
                        spill: spill, full_now: full_now)
           @mutex.synchronize { tr.clip = clip } unless carry
         elsif @session.resumable?(tr.name)

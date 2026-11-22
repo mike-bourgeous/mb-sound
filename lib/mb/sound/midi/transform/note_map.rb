@@ -183,12 +183,12 @@ module MB
           end
         end
 
-        # Moves every channel message to one channel (see Stream#rechannel).
+        # Moves every channel message to one channel (see Stream#rechannel;
+        # +channel+ counts from 1, MIDI::Channel.of).
         class Rechannel < NoteMap
           def initialize(parent, channel)
             super(parent)
-            raise ArgumentError, "MIDI channels are Integers from 0 to 15 (got #{channel.inspect})" unless channel.is_a?(Integer) && channel.between?(0, 15)
-            @channel = channel
+            @channel = MIDI::Channel.of(channel)
             @node_type_name = "rechannel(#{channel})"
           end
 

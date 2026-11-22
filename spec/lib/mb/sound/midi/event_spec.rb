@@ -126,7 +126,7 @@ RSpec.describe(MB::Sound::MIDI::Event) do
       expect(e.choke?).to eq(true)
       expect(e.note?).to eq(false)
       expect(MB::Sound::MIDI::Event.choke(nil).note).to eq(nil)
-      expect(e.to_s).to eq('choke/ch2 60 @0.5s')
+      expect(e.to_s).to eq('choke/ch3 60 @0.5s')
     end
 
     it 'makes glides' do
@@ -175,7 +175,11 @@ RSpec.describe(MB::Sound::MIDI::Event) do
   end
 
   it 'describes itself' do
-    expect(MB::Sound::MIDI::Event.note_on(60, 0.5, time: 1).to_s).to eq('note_on/ch0 60 v0.5 @1.0s')
+    expect(MB::Sound::MIDI::Event.note_on(60, 0.5, time: 1).to_s).to eq('note_on/ch1 60 v0.5 @1.0s')
+    # (shown counted from 1; the fields stay the wire's 0-based numbers)
+    e = MB::Sound::MIDI::Event.program(11, channel: 9)
+    expect(e.to_s).to eq('program/ch10 12 @0.0s')
+    expect([e.channel, e.value]).to eq([9, 11])
   end
 
   describe 'voice allocation events' do
@@ -192,7 +196,7 @@ RSpec.describe(MB::Sound::MIDI::Event) do
       expect(e.legato?).to eq(true)
       expect(e.with_note(62).with_velocity(0.2).at(1).legato).to eq(true)
       expect(e).not_to eq(ev.note_on(60, 0.5))
-      expect(e.to_s).to eq('note_on/ch0 60 v0.5 legato @0.0s')
+      expect(e.to_s).to eq('note_on/ch1 60 v0.5 legato @0.0s')
     end
 
     it 'builds choke and glide events without MIDI bytes' do
@@ -203,7 +207,7 @@ RSpec.describe(MB::Sound::MIDI::Event) do
       expect(c.choke?).to eq(true)
       expect(g.glide?).to eq(true)
       expect(c.note?).to eq(false)
-      expect(g.to_s).to eq('glide/ch0 64 @1.0s')
+      expect(g.to_s).to eq('glide/ch1 64 @1.0s')
     end
   end
 end

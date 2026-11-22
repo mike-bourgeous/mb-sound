@@ -525,6 +525,42 @@ RSpec.describe('set documents', :aggregate_failures) do
     expect(RecipeHelpers.max_diff(ref, got)).to eq(0)
   end
 
+  it 'saves MIDI channels counted from 1, and shifts 0-based ones of documents before format 16 (midi-one-based-1)' do
+    lines = [
+      'track(:lead, q: 1) { |c| c.number * c.gate * 0.001 }',
+      'track(:keys, q: 1) { |c| c.number * c.gate * 0.001 }',
+      'riff = seq(C4, E4, G4, nil).n4.loop.named(:riff)',
+      'wire :lead, riff.stream(channel: 2).channel(2).rechannel(10).chance(cc(1, channel: 3, default: 127))',
+      'wire :keys, riff.stream.channel([1, 3]).to_channel(1)',
+    ]
+    a = session
+    b = MB::Sound::Take.console_binding
+    within(a) { lines.each { |l| b.eval(l) } }
+    text = io.dump(a.arrangement, name: 'channels')
+    expect(io::FORMAT).to be >= 16
+    expect(text).to include(%(graph #{io::FORMAT}, name: "channels"))
+    expect(text).to include("\nwire :lead, riff.stream(channel: 2).channel(2).rechannel(10).chance(cc(1, default: 127, channel: 3))\n")
+    expect(text).to include("\nwire :keys, riff.stream.channel([1, 3]).to_channel(1)\n")
+
+    # The same set as format 15 wrote it, counted from 0: loads shifted,
+    # plays the same, and saves again as the text above
+    old = text.sub(/graph #{io::FORMAT},/, 'graph 15,')
+              .sub('riff.stream(channel: 2).channel(2).rechannel(10)', 'riff.stream(channel: 1).channel(1).rechannel(9)')
+              .sub('channel: 3', 'channel: 2')
+              .sub('riff.stream.channel([1, 3]).to_channel(1)', 'riff.stream.channel([0, 2]).to_channel(0)')
+    expect(old).not_to eq(text)
+    c = session
+    io.load(old, session: c)
+    expect(io.dump(c.arrangement, name: 'channels').sub(/saved: [^,]*,/, '')).to eq(text.sub(/saved: [^,]*,/, ''))
+    ref = Array.new(120) { a.process_buffer.map(&:dup) }.transpose.map { |x| SpecBuffers.join(x) }
+    got = Array.new(120) { c.process_buffer.map(&:dup) }.transpose.map { |x| SpecBuffers.join(x) }
+    expect(ref[0].abs.max).to be > 0.0001
+    expect(RecipeHelpers.max_diff(ref, got)).to eq(0)
+
+    # A format 16 document with channel 0 raises at its line
+    expect { io.load(text.sub('riff.stream(channel: 2)', 'riff.stream(channel: 0)'), session: session) }.to raise_error(io::LoadError, /channels count from 1/)
+  end
+
   it 'builds patches to save them without a TracePoint (YJIT would drop its code)' do
     a = session
     within(a) { MB::Sound::GraphIOSetSpec.build }

@@ -183,7 +183,8 @@ module MB
         # MIDI::Capture for how notes become events.  +quantize:+ (a grid
         # for Clip#quantize, e.g. 16 or 1.n16, or [grid, {amount:}]) and
         # +humanize:+ (a time for Clip#humanize, or [time, {velocity:}])
-        # clean up or loosen the clip; +channel:+ keeps one channel's notes;
+        # clean up or loosen the clip; +channel:+ (1 to 16) keeps one
+        # channel's notes;
         # +sustain: false+ ignores the sustain pedal.  +cc:+ keeps the
         # controllers played (MIDI::Capture: false, the default, keeps
         # notes only; true or :steps keeps CCs, bend, and pressure as
@@ -205,6 +206,8 @@ module MB
           len = recording_length(length) or return nil
           recording_align(align) or return nil
           recording_cc(cc) or return nil
+          channel = recording_channel(channel)
+          return nil if channel == false
 
           entries = nil
           @session.command("rec #{names.map(&:inspect).join(', ')}") {
@@ -239,6 +242,8 @@ module MB
           len = length && (recording_length(length) or return nil)
           recording_align(align) or return nil
           recording_cc(cc) or return nil
+          channel = recording_channel(channel)
+          return nil if channel == false
 
           entries = nil
           failed = []
@@ -389,6 +394,15 @@ module MB
           return true if cc == :split || Sequence::ControlLane.selection?(cc)
           hint = cc.is_a?(Symbol) && DidYouMean::SpellChecker.new(dictionary: %w[steps fit split]).correct(cc.to_s).first
           MB::Sound.live_error(ArgumentError.new("cc: is false (notes only), true or :steps (controller lanes in the clip), :fit (fitted lanes), :split (lanes in a clip of their own), or an Array of CC numbers and :bend/:pressure/:poly_pressure (got #{cc.inspect}#{"; did you mean :#{hint}?" if hint})"))
+        end
+
+        # The 0-based (wire) channel for a recording's 1-based +channel:+
+        # (nil for every channel), or false after live_error.
+        def recording_channel(channel)
+          MIDI::Channel.of_optional(channel)
+        rescue ArgumentError => e
+          MB::Sound.live_error(e)
+          false
         end
 
         # +align+ if it is a loop alignment, else nil (after live_error).

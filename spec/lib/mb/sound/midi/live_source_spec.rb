@@ -315,7 +315,7 @@ RSpec.describe(MB::Sound::MIDI::LiveSource, :aggregate_failures) do
       stream = MB::Sound::MIDI::Stream.for(src)
       expect(stream.source).to equal(src)
 
-      reader = stream.channel(0).transpose(12).reader
+      reader = stream.channel(1).transpose(12).reader
       input.push([0.0, on], [0.0, [0x91, 40, 100].pack('C*')])
       expect(reader.next(buffer).map { |e| [e.note, e.time] }).to eq([[72, 0]])
     end

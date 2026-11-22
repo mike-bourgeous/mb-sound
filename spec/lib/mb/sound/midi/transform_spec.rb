@@ -18,19 +18,24 @@ RSpec.describe(MB::Sound::MIDI::Transform) do
   describe '#channel' do
     let(:s) { stream(ev.note_on(60, channel: 0), ev.note_on(61, channel: 1), ev.note_on(62, channel: 9), ev.parse([0xf8])) }
 
-    it 'keeps events on one channel plus system events' do
-      expect(s.channel(9).reader.next(1).map { |e| e.note || e.type }).to eq([62, :system])
+    it 'keeps events on one channel plus system events (channels count from 1: 10 is the event channel 9)' do
+      expect(s.channel(10).reader.next(1).map { |e| e.note || e.type }).to eq([62, :system])
     end
 
     it 'accepts Arrays and Ranges of channels' do
-      a = s.channel([0, 9]).reader
-      b = s.channel(0..1).reader
+      a = s.channel([1, 10]).reader
+      b = s.channel(1..2).reader
+      c = s.channel(1...3).reader
       expect(a.next(1).filter_map(&:note)).to eq([60, 62])
       expect(b.next(1).filter_map(&:note)).to eq([60, 61])
+      expect(c.next(1).filter_map(&:note)).to eq([60, 61])
     end
 
-    it 'rejects channels outside 0..15' do
-      expect { s.channel(16) }.to raise_error(ArgumentError, /0 to 15/)
+    it 'rejects channels outside 1..16, with a hint for 0' do
+      expect { s.channel(17) }.to raise_error(ArgumentError, /1 to 16/)
+      expect { s.channel(0) }.to raise_error(ArgumentError, /channels count from 1/)
+      expect { s.channel([0, 1]) }.to raise_error(ArgumentError, /channels count from 1/)
+      expect { s.channel(0..2) }.to raise_error(ArgumentError, /channels count from 1/)
       expect { s.channel([]) }.to raise_error(ArgumentError)
     end
 
@@ -43,7 +48,7 @@ RSpec.describe(MB::Sound::MIDI::Transform) do
     it 'starts views made later at the slowest reader of the parent' do
       a = s.reader
       a.next(2/100r)
-      expect(s.channel(9).reader.next(1).map { |e| e.note || e.type }).to eq([62, :system])
+      expect(s.channel(10).reader.next(1).map { |e| e.note || e.type }).to eq([62, :system])
     end
   end
 
@@ -238,7 +243,7 @@ RSpec.describe(MB::Sound::MIDI::Transform) do
     it 'sets the bend range of bend events' do
       s = stream(ev.bend(0.5), ev.bend(-1.0, channel: 3))
       a = s.bend_range(12.st).reader
-      b = s.bend_range(1.oct).channel(3).reader
+      b = s.bend_range(1.oct).channel(4).reader
       expect(a.next(1).map(&:bend_semitones)).to eq([6.0, -12.0])
       expect(b.next(1).map(&:bend_semitones)).to eq([-12.0])
     end
@@ -259,7 +264,7 @@ RSpec.describe(MB::Sound::MIDI::Transform) do
   describe 'chains' do
     it 'combines transforms and runs each once for many readers' do
       src = MIDIListSource.new(timeline(ev.note_on(60, 0.5, channel: 2), ev.note_on(61, channel: 3), ev.note_off(60, channel: 2), ev.note_off(61, channel: 3)))
-      view = MB::Sound::MIDI::Stream.new(src).channel(2).transpose(-12).velocity_curve(2)
+      view = MB::Sound::MIDI::Stream.new(src).channel(3).transpose(-12).velocity_curve(2)
       a = view.reader
       b = view.reader
       out = a.next(1)
@@ -284,8 +289,8 @@ RSpec.describe(MB::Sound::MIDI::Transform) do
     end
 
     it 'drops notes on other channels' do
-      expect(root.channel(2).first_note.note).to eq(60)
-      expect(root.channel(1).first_note).to eq(nil)
+      expect(root.channel(3).first_note.note).to eq(60)
+      expect(root.channel(2).first_note).to eq(nil)
     end
   end
 

@@ -911,6 +911,18 @@ module SessionFuzz
       turn = s.pick(['', "; turn :\"#{t}/morph\", 1, over: 1", "; turn :\"#{t}/morph\", 2.beats.lfo.square.at(0..1)"])
       "swap :#{t}, L.gen.beat.#{a}.morph(:#{b}, morph: #{s.pick([0, 0.25, 0.5, 1])})#{s.on}#{turn}"
     },
+    ->(s) {
+      # (bg-latency-2) a swap to a generator steered by :busy, with :busy
+      # turned after the swap is queued and before it lands: the swap's
+      # first cycles were made ahead with the value before the turn, and
+      # the landing takes only those whose decided values still match
+      # (Sequence::Clip#pregenerate)
+      next if s.swappable.empty?
+
+      t = s.pick(s.swappable)
+      clip = s.pick(MELODIC.select { |c| c.include?('knob(:busy)') } + ['beats(16, energy: knob(:busy), seed: 5) { kick [1, 0, 0, 0] * 4; hat euclid(7, 16) }.transpose(24)'])
+      "swap :#{t}, #{clip}, on: :bar; after(in: #{s.pick(['1/16r', '1/4r'])}) { turn :busy, #{s.pick([0.1, 0.9])} }"
+    },
     # (new commands go here, at the end)
   ].freeze
 

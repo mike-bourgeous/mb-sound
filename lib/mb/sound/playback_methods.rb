@@ -273,6 +273,10 @@ module MB
 
         session_command(name, label: "bg #{name.inspect}", kind: :bg) { |session, time|
           land = landings.empty? ? nil : (time || session.send(:launch_time, point, session.timeline_nodes_in(playable)))
+          # (a generator clip's first reads made here, for where the graph
+          # will start, not in the buffer where it lands: Session#prepare_clips)
+          nodes = session.timeline_nodes_in(playable)
+          session.prepare_clips(nodes, land || time || session.send(:launch_time, point, nodes)) if nodes.any?(MIDI::ClipSource)
           added = session.add(playable, at: point, name: name, fade: fade, start_time: point.given? ? nil : time, to: to || :keep, send: send, pre_send: pre_send, pre_mute_send: pre_mute_send)
           Arrangement::TrackKnobs.land(session, landings, land) if land && added
           added

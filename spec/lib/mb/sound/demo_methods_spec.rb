@@ -127,6 +127,70 @@ RSpec.describe(MB::Sound::DemoMethods) do
     MB::Sound::DemoMethods::DEMOS.each_key { |name| expect(page).to match(/^  demo #{Regexp.escape(name.inspect)} +\S/) }
   end
 
+  # The class guard of fixes-17 (a merge train's console run, 2026-11-22:
+  # `demo :n109` then `start` printed an ArgumentError for every section
+  # from the warm-up's rehearsal, which only runs live, with YJIT, on a
+  # realtime Session): every demo loaded and started as the console does
+  # it (live mode, a realtime Session on a virtual clock, the warm-up and
+  # its rehearsal), then launched scene by scene, warns of nothing.  The
+  # slow tier plays the first 8 bars, the everyday run 2.
+  describe 'every demo, started as the console starts it' do
+    before { allow(MB::Sound::JIT).to receive(:compiling?).and_return(true) } # (the rehearsal runs only with YJIT)
+
+    after do
+      MB::Sound.live = false
+      @live&.close
+      MB::Sound.rewind
+    end
+
+    # Lets +session+ (a virtual clock) play +seconds+ in steps of four
+    # buffers, each after the scheduler has run what its lookahead handed
+    # it, as a machine that renders instantly would (an unpaced virtual
+    # clock outruns the scheduler's scene builds, and every section then
+    # lands late with a LateBlock warning, which isn't what the console
+    # does).
+    def paced(session, seconds)
+      sched = session.instance_variable_get(:@scheduler)
+      step = 4 * session.buffer_size.to_f / session.sample_rate
+      (seconds / step).ceil.times do
+        MB::Sound::Internal.wait_audio(session, step)
+        deadline = MB::U.clock_now + 60
+        until (q = sched.instance_variable_get(:@queue)).nil? || (q.empty? && sched.instance_variable_get(:@running).nil?)
+          raise 'the scheduler ran one block for over 60 s' if MB::U.clock_now > deadline
+          Thread.pass
+        end
+      end
+    end
+
+    MB::Sound::DemoMethods::DEMOS.each_key do |name|
+      it "starts #{name.inspect} and launches each of its scenes with no error or warning",
+        render_budget: { seconds: 100, reason: 'the slow tier counted 41-67 s per demo, above the timeline it plays (the warm-up sandboxes, likely; 2026-11-22)' } do
+        out = MB::Sound::NullOutput.new(channels: 2, sleep: :virtual, buffer_size: 800)
+        @live = MB::Sound::Session.new(output: out, realtime: true, channels: 2, buffer_size: 800, transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+        MB::Sound.live = true
+        bars = [2, *slow_tier([8], keep: 0)].max
+        status = nil
+        expect {
+          expect {
+            MB::Sound::Session.with_context(session: @live) do
+              MB::Sound.demo(name)
+              status = MB::Sound.start
+              bar = @live.transport.bar_length * 240r / @live.transport.bpm
+              paced(@live, (bars * bar).to_f)
+              @live.arrangement.scenes.each_key do |scene|
+                MB::Sound.go(scene)
+                paced(@live, (1.25r * bar).to_f)
+              end
+            end
+          }.not_to output.to_stderr
+        }.to output(/demo #{name.inspect}.*Warmed up \d+ tracks and \d+ sections/m).to_stdout
+        expect(status.state).to eq(:started)
+        expect(@live.arrangement.rehearsal).to be > 0
+        expect(@live.players).not_to be_empty
+      end
+    end
+  end
+
   it 'is not taken by Pry or another MB::Sound method' do
     require 'pry'
     expect(Pry::Commands.keys.map(&:to_s)).not_to include('demo', 'demos')
