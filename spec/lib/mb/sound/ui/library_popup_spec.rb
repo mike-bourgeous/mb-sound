@@ -55,6 +55,8 @@ RSpec.describe(MB::Sound::UI::LibraryPopup, :aggregate_failures) do
       host.synchronize { host.vt.lines }.reverse.find { |l| l.match?(/\At[>*] /) }&.rstrip
     end
 
+    def popup = ::Reline.dialog_proc(:mb_library).context
+
     it 'lists matches as you type, Down and Tab or Enter pick, Esc closes, and Tab completes as before elsewhere' do
       @tiles, @term = ui_tiles(:tiles, rows: 30, cols: 100)
       expect(@term.wait_for('t> ')).to eq(true), @term.text
@@ -63,33 +65,89 @@ RSpec.describe(MB::Sound::UI::LibraryPopup, :aggregate_failures) do
       @term.type('ee')
       expect(@term.wait_for(/jungle_reese +instrument/)).to eq(true), @term.text
       expect(wait_until { listed?('L.inst.ree') }).to eq(true)
+      # (only shown while typing: no row picked, the hint says how to go in)
+      expect(popup.focused).to eq(false)
+      expect(@term.text).to include(MB::Sound::UI::LibraryPopup::HINT_SHOWN)
+      second = popup.list[1].chain
+      @term.write("\e[B") # Down: into the list, the first row
+      expect(wait_until { popup.focused && popup.pointer == 0 }).to eq(true)
+      expect(@term.wait_for(MB::Sound::UI::LibraryPopup::HINT_PICKING)).to eq(true), @term.text
       @term.write("\e[B")
-      # (Reline holds the list's keys again once it has drawn the list:
-      # keys typed apart, as people type them)
-      expect(wait_until { ::Reline.dialog_proc(:mb_library).context.pointer == 1 }).to eq(true)
+      expect(wait_until { popup.pointer == 1 }).to eq(true)
       @term.write("\t")
-      expect(wait_until { prompt_line == 't> L.inst.dnb_reese' }).to eq(true), prompt_line.inspect
+      expect(wait_until { prompt_line == "t> #{second}" }).to eq(true), prompt_line.inspect
 
-      # Enter picks too (a second Enter runs the line)
+      # Down, then Enter: the first row
       @term.write("\x15") # (Ctrl-U: an empty line)
       @term.type('L.reese')
       expect(wait_until { listed?('L.reese') }).to eq(true)
+      first = popup.list[0].chain
+      @term.write("\e[B")
+      expect(wait_until { popup.focused }).to eq(true)
       @term.write("\r")
-      expect(wait_until { prompt_line == 't> L.inst.dnb_reese' }).to eq(true), prompt_line.inspect
+      expect(wait_until { prompt_line == "t> #{first}" }).to eq(true), prompt_line.inspect
 
-      # Esc closes the list; typing on brings it back
+      # Tab, Down, Enter: the second row
       @term.write("\x15")
       @term.type('L.inst.ree')
       expect(wait_until { listed?('L.inst.ree') }).to eq(true)
-      expect(@term.wait_for(/jungle_reese/)).to eq(true)
+      second = popup.list[1].chain
+      @term.write("\t")
+      expect(wait_until { popup.focused && popup.pointer == 0 }).to eq(true)
+      @term.write("\e[B")
+      expect(wait_until { popup.pointer == 1 }).to eq(true)
+      @term.write("\r")
+      expect(wait_until { prompt_line == "t> #{second}" }).to eq(true), prompt_line.inspect
+
+      # Esc in the list: back to the line, unchanged, the list still shown;
+      # Up from the first row too; Esc again closes it
+      @term.write("\x15")
+      @term.type('L.inst.ree')
+      expect(wait_until { listed?('L.inst.ree') }).to eq(true)
+      @term.write("\e[B")
+      expect(wait_until { popup.focused }).to eq(true)
       @term.write("\e")
-      expect(wait_until { ::Reline.dialog_proc(:mb_library).context.list.nil? && !@term.text.include?('jungle_reese') }).to eq(true), @term.text
+      expect(wait_until { !popup.focused && !popup.list.nil? }).to eq(true)
+      expect(prompt_line).to eq('t> L.inst.ree')
+      @term.write("\t")
+      expect(wait_until { popup.focused }).to eq(true)
+      @term.write("\e[A")
+      expect(wait_until { !popup.focused && !popup.list.nil? }).to eq(true)
+      expect(prompt_line).to eq('t> L.inst.ree')
+      @term.write("\e")
+      expect(wait_until { popup.list.nil? && !@term.text.include?('jungle_reese') }).to eq(true), @term.text
       expect(prompt_line).to eq('t> L.inst.ree')
 
       # Outside head chains, Tab is Pry's completion
       @term.write("\x15")
       @term.type("[1].firs\t")
       expect(wait_until { prompt_line == 't> [1].first' }).to eq(true), prompt_line.inspect
+    end
+
+    # (ux-friction-3, the maintainer: "don't focus the find-as-you-type
+    # popup unless I press tab or down; enter as I type should act like a
+    # normal enter")
+    it 'runs the line as typed on Enter while the list only shows, and Up is history' do
+      @tiles, @term = ui_tiles(:tiles, rows: 30, cols: 100)
+      expect(@term.wait_for('t> ')).to eq(true), @term.text
+      @term.type("6 * 7\r")
+      expect(@term.wait_for('=> 42')).to eq(true), @term.text
+      @term.type('L.gen.be')
+      expect(wait_until { listed?('L.gen.be') }).to eq(true), @term.text
+      # Up while it only shows: the line before, as without the list
+      @term.write("\e[A")
+      expect(wait_until { prompt_line == 't> 6 * 7' }).to eq(true), prompt_line.inspect
+      @term.write("\x15")
+      @term.type('L.gen.be')
+      expect(wait_until { listed?('L.gen.be') }).to eq(true), @term.text
+      typed = popup.list.map(&:chain)
+      @term.write("\r")
+      # (run as typed: the value of L.gen.be, or its error; nothing put on the line)
+      expect(wait_until { prompt_line == 't>' }).to eq(true), "#{prompt_line.inspect}\n#{@term.text}"
+      expect(@term.text).to match(/NoMethodError|NameError|undefined method|L\.gen\.be/)
+      prompts = @term.text.lines.grep(/\At> /).map { |l| l[/\At> \S*/] }
+      expect(prompts).to include('t> L.gen.be')
+      expect(prompts & typed.map { |c| "t> #{c}" }).to be_empty
     end
 
     it 'stays closed on a chain recalled from history, so Up goes on to older lines' do
@@ -130,6 +188,8 @@ RSpec.describe(MB::Sound::UI::LibraryPopup, :aggregate_failures) do
       expect(st.list.length).to be > 20
       eleventh = st.list[10].entry.name.to_s
       expect(@term.text).not_to match(/^\s*#{Regexp.escape(eleventh)}\s/) # (below the ten rows shown)
+      @term.write("\e[B") # (into the list)
+      expect(wait_until { st.focused && st.pointer == 0 }).to eq(true)
       @term.write("\e[6~") # PageDown
       expect(wait_until { st.pointer == 10 }).to eq(true)
       expect(@term.wait_for(/#{Regexp.escape(eleventh)} +\w/)).to eq(true), @term.text

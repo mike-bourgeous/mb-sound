@@ -271,5 +271,20 @@ RSpec.describe 'Buffer size invariance (samplers, drums, Synth lanes)' do
       expect(parts.sum(&:skipped_samples)).to be > 48000
       expect(parts.sum(&:wakes)).to be > 0
     end
+
+    # (sf2-cost-1: lanes and sub-lanes whose envelope can't land before the
+    # next grid point render on without splitting the block there,
+    # Envelope#busy_through?; acoustic SoundFont kits release one-shots over
+    # ~100 s, and a short release here still lets the lanes sleep)
+    [100, 0.02].each do |release|
+      it "gives the same samples for one-shots under a #{release} s release, in lanes and narrow layers" do
+        hit = MB::Sound::Sample[Numo::SFloat.cast(Array.new(1500) { |i| Math.sin(i * 0.07) * Math.exp(-i / 300.0) })]
+        wide = MB::Sound::Sampler::Instrument.new(envelope: [0.001, 0.0, 1.0, release]) { |i| i.region(hit, keytrack: 0) }
+        narrow = MB::Sound::Sampler::Instrument.new(envelope: [0.001, 0.0, 1.0, release]) { |i| i.region(hit.gain(0.5), keys: 70..80, keytrack: 0) }
+        clip = MB::Sound.seq(MB::Sound::C3, MB::Sound::B4, nil, MB::Sound::E3, MB::Sound::C3, nil, nil, MB::Sound::A4).n8.loop
+        expect_invariant(-> { clip.synth(voices: 4) { |v| wide.play(v) } }, seconds: 2.5)
+        expect_invariant(-> { clip.synth(voices: 3) { |v| MB::Sound::Sampler::Instrument.layered(wide, narrow).play(v) } }, seconds: 2.5)
+      end
+    end
   end
 end

@@ -23,6 +23,7 @@ module MB
             @cuts = {}
             @fill = 0
             @fill_rgb = nil
+            @arm_shown = true
             @sections = {}
             @parts = nil
             @parts_key = [nil, 0, 0, 0, 0, nil]
@@ -90,7 +91,12 @@ module MB
               list << Sections::Section.new(name: :played, min: 1, pref: 2, priority: 2)
             end
             list << Sections::Section.new(name: :roll, min: 4, pref: 8, max: 16, priority: 5)
-            list << Sections::Section.new(name: :armed, min: 2, pref: 3, max: 6, priority: 6)
+            # (the armed tracks outrank the chord and the roll: ux-friction-3,
+            # the maintainer: "the message about arming should be shown on
+            # smaller keyboard sizes whenever possible.  I keep forgetting
+            # that \"arm\" is a thing"; without room for it, the header
+            # says it: #arm_hint)
+            list << Sections::Section.new(name: :armed, min: 2, pref: 3, max: 6, priority: 3)
             list.freeze
           end
 
@@ -116,7 +122,8 @@ module MB
             v = kb.view
             track_roll(state, v)
             parts = parts_of(c, !v.step.nil?)
-            header(parts[:header], v, kb)
+            x = header(parts[:header], v, kb)
+            @arm_shown = parts[:armed] ? true : arm_hint(parts[:header], x, s)
             held = v.held.map { |n| n - v.base }
             inputs = Keyboard.input_fills(s, v.base)
             if (pc = parts[:piano])
@@ -342,8 +349,48 @@ module MB
             notes = v.played.last(12).map { |p| note_name(kb, p.note) }
             c.line(y, ['played ', :dim], [notes.join(' '), :name]) unless notes.empty?
             c.line(y, [v.message.to_s, :dim]) if notes.empty? && v.message
-            hint = v.active ? 'Ctrl-] back  -/+ octave  Up/Dn vel  Space sus  Esc off  Enter capture  ` mode  Tab step' : 'NAV K (or ui.keys, F2): play the keyboard'
-            c.text(0, c.h - 1, c.fit(hint, c.w), :dim) if c.h > y + 1
+            return unless c.h > y + 1
+
+            # (no room for the arm hint in the header: it leads the keys' hint)
+            x = @arm_shown ? 0 : c.line(c.h - 1, [ARM, :key], [ARM_AFTER, :dim])
+            c.text_fit(x, c.h - 1, v.active ? ACTIVE_HINT : NAV_HINT, c.w - x, :dim)
+          end
+
+          # The keys' hint under the piano, playing and not.
+          ACTIVE_HINT = 'Ctrl-] back  -/+ octave  Up/Dn vel  Space sus  Esc off  Enter capture  ` mode  Tab step'
+          NAV_HINT = 'NAV K (or ui.keys, F2): play the keyboard'
+
+          # The arm hint's command, and its forms after the header (longest
+          # first; #arm_hint takes the first that fits), and before the
+          # keys' hint.
+          ARM = 'arm :name'
+          ARM_AFTER = ' plays a track  '
+          ARM_FORMS = [
+            ['  nothing armed: ', ' plays a track'],
+            ['  ', ' plays a track'],
+            ['  ', ''],
+          ].map { |a| a.map(&:freeze).freeze }.freeze
+          ARMED = '  -> '
+
+          # After the header's text (ending at +x+): with nothing armed, the
+          # longest arm hint that fits (ARM_FORMS), else the armed tracks'
+          # names.  True if it showed.
+          def arm_hint(c, x, s)
+            armed = s.respond_to?(:armed) ? s.armed : nil
+            if armed && !armed.empty?
+              names = armed.length == 1 ? armed[0].to_s : armed.map(&:to_s).join(' ')
+              return false if x + ARMED.length + names.length > c.w
+
+              c.line(0, [ARMED, :dim], [names, :armed], x: x)
+              return true
+            end
+            ARM_FORMS.each do |before, after|
+              next if x + before.length + ARM.length + after.length > c.w
+
+              c.line(0, [before, :dim], [ARM, :key], [after, :dim], x: x)
+              return true
+            end
+            false
           end
 
           # The notes held and their chord's name ("held C3 E3 G3  C").
