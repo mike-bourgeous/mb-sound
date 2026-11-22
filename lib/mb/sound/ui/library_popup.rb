@@ -69,7 +69,7 @@ module MB
             # through history landed me inside a tab completion menu")
             return close(st) if st.list.nil? && !typed?(key)
             st.closed = nil
-            list = st.finder.candidates(word, limit: LIMIT)
+            list = LibraryPopup.live { st.finder.candidates(word, limit: LIMIT) }
             return close(st) unless list
             st.pointer = 0 unless st.word == word && st.list && st.pointer < list.length
             st.word = word
@@ -86,6 +86,21 @@ module MB
           )
         rescue StandardError
           nil
+        end
+
+        # Runs the block as a live thread (Library::Index#document_entries
+        # gives it the last scan's documents, rescanning in the background
+        # once that is DOCUMENT_STALE), then puts the thread's flag back:
+        # each key typed in a head chain listed the shelves' documents
+        # anew, about 200 stats, ~40 ms of typing lag where the checkout is
+        # on sshfs (followups-1; the gvl-main-1 report).  Lines the console
+        # runs on the same thread still scan fresh.
+        def live
+          was = Thread.current[:mb_sound_live]
+          Thread.current[:mb_sound_live] = true
+          yield
+        ensure
+          Thread.current[:mb_sound_live] = was
         end
 
         # Reline editing methods that open the list (typing or deleting in

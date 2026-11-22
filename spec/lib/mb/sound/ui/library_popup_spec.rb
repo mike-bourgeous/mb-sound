@@ -117,5 +117,28 @@ RSpec.describe(MB::Sound::UI::LibraryPopup, :aggregate_failures) do
       @term.type('b')
       expect(@term.wait_for(/barberpole +phaser/)).to eq(true), @term.text
     end
+
+    # followups-1 (the gvl-main-1 report: each key in a head chain listed
+    # the shelves' documents anew, about 200 stats, ~40 ms of typing lag
+    # over sshfs): in steady state the keys make no file calls on the
+    # thread reading them; the documents come from the last scan, rescanned
+    # in the background once stale (Library::Index::DOCUMENT_STALE)
+    it 'makes no file calls on the REPL thread per key typed into a listed chain' do
+      @tiles, @term = ui_tiles(:tiles, rows: 30, cols: 100)
+      expect(@term.wait_for('t> ')).to eq(true), @term.text
+      @term.type('L.inst.r') # (the first list: a scan where it runs)
+      expect(wait_until { listed?('L.inst.r') }).to eq(true), @term.text
+      host = @tiles.instance_variable_get(:@host)
+      reader = host.thread || Thread.main
+      calls = MB::Sound::UI::FileWatch.watch([reader]) do
+        %w[e e s].each_with_index do |ch, i|
+          @term.type(ch)
+          expect(wait_until { listed?('L.inst.r' + 'ees'[0..i]) }).to eq(true), @term.text
+        end
+        @term.write("\x7f") # (a deletion lists again too)
+        expect(wait_until { listed?('L.inst.ree') }).to eq(true), @term.text
+      end
+      expect(calls).to eq([]), calls.first(10).map(&:inspect).join("\n")
+    end
   end
 end
