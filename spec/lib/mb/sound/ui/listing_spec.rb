@@ -97,7 +97,7 @@ RSpec.describe('UI listings', :aggregate_failures) do
   # ":library should be an alias for it"; `help :library` is a help topic,
   # another namespace)
   it 'takes :library for the picker everywhere a pane name goes, beside :pager, and did-you-means a mistyped one' do
-    expect(ui::PANE_ALIASES).to eq(pager: :page, library: :picker)
+    expect(ui::PANE_ALIASES).to eq(pager: :page, library: :picker, midi_devices: :midi_ports, ports: :midi_ports)
     expect(ui.pane_catalog[:picker].aliases).to eq([:library])
     expect(ui.pane_catalog.to_s).to match(/picker, library/)
     expect(ui.pane_catalog.names).not_to include(:library)

@@ -389,6 +389,9 @@ module MB
             disarmed = session.arrangement.panic_disarm
           }
         }
+        # MIDI out: all notes off now on every destination (the stopped
+        # tracks' own note-offs follow on their stop frame)
+        MIDI::Destination.panic_all
         return stops if Session.context&.batch
 
         stopped = Array(stops).grep(Session::Journal::Entry)

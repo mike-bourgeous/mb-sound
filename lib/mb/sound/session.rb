@@ -42,6 +42,7 @@ require_relative 'session/ui_feed'
 require_relative 'session/warming'
 require_relative 'session/carry'
 require_relative 'session/set_clear'
+require_relative 'session/midi_outs'
 
 module MB
   module Sound
@@ -97,6 +98,7 @@ module MB
       include KeyChanges
       include TempoChanges
       include MidiIn
+      include MidiOuts
       include AudioRecording
       include Stems
       include MonitorTrim
@@ -404,6 +406,9 @@ module MB
         # Session.span; MIDI::Stream#spy)
         @span = Span.new(self, 0, 0r, 0r, false, 48000, 0)
         @player_frame = nil
+        @write_frame = 0 # (see MidiOuts)
+        @midi_outs = nil # (MidiOuts: OutNodes holding notes)
+        @reading_player = nil # (MidiOuts: the player being read)
         @sound_end_frame = 0 # (see #sound_end_frame)
         @schedule_ran_kept = nil # (see #schedule_ran_frame)
         @span_end_pos = nil # (see #keep_schedule_ran_frame)
@@ -1152,6 +1157,7 @@ module MB
         # dropouts-2: two new SFloats a buffer were ~470 KB/s of garbage
         # at 256 frames); callers of #process_buffer keep what it returns
         @reuse_mix = Thread.current.equal?(@thread)
+        @write_frame = @frame # (MidiOuts)
 
         mix = @render_lock.synchronize {
           # A seek (or its undo) landing inside the buffer splits it: the
@@ -1349,6 +1355,8 @@ module MB
 
         # Graphs kept for #resume or #undo keep their shared nodes in step
         read_kept_graphs(@frame + count)
+        # MIDI out graphs no longer read end their notes (see MidiOuts)
+        end_midi_out_span(@frame + count) if @midi_outs
 
         # (starts that only wait for a hold leave the timeline where it
         # is: see #timeline_idle?)
@@ -2202,10 +2210,12 @@ module MB
           begin
             @knob_frame = base + offset if @knob_frame
             @player_frame = base + offset
+            @reading_player = p
             data = p.input.read(frames)
           ensure
             @knob_frame = base if @knob_frame
             @player_frame = nil
+            @reading_player = nil
           end
           elapsed = MB::U.clock_now - t
           p.cpu = (p.cpu || 0.0) + elapsed if @ui_feed
