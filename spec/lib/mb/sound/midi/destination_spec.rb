@@ -165,6 +165,26 @@ RSpec.describe(MB::Sound::MIDI::Destination, :aggregate_failures) do
     expect(d.log).to eq([[nil, [0x93, 60, 100]], [nil, [0x93, 64, 100]], [nil, [0x83, 60, 64]], [nil, [0x83, 64, 64]]])
   end
 
+  it 'sends a bound knob as its controller when it turns, on the frame it lands, at any buffer size' do
+    expect { MB::Sound.midi_out(log: true, cc: { cut: 200 }) }.to raise_error(ArgumentError, /cc: binds knobs to controllers/)
+    expect(MB::Sound.midi_out(log: true, cc: { cut: 74 }).to_ruby).to eq('midi_out(cc: { cut: 74 }, log: true)')
+    logs = [800, 367].map { |size|
+      s = session_at(size)
+      s.knob(:cut, 1000, range: 100..10_000, curve: :exp)
+      d = MB::Sound.midi_out(log: true, cc: { cut: 74 })
+      s.arrangement.track(:k, d)
+      s.arrangement.play(:k, riff, start_time: 0)
+      run(s, 12_000, size)
+      s.turn(:cut, 10_000, smooth: 0)
+      run(s, 12_000, size)
+      d.log.select { |_, b| b[0] == 0xb0 }
+    }
+    expect(logs[1]).to eq(logs[0])
+    expect(logs[0].first).to eq([0, [0xb0, 74, 64]]) # (1000 is halfway along 100..10000 on an exponential curve)
+    expect(logs[0].last[1]).to eq([0xb0, 74, 127])
+    expect(logs[0].last[0]).to be_between(12_000, 12_000 + 480)
+  end
+
   it 'refuses effect inserts on a MIDI out track' do
     s = session_at(800)
     s.arrangement.track(:k, MB::Sound.midi_out(log: true))

@@ -92,6 +92,12 @@ module MB
         # MSB alone, or nil.
         attr_reader :bank
 
+        # Knobs bound to controllers on this destination: { knob name => CC
+        # number } (`cc: { cut: 74 }`): while the track plays, turning the
+        # knob sends the controller (its position along the knob's range,
+        # 0..127), mirroring `knob :cut, ..., cc: 74` for input.
+        attr_reader :ccs
+
         # Our own port's name for +port:+, or nil.
         attr_reader :port_name
 
@@ -102,13 +108,14 @@ module MB
         attr_reader :log
 
         # See the class description.
-        def initialize(target = nil, channel: 1, program: nil, bank: nil, offset: 0, port: nil, log: false)
+        def initialize(target = nil, channel: 1, program: nil, bank: nil, offset: 0, port: nil, cc: nil, log: false)
           raise ArgumentError, 'Give midi_out a destination name (part of a port name) or port: (a port of our own), not both' if target && port
           raise ArgumentError, "Give midi_out a destination: midi_out('KRONOS'), or port: 'name' for a port others connect to" if target.nil? && port.nil? && !log
 
           @channel = Destination.check_channel(channel)
           @program = Destination.check_program(program)
           @bank = Destination.check_bank(bank)
+          @ccs = Destination.check_ccs(cc)
           @target = target&.to_s
           @port_name = port&.to_s
           @log = log ? [] : nil
@@ -145,6 +152,16 @@ module MB
             raise ArgumentError, "MIDI programs are 1 to 128 (got #{program.inspect})#{hint}"
           end
           program
+        end
+
+        # The knob-to-controller binds checked: { knob name => CC number
+        # (0..119) }, frozen (empty for nil).
+        def self.check_ccs(cc)
+          return {}.freeze if cc.nil?
+          unless cc.is_a?(Hash) && cc.all? { |k, v| k.is_a?(Symbol) && v.is_a?(Integer) && v.between?(0, 119) }
+            raise ArgumentError, "cc: binds knobs to controllers: { cut: 74, res: 71 } (knob names => CC numbers 0..119; got #{cc.inspect})"
+          end
+          cc.dup.freeze
         end
 
         # The bank checked: an MSB (0..127), [MSB, LSB], or nil.
@@ -306,10 +323,11 @@ module MB
         def to_ruby
           args = []
           args << @target.inspect if @target
-          args << "channel: #{@channel}" unless @channel == 1 && @target.nil? && @port_name
+          args << "channel: #{@channel}" unless @channel == 1
           args << "program: #{@program}" if @program
           args << "bank: #{@bank.inspect}" if @bank
           args << "offset: #{RubyValue.to_ruby(@offset)}" unless @offset_seconds.zero?
+          args << "cc: { #{@ccs.map { |k, v| "#{k.to_s.match?(/\A[a-z_][a-z0-9_]*\z/) ? "#{k}:" : "#{k.inspect} =>"} #{v}" }.join(', ')} }" unless @ccs.empty?
           args << "port: #{@port_name.inspect}" if @port_name
           args << 'log: true' if @log && @target.nil? && @port_name.nil?
           "midi_out(#{args.join(', ')})"

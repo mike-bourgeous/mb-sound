@@ -56,6 +56,9 @@ module MB
           @ended = false
           @level_knob = nil # the track's level knob (Session::Faders), once found
           @level_cc = nil # the CC 7 value last sent
+          # knob binds: [name, CC number, knob or nil, last value sent]
+          @cc_binds = destination.ccs.map { |name, n| [name, n, nil, nil] }
+          @cc_look = 0 # buffers until missing knobs are looked for again
         end
 
         # Silence (+count+ samples, a frozen buffer), or nil once the stream
@@ -83,7 +86,10 @@ module MB
             @started = true
             select_program(session, frame)
           end
-          follow_level(session, frame, count) if session && !@live
+          if session && !@live
+            follow_level(session, frame, count)
+            follow_ccs(session, frame, count) unless @cc_binds.empty?
+          end
 
           i = 0
           n = events.length
@@ -206,6 +212,43 @@ module MB
           return if cc == @level_cc
           @level_cc = cc
           transmit(session, frame + at, 0xb0, 7, cc)
+        end
+
+        # Knobs bound to controllers (Destination#ccs): each sends its
+        # position along its range (0..127) when it changes, on the frame it
+        # changes.  Knobs not defined yet are looked for every 32 buffers.
+        def follow_ccs(session, frame, count)
+          look = (@cc_look -= 1) <= 0
+          @cc_look = 32 if look
+          i = 0
+          while i < @cc_binds.length
+            b = @cc_binds[i]
+            i += 1
+            k = b[2]
+            if k.nil?
+              next unless look
+              k = b[2] = session.knobs[b[0]] or next
+            end
+            v = k.read(frame, count)
+            at = 0
+            if v.is_a?(Numeric)
+              cc = knob_cc(k, v)
+            else
+              cc = knob_cc(k, v[-1])
+              next if cc == b[3]
+              at += 1 while at < count - 1 && knob_cc(k, v[at]) == b[3]
+            end
+            next if cc == b[3]
+            b[3] = cc
+            transmit(session, frame + at, 0xb0, b[1], cc)
+          end
+        end
+
+        def knob_cc(k, value)
+          p = k.spec.position(value).to_f
+          p = 0.0 if p < 0
+          p = 1.0 if p > 1
+          (p * 127).round
         end
 
         def level_cc(gain)
