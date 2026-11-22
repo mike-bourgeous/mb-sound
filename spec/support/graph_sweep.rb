@@ -376,6 +376,30 @@ module GraphSweep
         inst = MB::Sound::Sampler::Instrument.layered(a, b)
         c.clip.synth(voices: 2) { |v, _i| inst.play(v) }.mixdown * 0.5
       }],
+      # A drum kit playing roles (drum-gen-1): a kit with the acoustic
+      # SoundFont layout (one-key regions 35..61, ZoneMap envelopes, two
+      # layers) moved by its Drums::Roles map, played by a beats clip of
+      # GM and extended roles (a high tom on the rack tom, a half-open hat,
+      # a crash choke, a missing bongo)
+      ['sampler drum kit by roles (Instrument#remap_keys)', ->(_c) {
+        d = Numo::SFloat.cast(Array.new(1200) { |i| Math.sin(i * 0.11) * Math.exp(-i / 400.0) })
+        smp = MB::Sound::Sample[d]
+        zm = MB::Sound::Sampler::ZoneMap.new([[35..47, 0..127, 0.05], [48..61, 0..127, 0.2]])
+        a = MB::Sound::Sampler::Instrument.new(envelope: { segments: [[1, 0.001], [0, zm]], release_at: 1, sensitivity: nil }) { |i|
+          (35..61).each { |k| i.region(smp, keys: k, tune: (k - 48) * 0.5, keytrack: 0) }
+        }
+        b = MB::Sound::Sampler::Instrument.new { |i| (35..47).each { |k| i.region(smp[0...600], keys: k, keytrack: 0, gain: 0.5) } }
+        roles = MB::Sound::Drums::Roles.map(keys: 35..61, layout: :acoustic_kit)
+        kit = MB::Sound::Sampler::Instrument.layered(a, b).remap_keys(roles.remap, drum_map: roles)
+        beat = MB::Sound.beats(8, seed: 3) {
+          kick [1, 0, 0, 0, 1, 0, 0, 0], keep: [0, 4]
+          high_tom [0, 0, 1, 0, 0, 0, 0, 0], keep: [2]
+          half_open_hat [0, 1, 0, 1, 0, 1, 0, 1], keep: [1]
+          crash_choke [0, 0, 0, 0, 0, 0, 1, 0], keep: [6]
+          high_bongo [0, 0, 0, 0, 0, 1, 0, 0], keep: [5]
+        }
+        beat.loop.sampler(kit, voices: 4).mixdown * 0.5
+      }],
       # A tracker channel (tracker-1): one sampler voice following bend,
       # CC 7, CC 10, and CC 20 lanes tick by tick, its volume lane at 0
       # while the lane sleeps (the Synth idle-skip fix: channel nodes read

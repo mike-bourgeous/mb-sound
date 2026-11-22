@@ -4,7 +4,7 @@ RSpec.describe('bin/synths/funk.rb') do
   after { MB::Sound.rewind }
 
   it 'plays the mouth drums and the perc from GM notes' do
-    beat = render_patch(MB::Sound.funk_beat(patch_notes([36, 0, 0.1, 1.0], [38, 0.5, 0.6, 1.0])), 1)[0]
+    beat = render_patch(MB::Sound.funk_kit(patch_notes([36, 0, 0.1, 1.0], [38, 0.5, 0.6, 1.0])), 1)[0]
     expect(peak_db(seconds(beat, 0, 0.4))).to be > -10
     expect(peak_db(seconds(beat, 0.5, 0.9))).to be > -10
 
@@ -15,13 +15,13 @@ RSpec.describe('bin/synths/funk.rb') do
 
   it 'says the drums as vowels with beatbox:' do
     hits = -> { patch_notes([36, 0, 0.1, 1.0], [38, 0.5, 0.6, 1.0], [42, 0.75, 0.8, 1.0]) }
-    plain = render_patch(MB::Sound.funk_beat(hits.()), 1)[0]
-    boxed = render_patch(MB::Sound.funk_beat(hits.(), beatbox: true), 1)[0]
+    plain = render_patch(MB::Sound.funk_kit(hits.()), 1)[0]
+    boxed = render_patch(MB::Sound.funk_kit(hits.(), beatbox: true), 1)[0]
     expect(peak_db(boxed)).to be_within(4).of(peak_db(plain))
     # The kick's sine gets harmonics for its "boo"; the snare and hats move up
     expect(band_share(seconds(boxed, 0, 0.4), 150, 1000)).to be > band_share(seconds(plain, 0, 0.4), 150, 1000) * 2
     expect(rms_db(seconds(boxed, 0.5, 1))).to be_within(6).of(rms_db(seconds(plain, 0.5, 1)))
-    half = render_patch(MB::Sound.funk_beat(hits.(), beatbox: 0.5), 1)[0]
+    half = render_patch(MB::Sound.funk_kit(hits.(), beatbox: 0.5), 1)[0]
     expect((half - boxed).abs.max).to be > 0.01
   end
 
@@ -49,9 +49,9 @@ RSpec.describe('bin/synths/funk.rb') do
     beat = 60.0 / 96
     snares = ->(x) { [1, 3].map { |b| band_share(seconds(x, b * beat, b * beat + 0.1).dup, 200, 1500) } }
     [false, true].each do |box|
-      still = snares.(render_bars(1) { MB::Sound.funk_beat(kit.(), beatbox: box, wobble: 0) })
-      swept = snares.(render_bars(1) { MB::Sound.funk_beat(kit.(), beatbox: box, wobble: 0.8) })
-      default = snares.(render_bars(1) { MB::Sound.funk_beat(kit.(), beatbox: box) })
+      still = snares.(render_bars(1) { MB::Sound.funk_kit(kit.(), beatbox: box, wobble: 0) })
+      swept = snares.(render_bars(1) { MB::Sound.funk_kit(kit.(), beatbox: box, wobble: 0.8) })
+      default = snares.(render_bars(1) { MB::Sound.funk_kit(kit.(), beatbox: box) })
       expect(default).to eq(box ? swept : still), "beatbox: #{box}: the default wobbles only the beatbox"
       ratio = ->((a, b)) { (10 * Math.log10(a / b)).abs }
       expect(ratio.(swept)).to be > ratio.(still) + 1, "beatbox: #{box}: #{still} -> #{swept}"
@@ -100,10 +100,10 @@ RSpec.describe('bin/synths/funk.rb') do
   it 'opens the beatbox snare\'s formants with snare_width:, and its upper (whistling) formants more with snare_top:' do
     kit = -> { MB::Sound.grid(16, snare: '....X.......X...').loop }
     expect(MB::Sound::FUNK_BEATBOX_SNARE_WIDTH).to eq(0.4)
-    default = render_bars(1) { MB::Sound.funk_beat(kit.(), beatbox: true, wobble: 0) }
-    explicit = render_bars(1) { MB::Sound.funk_beat(kit.(), beatbox: true, wobble: 0, snare_width: 0.4, snare_top: MB::Sound::FUNK_BEATBOX_SNARE_TOP) }
+    default = render_bars(1) { MB::Sound.funk_kit(kit.(), beatbox: true, wobble: 0) }
+    explicit = render_bars(1) { MB::Sound.funk_kit(kit.(), beatbox: true, wobble: 0, snare_width: 0.4, snare_top: MB::Sound::FUNK_BEATBOX_SNARE_TOP) }
     expect(default).to eq(explicit)
-    wide = render_bars(1) { MB::Sound.funk_beat(kit.(), beatbox: true, wobble: 0, snare_width: 0.7) }
+    wide = render_bars(1) { MB::Sound.funk_kit(kit.(), beatbox: true, wobble: 0, snare_width: 0.7) }
     expect((default - wide).abs.max).to be > 0.01
 
     # The whistle: the second formant's spectrum peak (about 1.36 kHz) over the spectrum around it (+/-300 Hz)
@@ -114,7 +114,7 @@ RSpec.describe('bin/synths/funk.rb') do
       near = mag[(i - 300 / hz).round..(i + 300 / hz).round].to_a.sort
       20 * Math.log10(mag[i] / near[near.length / 2])
     }
-    plain = render_bars(1) { MB::Sound.funk_beat(kit.(), beatbox: true, wobble: 0, snare_top: 1) }
+    plain = render_bars(1) { MB::Sound.funk_kit(kit.(), beatbox: true, wobble: 0, snare_top: 1) }
     expect(whistle.(plain)).to be > 22 # (patches-4 at width 0.4: about 26 dB)
     expect(whistle.(default)).to be < whistle.(plain) - 6
     # (the upper formants keep their power: their peaks are lower and broader)

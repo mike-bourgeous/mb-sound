@@ -130,6 +130,7 @@ RSpec.describe(MB::Sound::GraphIO, :aggregate_failures) do
       'drums kit builder, stereo sample voices' => 'the kit block uses wood from the code around it',
       'grains (Grains)' => 'a Sample made from audio in memory',
       'sampler zone values (ZoneValue), pans, layers' => 'a Sample made from audio in memory',
+      'sampler drum kit by roles (Instrument#remap_keys)' => 'a Sample made from audio in memory',
       'sampler choke groups (SamplerVoice choke)' => 'a Sample made from audio in memory',
       'loop players (LoopPlayer)' => 'a Sample made from audio in memory',
       'region lanes (RegionPlayer)' => 'a Sample made from audio in memory', # (region_player_spec.rb round trips a lane of breakbeat(:jungle))

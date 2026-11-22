@@ -31,7 +31,7 @@
 #             voice into a 4-bar loop that loses 1 - --keep every pass
 #
 # Every patch is one method taking a MIDI source (Notes, Clip, MIDI file, or
-# Stream) and its knobs as keywords: funk_beat, funk_perc, funk_bass_voice,
+# Stream) and its knobs as keywords: funk_kit, funk_perc, funk_bass_voice,
 # funk_keys_voice, funk_clav_voice, funk_talkbox_voice, funk_choir_voice;
 # the looper is the effect funk_dub_loop(sig, dub:, keep:).  Each is also a
 # preset (presets/funk_*.mbg.rb): `preset :funk_keys, midi: midi`.
@@ -85,7 +85,7 @@ module MB::Sound
   # (FUNK_BEATBOX_SNARE_TOP by default; 1 for the tenor's own vowels):
   # the snare's noise rang them as whistles, while the first formant
   # carries the "ka".
-  def self.funk_beat(source, mouth: 0.7, dry: 0.55, level: 2.0, beatbox: false, wobble: nil, wobble_rate: 1.bar, snare_width: FUNK_BEATBOX_SNARE_WIDTH, snare_top: FUNK_BEATBOX_SNARE_TOP)
+  def self.funk_kit(source, mouth: 0.7, dry: 0.55, level: 2.0, beatbox: false, wobble: nil, wobble_rate: 1.bar, snare_width: FUNK_BEATBOX_SNARE_WIDTH, snare_top: FUNK_BEATBOX_SNARE_TOP)
     voices = {
       kick: { tune: 56, decay: 0.32, tone: 0.25 },
       snare: { tune: 210, decay: 0.16, tone: 0.55, snappy: 0.75 },
@@ -128,7 +128,7 @@ module MB::Sound
     mix.softclip(0.7, 0.95) * level
   end
 
-  # The beatbox snare's formant width in .funk_beat: patches-4
+  # The beatbox snare's formant width in .funk_kit: patches-4
   # (2026-10-13; maintainer on the wobbling beatbox: "With the lfo a little
   # less resonance is acceptable on the snare") widened it from 0.4;
   # patches-5 (2026-10-13; maintainer, preferring 0.4: "I think it's all
@@ -138,7 +138,7 @@ module MB::Sound
   FUNK_BEATBOX_SNARE_WIDTH = 0.4
 
   # How much wider than +snare_width+ the beatbox snare's upper formants
-  # are (see .funk_beat): patches-5.  At 1 (before), the snare said "ka"
+  # are (see .funk_kit): patches-5.  At 1 (before), the snare said "ka"
   # through formants 32-52 Hz wide at 1.36, 2.6, and 3.1 kHz, spectrum
   # peaks 19-26 dB over the spectrum around them (whistles); at 4 they
   # stand 13-16 dB out, with the same power per band (within 1 dB below 4
@@ -160,15 +160,15 @@ module MB::Sound
     }
   end
 
-  # .funk_beat's vowel LFO depth with +beatbox+ (the plain kit's is 0).
+  # .funk_kit's vowel LFO depth with +beatbox+ (the plain kit's is 0).
   FUNK_BEAT_WOBBLE = 0.8
 
-  # The beatbox drums' phases in .funk_beat's vowel LFO (cycles): the
+  # The beatbox drums' phases in .funk_kit's vowel LFO (cycles): the
   # snare at 0 says "e" on 2 and "a" on 4, the kick a quarter cycle on
   # opens to "o" on the downbeat, the hats an eighth apart.
   FUNK_WOBBLE_PHASES = { kick: 0.25, snare: 0, closed_hat: 0.125, open_hat: 0.375 }.freeze
 
-  # The vowel LFO of .funk_beat: a triangle every +rate+ (a Duration,
+  # The vowel LFO of .funk_kit: a triangle every +rate+ (a Duration,
   # locked to the timeline), +phase+ cycles in.
   def self.funk_wobble_lfo(rate, phase: 0)
     lfo = rate.lfo.triangle
@@ -176,7 +176,7 @@ module MB::Sound
   end
 
   # The overdub percussion: shaker, rim, congas (+source+ as for
-  # .funk_beat), highpassed at 180 Hz.
+  # .funk_kit), highpassed at 180 Hz.
   def self.funk_perc(source, level: 1.2)
     tr808(source, only: [:maracas, :rimshot, :low_conga, :mid_conga], velocity_curve: :midi, maracas: { decay: 0.05 }, rimshot: { tune: 1700 }, low_conga: { tune: 190 }, mid_conga: { tune: 280 })
       .filter(:highpass, cutoff: 180) * level
@@ -315,7 +315,7 @@ module MB::Sound
   def self.funk_patch(midi, patch = :keys, **opts)
     k = (FUNK_KNOBS[patch] || {}).to_h { |name, v| [name, (opts[name] || v).to_f.constant.named(name.to_s)] }
     case patch
-    when :beat then funk_beat(midi)
+    when :beat then funk_kit(midi)
     when :perc then funk_perc(midi)
     when :bass then funk_bass_voice(midi, **k)
     when :keys then funk_keys_voice(midi, **k)

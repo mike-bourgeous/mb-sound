@@ -479,6 +479,7 @@ RSpec.describe(MB::Sound::GraphNode::Recipe, :aggregate_failures) do
         'drums kit builder, stereo sample voices' => 'Samples made from NArrays (bundles save them as assets; see sampler_graph_io_spec.rb)',
         'grains (Grains)' => 'Samples made from NArrays (bundles save them as assets; see sampler_graph_io_spec.rb)',
         'sampler zone values (ZoneValue), pans, layers' => 'Samples made from NArrays (bundles save them as assets; see sf2_spec.rb)',
+        'sampler drum kit by roles (Instrument#remap_keys)' => 'Samples made from NArrays (bundles save them as assets; see drum_kits_spec.rb)',
         'sampler choke groups (SamplerVoice choke)' => 'Samples made from NArrays (bundles save them as assets; see sampler_graph_io_spec.rb)',
         'loop players (LoopPlayer)' => 'Samples made from NArrays (bundles save them as assets; see sampler_graph_io_spec.rb)',
         'region lanes (RegionPlayer)' => 'Samples made from NArrays (region_player_spec.rb round trips a lane of breakbeat(:jungle))',

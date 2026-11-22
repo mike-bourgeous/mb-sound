@@ -373,7 +373,9 @@ RSpec.describe(MB::Sound::Sampler::SF2, :aggregate_failures) do
           ] }],
           presets: [{ name: 'Standard', bank: 128, zones: [{ instrument: 0 }] }]
         )
-        m.sf2(path, [128, 0])
+        # (the font's own keys: a drum kit's role map adds key copies,
+        # which keep their exclusive classes; drum_kits_spec)
+        m.sf2(path, [128, 0], roles: false)
       }
 
       # A clip of sixteenth-note hits: [start (whole notes), note] pairs.
@@ -386,6 +388,8 @@ RSpec.describe(MB::Sound::Sampler::SF2, :aggregate_failures) do
         expect(kit.regions.map(&:off_by)).to eq([1, 1, 1, 2, nil])
         expect(kit.choke_map.groups(46, 1.0)).to eq([1])
         expect(kit.choke_map.choked_by(m::As2, 0.5)).to eq([1])
+        roles = m.sf2(kit.lineage[2][0], [128, 0])
+        expect(roles.choke_map.choked_by(MB::Sound::Drums::Roles.note(:half_open_hat), 0.5)).to eq([1]) # (a half-open hat plays the open hat, choked as it)
         expect(m.sf2(kit.lineage[2][0]).skipped([128, 0])).to eq({})
 
         alone = play(kit, hits([0, m::As2]), 24000)[0]

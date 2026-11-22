@@ -67,8 +67,22 @@ module MB
       #     }
       #     perc = kit { voice(:hat, decay: 0.04) { |h| h.metal.filter(:highpass, cutoff: 8000) * h.env(h.decay) * 3 } }
       #     bg :hats, perc.kit(grid(16, hat: 'x.xX' * 4).loop, shuffle: 3)
+      #
+      # Given a kind of kit (a Symbol) and no block, the kit of that kind
+      # (drum-gen-1; Drums::InstalledKits): the first installed SoundFont
+      # kit of its list, else a drum machine (saying once, in the console,
+      # which package to install).  It is a library entry, `L.kit.acoustic`,
+      # that a track plays and a set saves as the kind:
+      #
+      #     track :drums, kit(:acoustic)      # also :jazz, :hand_percussion, :gm
+      #     bg :drums, L.gen.beat.rock
       def kit(source = nil, name: :kit, **settings, &block)
-        raise ArgumentError, 'kit needs a block defining its voices' unless block
+        if source.is_a?(Symbol) && block.nil?
+          raise ArgumentError, "kit(#{source.inspect}) takes no settings (got #{settings.keys.map { |k| "#{k}:" }.join(', ')})" unless settings.empty?
+          Drums::InstalledKits.kind(source)
+          return Library.index.lookup(:installed, source)
+        end
+        raise ArgumentError, 'kit needs a block defining its voices (or a kind of kit: kit(:acoustic))' unless block
         machine = Drums::Machine.new(name, &block)
         return machine if source.nil?
         machine.kit(source, **settings)
