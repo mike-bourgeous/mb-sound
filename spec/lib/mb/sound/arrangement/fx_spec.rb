@@ -63,9 +63,9 @@ RSpec.describe(MB::Sound::Arrangement::Fx, :aggregate_failures) do
       expect { within.() { MB::Sound.public_send(cmd, :bass, :riff) } }.to raise_error(ArgumentError, /\A#{cmd} :bass, :riff: :riff is a clip's name; launch :bass, :riff plays it/)
     end
     expect(within.() { MB::Sound.launch(:bass, :riff) }.to_s).to start_with('bg :bass lands')
-    # start takes no names; seek 0 is not a bar; a latency profile is checked
+    # start takes no names; a latency profile is checked (seek 0 is the
+    # start since ux-friction-3: form_spec's seek spellings)
     expect { within.() { MB::Sound.start(:keys) } }.to raise_error(ArgumentError, /start starts the transport .* bg :keys plays/)
-    expect { within.() { MB::Sound.seek(0) } }.to raise_error(ArgumentError, /seek 0: bars count from 1, so the start is seek 1/)
     expect { MB::Sound.latency(:Low) }.to raise_error(ArgumentError, /latency :Low: no such profile \(did you mean :low\?\); the profiles are :low, :default, :video, :safe/)
   end
 

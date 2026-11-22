@@ -2128,6 +2128,12 @@ module MB
         `ui :deck` adds knobs and CPU, `ui :mini` is one line, `ui off`
         hides it.
 
+        Typing a library chain (`L.inst.ree`) shows the entries that match
+        beside the prompt; it takes no keys until Tab or Down goes into it
+        (then Up/Down/PgUp/PgDn move, Enter or Tab put the entry on the
+        line, Esc goes back), so Enter runs the line as typed and Up is
+        history.
+
         At the prompt (with or without a screen), Alt-Up/Alt-Down step the
         number at the cursor and run the line again, as Enter would (the
         take, the journal, undo; it lands where the line lands); the line
