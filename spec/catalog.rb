@@ -29,7 +29,9 @@ module Catalog
   # (17 854 bytes) and gen-ux-1 added fadeout to :play and progression to
   # :generative (17 862 bytes on its own): a question for the maintainer,
   # as before
-  BUDGET = 17_900
+  # 17 900 until racks-r3 added slot (17 969 bytes with both; maintainer
+  # 2026-11-21: "ok")
+  BUDGET = 18_000
 
   # Characters for a description, and bytes for a whole line
   DESCRIPTION_MAX = 80
@@ -54,7 +56,7 @@ module Catalog
     'Channels, panning, blending' => %i[pan balance place stereo mono left right swap mid_side from_mid_side width matrix blend],
     'Time, length, and units' => %i[until and_then ringdown sounding seconds samples bars cycles radians],
     'Rates, rendering, and debugging' => %i[oversample resample bounce spy clear_spies debug],
-    'Plumbing' => %i[tee get_sampler proc with_buffer as_input multi_sample],
+    'Plumbing' => %i[tee get_sampler proc with_buffer as_input multi_sample slot],
   }.freeze
 
   # Methods defined by metaprogramming (so with no doc comment of their

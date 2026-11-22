@@ -101,6 +101,7 @@ module MB
         10 => :prefader_sends,
         11 => :metadata,
         12 => :following_scales,
+        13 => :rack_slots,
       }.freeze
       FORMAT = FORMATS.keys.max
 

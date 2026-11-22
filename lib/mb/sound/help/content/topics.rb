@@ -1499,11 +1499,22 @@ module MB
         rack plays in several, and `:"dub/space"` turns them all); `share: true` joins the session knob
         `:space`, `follow: :space` maps it onto this knob's range, and
         `.mod(lfo, depth: 0.2)` swings around it.  `rack(:dub).snap :wide`
-        and `recall :"dub/wide", only: [:space]` keep variations.  `help
-        rack(:dub)` shows ports, knobs, and latency; `rack(:dub).draw` draws
-        its inside by rank (its ports at the left), and the rack pane (under
-        the racks in `ui :session`, or `ui.show :rack`) shows the instance
-        the racks pane picked, its knobs, and that drawing.  `save :dub,
+        and `recall :"dub/wide", only: [:space]` keep variations.
+        `sig.slot(:color) { |s| s.softclip }` inside a rack block is a hole
+        you swap while it plays: `swap :"dub/color", arack { |s|
+        s.diode(800) }` lands on the next bar, the old content ringing out
+        (`fade: 1.n8` crossfades, `fade: 0` cuts; undo and takes too).
+        `midi.slot(:keys) { |n| n.synth { |v| ... } }` swaps instruments:
+        notes still sounding stay on the old one for a second (`ring:
+        4.bars` for longer).  A named rack defined with `slot: true`
+        (`arack :dub, slot: true do ... end`) swaps its instances, stopped
+        ones too, when you define it again (`swap :dub, arack { ... }, fade:
+        0` picks the launch point and handover); without it they keep
+        playing as they were built.  `help rack(:dub)` shows ports, knobs,
+        slots, and latency; `rack(:dub).draw` draws its inside by rank (its
+        ports at the left), and the rack pane (under the racks in `ui
+        :session`, or `ui.show :rack`) shows the instance the racks pane
+        picked, its knobs, and that drawing.  `save :dub,
         rack(:dub)` writes a rack document: `preset :dub` gives the rack
         back, `preset :dub, sig: mic` plays it on an input (try the library
         rack `preset :dub_echo`); a saved rack that differs from the
@@ -1515,6 +1526,11 @@ module MB
       example 'a note rack: an anonymous value' do
         wobble = mrack { it.arp(:up, 16).echo(3.n16, 2, pitch: 7) }
         bg :try, seq(A3, C4, E4, G4).n4.loop.then(&wobble).synth { |v| v.hz.triangle.at(-17.db) * v.amp_env(0.005, 0.1, 0.3, 0.1) }.until(1.bar)
+      end
+      example 'a slot: swap part of a rack while it plays' do
+        arack(:try_color) { |sig| sig.slot(:color) { |s| s.softclip(0.2, 0.5) }.lp4(1800) }
+        bg :try, 55.hz.saw.at(-20.db).then(&rack(:try_color)).until(2.bars)
+        swap :"try_color/color", arack { |s| s.diode(600, resonance: 0.7) }, on: :bar
       end
       example 'an effect rack with a sidechain port' do
         arack(:try_pump, side: :audio) { |sig, side:| sig.duck(side, amount: 12.db, threshold: -24.db).softclip }

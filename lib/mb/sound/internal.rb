@@ -457,6 +457,15 @@ module MB
         env.nil? || env.empty? ? nil : File.expand_path(env)
       end
 
+      # True if +name+ is a rack slot (or slot group) in the current
+      # Session (console #swap swaps its content; racks R3).
+      def slot_name?(name)
+        s = Session.existing
+        return false unless s
+        kind = s.names.kind(name)
+        kind == :slot || kind == :slot_group
+      end
+
       # An ArgumentError saying how to play the MIDI::Stream (or Notes)
       # +stream+ on player +name+'s instrument, for console +command+ (bg,
       # cue, swap), or nil when +stream+ isn't one or +name+ isn't a track

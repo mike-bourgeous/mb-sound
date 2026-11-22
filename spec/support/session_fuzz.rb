@@ -25,7 +25,8 @@
 #   does the first such part, and a one-shot tween (ONCE_TWEENS), in a
 #   bus chain first fed at the launch (fix-bus-tween-1)
 # - :warm: warming every change before it lands (Session::Warming.always:
-#   copies built and played in sandboxes) gives the same mix, bit for bit
+#   copies built and played in sandboxes) gives the same mix, bit for bit,
+#   and no warm-up fails to load or build its copy (WARM_FAILURES)
 # - :carry: a carrying rebuild of each patch track (what a bind or a build
 #   knob's turn does; Session::Carry, carry-1) at a point drawn from the
 #   song gives the same mix, bit for bit, when every swap was a cut
@@ -741,8 +742,62 @@ module SessionFuzz
       # vocoder on a short loop: renders make each stretch at once)
       "bg :#{s.bg_name}, #{s.pick(FOLLOW_LOOPS)}#{s.on}"
     },
+    ->(s) {
+      # (racks-r3) a part through a named rack with a slot (or a slot of
+      # its own), the slot swapped a beat or two later by spill-over,
+      # crossfade, or cut, and sometimes the rack defined again: its
+      # instances swap at a launch point (bit for bit at any buffer size,
+      # plans off and on, mid-song launches).  racks-r3-2: instance slots
+      # are opt-in (`slot: true`; without it a rack defined again leaves
+      # its instance as it was), instrument slots ring for a second unless
+      # given ring:, and a stopped player's instance swaps by a cut and
+      # plays the new definition when resumed
+      name = s.bg_name
+      part = "#{s.pick(MELODIC)}.synth(voices: 2) { |v| v.hz.saw * v.amp_env(0.002, 0.05, 0.6, 0.02) * 0.2 }"
+      fade = s.pick(['', ', fade: 0', ', fade: 1/8r'])
+      later = s.pick(['1.beat', '2.beats'])
+      roll = s.rng.rand
+      # (racks-r3-2's choices come from the draws racks-r3 made, so songs
+      # after this command keep their draws)
+      slot = (roll * 997).floor % 4 == 0 ? '' : ', slot: true'
+      if roll < 0.3
+        "bg :#{name}, #{part}.slot(:tint) { |x| x.#{s.pick(SLOT_FX)} }#{s.on}; " \
+          "after(in: #{later}) { swap :\"#{name}/tint\", arack { |x| x.#{s.pick(SLOT_FX)} }#{fade}#{s.on} }"
+      elsif roll < 0.5
+        # (an instrument slot, or an instrument rack defined again: the
+        # old voices keep their notes, new notes go to the new one)
+        voice = ->(shape) { "n.synth(voices: 2) { |v| v.hz.#{shape} * v.amp_env(0.002, 0.05, 0.6, 0.1) * 0.2 }" }
+        clip = s.pick(MELODIC)
+        ring = fade.empty? ? ['', ', ring: 2.beats', ', ring: 0.25'][(roll * 7919).floor % 3] : ''
+        if s.rng.rand < 0.5
+          "bg :#{name}, #{clip}.notes.slot(:inst) { |n| #{voice.(s.pick(SHAPES))} }#{s.on}; " \
+            "after(in: #{later}) { swap :\"#{name}/inst\", irack { |n| #{voice.(s.pick(SHAPES))} }#{fade}#{ring}#{s.on} }"
+        else
+          "irack(:fi#{slot}) { |n| #{voice.(s.pick(SHAPES))} }; bg :#{name}, #{clip}.then(&rack(:fi))#{s.on}; " \
+            "after(in: #{later}) { irack(:fi#{slot}) { |n| #{voice.(s.pick(SHAPES))} } }"
+        end
+      else
+        rack = "arack(:fz#{slot}) { |sig| sig.slot(:color) { |x| x.#{s.pick(SLOT_FX)} } * knob(:lvl, 0.5) }"
+        which = s.rng.rand
+        swap = if which < 0.35
+                 "arack(:fz#{slot}) { |sig| sig.#{s.pick(SLOT_FX)} * knob(:lvl, 0.5) }"
+               else
+                 "swap :\"fz/color\", arack { |x| x.#{s.pick(SLOT_FX)} }#{fade}#{s.on}"
+               end
+        if which < 0.14
+          # (defined again while its player is stopped, then resumed)
+          "#{rack}; bg :#{name}, #{part}.then(&rack(:fz))#{s.on}; " \
+            "after(in: #{later}) { stop :#{name}, on: :now }; after(in: 2.beats + #{later}) { #{swap} }; after(in: 3.beats + #{later}) { resume :#{name}, on: :now }"
+        else
+          "#{rack}; bg :#{name}, #{part}.then(&rack(:fz))#{s.on}; after(in: #{later}) { #{swap} }"
+        end
+      end
+    },
     # (new commands go here, at the end)
   ].freeze
+
+  # Mono effects for slot contents (racks-r3's command).
+  SLOT_FX = ['softclip(0.2, 0.5)', 'lp4(900, resonance: 0.4)', 'delay(1.n16, feedback: 0.3)', 'diode(600, resonance: 0.5)', 'lp1(700) * 2'].freeze
 
   # +code+ (a song script) without the metadata the `meta` command adds:
   # its `meta` lines' blocks emptied, its `.note(...)` and
@@ -841,6 +896,9 @@ module SessionFuzz
     end
     @warnings = err.string.lines.reject { |l| EXPECTED_WARNINGS.any? { |re| l.match?(re) } }
     @hung = hung_wire_notes(session)
+    @warm_failures = warm && session ? session.warmed.select { |w|
+      w.result == :failed && WARM_FAILURES.any? { |re| w.reason.to_s.match?(re) } && WARM_EXPECTED.none? { |re| w.reason.to_s.match?(re) }
+    } : []
     mix = out.captured.map { |c| Numo::DFloat.cast(c) }
     if mix.first && mix.first.length >= RENDER_CAP * 48000
       raise RenderCapped, "the song's #{bars}-bar render ran to SessionFuzz::RENDER_CAP (#{RENDER_CAP} s) without ending (a seek loop?)"
@@ -974,6 +1032,23 @@ module SessionFuzz
     /No background player :\w+ is playing or stopped/, /doesn't play any of the clips being replaced/, /so a swap would never be heard/,
     /swap :\w+: track :\w+ isn't playing/,
   ].freeze
+
+  # Warm-up failures the :warm relation reports (a warm-up may fail by
+  # design: a graph without a recipe, a copy that can't print; these say
+  # the copy's document didn't load or build in the sandbox: racks-r3-2,
+  # every graph using a named rack failed with "rack :dub isn't defined
+  # here").
+  WARM_FAILURES = [/GraphIO::LoadError/, /NameError/, /NoMethodError/].freeze
+
+  # Warm-up failures matching WARM_FAILURES that are by design: a graph
+  # reading an input bound at play time (a track's live wire stream,
+  # `:"t2/live"`) has a document needing that input (seed 36, the same
+  # with racks-r3's copies).
+  WARM_EXPECTED = [/missing inputs? /].freeze
+
+  # The failed warm-ups (Session::Warming::Warm) of the last #render with
+  # warm: true whose reasons match WARM_FAILURES.
+  def warm_failures = @warm_failures || []
 
   # The unexpected lines the last #render printed to stderr.
   def warnings = @warnings || []
@@ -1109,7 +1184,8 @@ module SessionFuzz
       compare(ref, got, tolerance: 0, label: 'planned vs unplanned') ||
         compare(ref, render(code, song.bars, rebuilds: :next_span), tolerance: 0, label: 'planned with deferred rebuilds vs unplanned')
     when :warm
-      compare(render(code, song.bars), render(code, song.bars, warm: true), tolerance: 0, label: 'warmed changes vs not')
+      compare(render(code, song.bars), render(code, song.bars, warm: true), tolerance: 0, label: 'warmed changes vs not') ||
+        warm_failures.first&.then { |w| "Warm-up of #{w.kind} #{w.name.inspect} failed: #{w.reason}" }
     when :meta
       plain = without_meta(code)
       return :skip if plain == code

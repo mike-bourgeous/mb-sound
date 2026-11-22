@@ -442,6 +442,12 @@ module MB
           MB::Sound::Notes.new(self, sustain: sustain)
         end
 
+        # An instrument slot (racks R3): a named, swappable hole whose block
+        # makes audio from this stream (see MB::Sound::Notes#slot).
+        def slot(name, &block)
+          GraphNode::SlotMethods.make(self, name, block)
+        end
+
         # A polyphonic MB::Sound::Synth playing this stream (see Synth.new;
         # Synth applies the sustain pedals).  Returns Channels for
         # multichannel voices, like Clip#synth.

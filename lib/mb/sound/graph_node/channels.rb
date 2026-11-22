@@ -40,6 +40,7 @@ module MB
         include MasteringMethods
         include ModulationMethods
         include TremoloMethods
+        include SlotMethods
         node_traits memory: :none
 
         # The channel nodes.
