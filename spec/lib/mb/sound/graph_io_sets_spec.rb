@@ -193,6 +193,37 @@ RSpec.describe('set documents', :aggregate_failures) do
     expect(s.knobs[:cut].value).to eq(2400.0)
   end
 
+  # fix-knob-reload (batch 42's soak seed 789008): scheduled blocks run a
+  # lookahead early, and a set document loaded in one set its knob values
+  # (and ran its commands) then, landing on the first frame of the buffer
+  # running the block; its lines land at the block's time, as the same
+  # lines typed in the block do
+  it "lands a set document's knob values and tempo at the time of the scheduled block loading it, at any buffer size" do
+    text = "graph #{io::FORMAT}, name: \"k\", kind: :set\nknob :cut, (100.hz..5000.hz).at(600.hz)\nbpm 150\n"
+    outs = [367, 800].map { |size|
+      s = session
+      within(s) {
+        MB::Sound.knob :cut, 1200.0, range: 200.0..4000.0
+        MB::Sound.bg :k, MB::Sound.knob(:cut) * 0.0001, on: :now
+      }
+      s.schedule(1/2r) { io.load(text, session: s) }
+      out = Array.new((60000.0 / size).ceil) { s.process_buffer(size)[0].dup }
+      out = SpecBuffers.join(out)[0...60000]
+
+      turn = s.journal.changes.find { |e| e.kind == :turn && e.subject == :cut }
+      expect(turn&.lands&.pos).to eq(1/2r), "#{size}-frame buffers"
+      expect(s.journal.changes.find { |e| e.kind == :tempo_base }&.lands&.pos).to eq(1/2r), "#{size}-frame buffers"
+      expect(s.knobs[:cut].spec.range).to eq(100.0..5000.0)
+      expect(s.knobs[:cut].value).to eq(600.0)
+      out
+    }
+    # (bar 1 beat 3 at 120 BPM: frame 48000, where the 5 ms glide starts)
+    expect(outs[0][47999]).to be_within(1e-6).of(0.12)
+    expect(outs[0][48001]).to be < 0.12
+    expect(outs[0][48300]).to be_within(1e-6).of(0.06)
+    expect(RecipeHelpers.max_diff([outs[0]], [outs[1]])).to eq(0)
+  end
+
   it 'saves a loaded set again to the same text, playing bit for bit' do
     a = session
     within(a) { MB::Sound.seed(3); MB::Sound::GraphIOSetSpec.build }
