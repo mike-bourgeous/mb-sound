@@ -574,9 +574,10 @@ struct playback {
 	int jack; // ports on the shared JACK client instead of a miniaudio device
 	struct mb_jack_unit unit;
 
-	// JACK only: the cycle's frame time and the ring and device clock
-	// positions at the start of the latest process cycle, so #jack_clock
-	// can map JACK frame times (e.g. MIDI input) to ring frames.  A seqlock:
+	// JACK only: where the next process cycle starts, published at the end
+	// of each cycle: its frame time (this cycle's plus the period) and the
+	// ring and device clock positions it reads from, so #jack_clock can map
+	// JACK frame times (e.g. MIDI input) to ring frames.  A seqlock:
 	// jack_seq is odd while the process thread writes, and 0 until the first
 	// cycle.
 	_Atomic unsigned jack_seq;
@@ -585,10 +586,13 @@ struct playback {
 	_Atomic size_t jack_played;
 
 	// JACK only: periods written again for a cycle the server ran twice
-	// (see playback_jack_process); jack_cycled is set after the first
-	// cycle (process thread only)
+	// (see playback_jack_process), found by the latest cycle's frame time
+	// and copied from the ring position it started at; jack_cycled is set
+	// after the first cycle (process thread only)
 	_Atomic size_t jack_repeated;
 	int jack_cycled;
+	uint32_t cycle_frame;
+	size_t cycle_read_pos;
 
 	// Optional record of the first capture_frames frames played (for specs)
 	float *capture;
@@ -1025,6 +1029,15 @@ static void playback_callback(ma_device *device, void *output, const void *input
 // more than the queue, so the writer can't have reached it), leaving the
 // ring, the device clock, and #jack_clock as they were.  Frame times
 // always move between real cycles, so nothing else changes.
+//
+// After its pull, each real cycle publishes where the next one starts (see
+// #jack_clock).  While the ring keeps up that is the same map as where
+// this cycle started, but a cycle that ran short (before the first write,
+// or an underrun) pads its end with silence, so the next queued frame
+// leaves at the next cycle's start, not right after the last one played.
+// Publishing the cycle's start put the first queued frame a period early
+// when the ring had been empty, and with it the first notes a Session's
+// MIDI out queued before its first audio left (midi-out-first-note).
 static void playback_jack_process(struct mb_jack_unit *unit, uint32_t nframes)
 {
 	struct playback *p = unit->user;
@@ -1036,7 +1049,7 @@ static void playback_jack_process(struct mb_jack_unit *unit, uint32_t nframes)
 	}
 
 	uint32_t frame = mb_jack_last_frame_time();
-	int repeat = p->jack_cycled && frame == atomic_load_explicit(&p->jack_frame, memory_order_relaxed);
+	int repeat = p->jack_cycled && frame == p->cycle_frame;
 	size_t start = 0, count = 0;
 	if (repeat) {
 		atomic_fetch_add_explicit(&p->jack_repeated, 1, memory_order_relaxed);
@@ -1046,7 +1059,7 @@ static void playback_jack_process(struct mb_jack_unit *unit, uint32_t nframes)
 			// port's buffer as that call left it.
 			return;
 		}
-		start = atomic_load_explicit(&p->jack_read_pos, memory_order_relaxed);
+		start = p->cycle_read_pos;
 		count = atomic_load_explicit(&p->read_pos, memory_order_relaxed) - start;
 		if (count > nframes || count + p->max_queue > p->capacity) {
 			// The period grew since opening, so the writer may have
@@ -1055,15 +1068,8 @@ static void playback_jack_process(struct mb_jack_unit *unit, uint32_t nframes)
 			return;
 		}
 	} else {
-		// Publish where this cycle starts (see #jack_clock); the reader
-		// retries while the sequence is odd or changed
-		unsigned seq = atomic_load_explicit(&p->jack_seq, memory_order_relaxed);
-		atomic_store_explicit(&p->jack_seq, seq + 1, memory_order_relaxed);
-		atomic_thread_fence(memory_order_release);
-		atomic_store_explicit(&p->jack_frame, frame, memory_order_relaxed);
-		atomic_store_explicit(&p->jack_read_pos, atomic_load_explicit(&p->read_pos, memory_order_relaxed), memory_order_relaxed);
-		atomic_store_explicit(&p->jack_played, atomic_load_explicit(&p->frames_played, memory_order_relaxed), memory_order_relaxed);
-		atomic_store_explicit(&p->jack_seq, seq + 2, memory_order_release);
+		p->cycle_frame = frame;
+		p->cycle_read_pos = atomic_load_explicit(&p->read_pos, memory_order_relaxed);
 		p->jack_cycled = 1;
 		p->conceal_touched = 0;
 	}
@@ -1081,6 +1087,18 @@ static void playback_jack_process(struct mb_jack_unit *unit, uint32_t nframes)
 				buffers[c][done + i] = jack_scratch[i * ch + c];
 			}
 		}
+	}
+
+	if (!repeat) {
+		// Publish where the next cycle starts (see #jack_clock); the
+		// reader retries while the sequence is odd or changed
+		unsigned seq = atomic_load_explicit(&p->jack_seq, memory_order_relaxed);
+		atomic_store_explicit(&p->jack_seq, seq + 1, memory_order_relaxed);
+		atomic_thread_fence(memory_order_release);
+		atomic_store_explicit(&p->jack_frame, frame + nframes, memory_order_relaxed);
+		atomic_store_explicit(&p->jack_read_pos, atomic_load_explicit(&p->read_pos, memory_order_relaxed), memory_order_relaxed);
+		atomic_store_explicit(&p->jack_played, atomic_load_explicit(&p->frames_played, memory_order_relaxed), memory_order_relaxed);
+		atomic_store_explicit(&p->jack_seq, seq + 2, memory_order_release);
 	}
 }
 
@@ -1832,15 +1850,18 @@ static VALUE playback_jack_ports(VALUE self)
  * call-seq:
  *   playback.jack_clock -> { frame_time:, read_pos:, frames_played:, write_pos: } or nil
  *
- * For outputs on JACK, where the latest process cycle started: its JACK
- * frame time (jack_last_frame_time, a 32-bit counter that wraps), the
+ * For outputs on JACK, where the next process cycle starts, as the latest
+ * one left it: its JACK frame time (the latest cycle's
+ * jack_last_frame_time plus the period, a 32-bit counter that wraps), the
  * ring's read position (frames taken from the queue since opening; see
- * #stats) and the device clock (:frames_played) at that moment, plus the
- * current :write_pos (frames queued since opening).  Until the next
- * underrun, ring frame +x+ goes to the ports at JACK frame
- * `frame_time + (x - read_pos)`, the same time base as a JACK MIDI input
- * event at that frame.  nil for miniaudio devices, before the first cycle,
- * and once closed.
+ * #stats) and the device clock (:frames_played) there, plus the current
+ * :write_pos (frames queued since opening).  Until the next underrun, ring
+ * frame +x+ goes to the ports at JACK frame `frame_time + (x - read_pos)`
+ * (frames already played map to where they played while the ring kept
+ * up), the same time base as a JACK MIDI input event at that frame.  A
+ * cycle that ran out of audio (before the first write, or an underrun)
+ * leaves the next queued frame at the next cycle's start.  nil for
+ * miniaudio devices, before the first cycle, and once closed.
  */
 static VALUE playback_jack_clock(VALUE self)
 {
@@ -3236,6 +3257,7 @@ struct jack_midi {
 	_Atomic size_t repeated; // messages of a repeated cycle, not queued again
 	_Atomic size_t too_large; // output messages larger than the port buffer holds
 	_Atomic size_t max_message; // output: the port buffer's room for one event, last cycle
+	_Atomic size_t message_cap; // output, #cap_message (specs): a smaller room than the port's, 0 for none
 
 	// Output only: timed short messages (see mb_midi_timed.h), and the
 	// last cycle's frame time (JACK's thread; see midi_out_process)
@@ -3381,8 +3403,10 @@ static void midi_in_process(struct mb_jack_unit *unit, uint32_t nframes)
 // JACK's thread: queued messages out of the ring into the output port (all
 // at the start of the cycle; what doesn't fit waits for the next cycle),
 // then the timed messages due in this cycle at their frames (see
-// mb_midi_timed.h).  A message that doesn't fit an empty port buffer never
-// will: it is dropped and counted (stats[:too_large]).  A cycle an
+// mb_midi_timed.h).  A message larger than this cycle's room for one event
+// (the empty port buffer's; it can shrink after the message was queued,
+// e.g. when the period changes) is dropped and counted
+// (stats[:too_large]) rather than blocking the queue behind it.  A cycle an
 // asynchronous server runs twice (the same frame time) leaves the port
 // buffer as the first call wrote it (as playback_jack_process does), so
 // nothing sent in it is lost or sent twice.
@@ -3399,7 +3423,12 @@ static void midi_out_process(struct mb_jack_unit *unit, uint32_t nframes)
 
 	void *buffer = mb_jack_port_buffer(unit->ports[0], nframes);
 	mb_jack_midi_clear(buffer);
-	atomic_store_explicit(&m->max_message, mb_jack_midi_max_event_size(buffer), memory_order_relaxed);
+	size_t room = mb_jack_midi_max_event_size(buffer);
+	atomic_store_explicit(&m->max_message, room, memory_order_relaxed);
+	size_t cap = atomic_load_explicit(&m->message_cap, memory_order_relaxed);
+	if (cap != 0 && cap < room) {
+		room = cap;
+	}
 
 	size_t rp = atomic_load_explicit(&m->read_pos, memory_order_relaxed);
 	size_t wp = atomic_load_explicit(&m->write_pos, memory_order_acquire);
@@ -3415,6 +3444,14 @@ static void midi_out_process(struct mb_jack_unit *unit, uint32_t nframes)
 		if (start + size > m->capacity) {
 			ring_get(m, rp + MIDI_HEADER, midi_scratch, size);
 			bytes = midi_scratch;
+		}
+
+		if (size > room) {
+			// Too large for this cycle's room, which may have shrunk since
+			// it was queued: drop it rather than block the queue
+			atomic_fetch_add_explicit(&m->too_large, 1, memory_order_relaxed);
+			rp += MIDI_HEADER + size;
+			continue;
 		}
 
 		if (mb_jack_midi_write(buffer, 0, bytes, size) != 0) {
@@ -3846,6 +3883,23 @@ static VALUE jack_midi_max_message(VALUE self)
 }
 
 /*
+ * call-seq:
+ *   output.cap_message(bytes) -> nil
+ *
+ * For specs: limits the room for one message to +bytes+ (0 lifts the
+ * limit) in JACK's thread only, as if the port buffer shrank after
+ * messages were queued (a period change): queued messages larger than that
+ * are dropped and counted (stats[:too_large]) when their turn comes.
+ * #write and #max_message keep the port's own room.
+ */
+static VALUE jack_midi_cap_message(VALUE self, VALUE bytes)
+{
+	struct jack_midi *m = get_jack_midi_output(self);
+	atomic_store(&m->message_cap, NUM2SIZET(bytes));
+	return Qnil;
+}
+
+/*
  * The messages of repeated cycles received once (stats[:repeated], without
  * allocating a Hash; MIDI::Input checks it on every read).
  */
@@ -3900,6 +3954,7 @@ static void init_jack_midi(VALUE fast_audio)
 	rb_define_method(output, "write_at", jack_midi_write_at, 4);
 	rb_define_method(output, "discard_timed", jack_midi_discard_timed, 0);
 	rb_define_method(output, "max_message", jack_midi_max_message, 0);
+	rb_define_method(output, "cap_message", jack_midi_cap_message, 1);
 }
 
 void Init_fast_audio(void)

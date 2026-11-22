@@ -37,9 +37,9 @@ RSpec.describe(MB::Sound::UI::NudgeKeys, :aggregate_failures) do
     out = +''
     lock = Mutex.new
     reader = Thread.new { loop { d = r.readpartial(4096); lock.synchronize { out << d }; w.write("\e[1;1R") if d.include?("\e[6n") } rescue nil }
-    wait_until { lock.synchronize { out.include?('> ') } }
+    wait_until!('the script\'s prompt') { lock.synchronize { out.include?('> ') } }
     keys.each { |k| k == :wait ? sleep(0.4) : (w.write(k); sleep 0.05) }
-    wait_until(timeout: 5) { lock.synchronize { out.include?('DONE') || out.scan('RESULT:').length >= lines } }
+    wait_until!("DONE or #{lines} results", timeout: 15) { lock.synchronize { out.include?('DONE') || out.scan('RESULT:').length >= lines } }
     text = lock.synchronize { out.dup }
     [text.scan(/RESULT:(.*)/).flatten.map(&:strip), text.scan(/REFUSED:(.*)/).flatten.map(&:strip)]
   ensure

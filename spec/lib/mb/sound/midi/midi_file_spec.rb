@@ -38,6 +38,11 @@ RSpec.describe(MB::Sound::MIDI::MIDIFile) do
       expect(t.map { |i| i[:index] }).to eq((0...t.length).to_a)
       expect(t[1]).to include(min_note: 68, mid_note: 75, max_note: 80)
       expect(t[1][:num_notes]).to be > 0
+      # (channels count from 1, as synths show them; midilib's are the wire's)
+      wire = MB::Sound::MIDI::MIDIFile.new('spec/test_data/midi.mid', merge_tracks: false).seq.tracks[1].events.grep(::MIDI::ChannelEvent).map(&:channel).uniq
+      expect(t[1][:event_channels]).to eq(wire.map { |c| c + 1 })
+      expect(t[1][:channel_mask]).to eq(wire.sort.map { |c| c + 1 })
+      expect(t[1][:channel]).to eq(wire.first + 1)
     end
   end
 

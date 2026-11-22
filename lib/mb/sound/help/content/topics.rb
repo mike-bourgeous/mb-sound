@@ -458,7 +458,10 @@ module MB
         plus `half_open_hat`, `hat_swish`, `ride_shank`, `crash3`, chokes,
         and tom rims, each kit playing what it has for them (a 909's open
         hat for a half-open one; the acoustic kits' rack tom for GM's high
-        tom).
+        tom).  Tune one in semitones on its track with its knob (`track
+        :drums, kit(:jazz)`, then `turn :"drums/tune", -3`: every drum
+        lower, each key the same drum); the machines' voices have tune
+        knobs of their own, in Hz (`tr909(clip, kick: { tune: 50 })`).
       TEXT
       commands :tr808, :tr909, :kit, :drum_kit, :grid, :euclid
       note :drums
@@ -701,7 +704,10 @@ module MB
         `sf2('GM.sf2', 0)` (a GM program in bank 0: 0 is the piano),
         `sf2(path, preset: 'Strings')` (a name, or the one name containing
         it), `sf2(path, preset: [128, 0])` (bank 128: GM drum kits), or
-        `font[48]`, `font['Pad']`, `font[128, 0]`.  Each is a sampler
+        `font[48]`, `font['Pad']`, `font[128, 0]`.  Preset numbers are
+        the file's own, counted from 0 as SoundFont editors show them (GM
+        program 1, the piano, is preset 0), unlike MIDI channels and
+        programs elsewhere, which count from 1.  Each is a sampler
         Instrument: `synth(midi) { |v| piano.play(v) }`,
         `beat.sampler(kit, voices: 8)`, or a track's patch.  Only the
         chosen preset's samples are read (a 30 MB GM font opens in a few
@@ -995,7 +1001,17 @@ module MB
         `track :drums, kit(:acoustic); bg :drums, L.gen.beat.rock;
         turn :"drums/energy", 2.bars.lfo.square.at(0.2..1)` (a busy bar, then
         a sparse one, counted from where the turn lands: add `on: :bar`
-        when the song is already playing).
+        when the song is already playing).  `.morph` blends one generator
+        into another, slot by slot: `bg :drums,
+        L.gen.beat.dnb.morph(L.gen.beat.house)` (or `.morph(:house)`, a
+        name in the same family) plays dnb at 0 and house at 1 of the
+        track knob `:"drums/morph"` (`morph: 0.3` is where it starts;
+        `turn :"drums/morph", 1, over: 8.bars`, an LFO, or a scene's
+        `drums: { morph: 1 }`).  Each drum step (a beat of a melodic line)
+        switches once on the way, notes both play stay, the anchors switch
+        halfway, and the sides keep their own seeds and share knobs of one
+        name.  Two of one kind only: a drum beat doesn't morph into a
+        pitched line.
       TEXT
       commands :tones, :chord, :weights, :harmony, :progression, :generate, :strikes, :dice, :melody, :motifs, :beats, :rhythm
       note :generative
@@ -1031,6 +1047,12 @@ module MB
         knob :energy, 0.5
         bg :try, tr909(beats(16, energy: knob(:energy)) { kick [1, 0, 0, 0] * 4, keep: [0, 8]; hat [0.8] * 16 }).at(-18.db)
         turn :energy, 2.bars.lfo.square.at(0.05..1)
+      end
+      example 'one beat morphing into another (dnb at 0, house at 1 of the knob drums/morph)' do
+        track :try_drums, :tr909, q: 1
+        level :try_drums, -18.db
+        bg :try_drums, L.gen.beat.dnb.morph(L.gen.beat.house)
+        turn :"try_drums/morph", 1, over: 8.bars
       end
       example 'sparse bells over a drone' do
         bells = strikes(scale(:minor_pentatonic, :a).weights.over(A4..A6), every: 1.n8, chance: 0.5, gap: 2)
@@ -1107,7 +1129,11 @@ module MB
       about <<~TEXT
         The Set layer: tracks remember a patch and a clip, scenes are the
         state of every track, `go` launches one at its launch point
-        (`on:`, `in:`, `at: bar(n)`).  Every command is one undo step.
+        (`on:`, `in:`, `at: bar(n)`).  Every command is one undo step,
+        and `undo` takes back one at a time (at the next bar; `undo on:
+        :now` at once), also a redefinition that never got to play: three
+        quick `track :bass` lines before the bar, then `undo`, plays the
+        second; `redo!` steps forward again.
         Each track keeps the clips it has played as numbered slots (the
         clip matrix): `launch :bass, :bass_b` (or a slot number) plays one,
         and `tweak :bass, transpose: 2` (legato:, swing:, quantize:,
@@ -1293,7 +1319,9 @@ module MB
         `demo` loads a whole set into the session, paused at bar 1: Night
         Bus (bin/songs/night_bus_flow.rb), tech house at 126 BPM with 12
         tracks, 12 scenes, 5 knobs, a master chain, and its song form;
-        `demo :tunnel_vision` loads the other set (the list is below).
+        `demo :tunnel_vision` and `demo :n109` load the others (the
+        list is below; in N109, `turn :variant, 0, over: 8.bars` moves the
+        whole song from Kez Volta's second version to his first).
         Nothing plays until you do something: `go :groove` launches a
         scene, `turn :cut, 3000, over: 2` opens the hook's filter, `play_form
         demo.form` plays the whole song (steer it with `loop!`, `onward`,
@@ -1633,8 +1661,11 @@ module MB
         Stuck note on live input (a keyboard dropped a note-off)?  Press
         the key again and let go: live input restrikes held keys
         (`same_key: :restrike`; files and clips count overlaps,
-        `same_key: :count`).  `sysex.capture` saves patch dumps from
-        hardware to .syx files in the background (`sysex.load` reads them).
+        `same_key: :count`).  Channels and programs count from 1, as on
+        synths: `midi.channel(10)` keeps the drums, `cc(1, channel: 2)`
+        listens to channel 2, `C4.to_midi(channel: 1)` (channel 0 raises).
+        `sysex.capture` saves patch dumps from hardware to .syx files in
+        the background (`sysex.load` reads them).
       TEXT
       commands :midi, :midi_file, :midi_stream, :synth, :per_voice, :close_midi, :mod_sum, :mod_scale, :sysex
       dsl :gate, :trigger, :velocity, :amp_env, :hz, :cutoff, :reso, :arp, :echo, :chord
@@ -1654,7 +1685,7 @@ module MB
         added); `offset: 4.ms` moves one synth later for its own response
         (`midi_out(...).offset = 6.ms` while it plays).  `level :kronos,
         -6.db` sends CC 7.  Channels and programs count from 1, as on the
-        synths.  `midi_out('SQ-80').test` plays a test note; `midi_out(port:
+        synths (channel 0 or program 0 raises).  `midi_out('SQ-80').test` plays a test note; `midi_out(port:
         'to_surge')` makes a port another program connects to.  `ui.show
         :midi_ports` (alias `:midi_devices`) shows them in a pane: Enter
         puts a track line on the console, a plays a test note.
@@ -1681,7 +1712,8 @@ module MB
         keeps a rubato file's tempo map.
         `midi_kit 'beat.mid'` makes the drum tracks a grid-like Kit for
         tr808/tr909.  Saved graph documents keep the notes and lanes as
-        `events(...)`, not the file.
+        `events(...)`, not the file.  Channels count from 1, as the
+        listing shows them: `midi_clip 'song.mid', channel: 10`.
       TEXT
       commands :midi_tracks, :midi_clip, :midi_kit, :midi_file
       note :midi
@@ -1703,7 +1735,8 @@ module MB
         the stream).  `wires` lists them; set documents save the ones that
         print as Ruby; takes replay them all.  A clip on a track's
         instrument is `swap :lead, clip`; `arm :lead, input: stream` wires
-        it now.
+        it now.  Channels count from 1 here as everywhere:
+        `riff.stream(channel: 2)`, `midi.channel(10)`, `.rechannel(3)`.
       TEXT
       commands :wire, :unwire, :wires
       note :arrangement
@@ -1958,7 +1991,7 @@ module MB
         drum machines, graph documents, clips) is an entry in one library.
         `find 'dark bass'` lists the best matches with why each matched;
         `L.fx.reverb.hall` reaches one by words, each narrowing the last
-        (`L.inst.reese` lists both Reeses, Tab shows what is left), and
+        (`L.inst.reese` lists the Reeses, Tab shows what is left), and
         `.(sig)` uses it: `sig.then(&L.fx.hall)`.  Heads: `L.inst`,
         `L.fx`, `L.kit`, `L.seq`, `L.gen` (clip generators), `L.flow`
         (section chains), `L.master`, `L.set`, `L.env`, `L.edit`, `L.mfx`
@@ -1977,7 +2010,11 @@ module MB
         inspector's notes row too); `L.gen.beat.techno(energy: 0.8)` keeps
         its number.  `L.gen.beat` is a family (the drum beats): its entries
         print with it, and under `L.gen` alone their names narrow like
-        tags (`L.gen.rock` is `L.gen.beat.rock`).
+        tags (`L.gen.rock` is `L.gen.beat.rock`).  A generator entry
+        morphs into another: `bg :drums,
+        L.gen.beat.dnb.morph(L.gen.beat.house)` (the knob :"drums/morph",
+        0 dnb, 1 house; `.morph(:house)` names one in the family;
+        `L.gen.morph(:dnb, :house)` is the same; help :generative).
         `L.flow.techno_chain(seed: 4)` is a genre template's section chain;
         `flow L.flow.techno_chain` plays it over the session's scenes, and
         the templates read theirs from here.  Saved graphs print them back

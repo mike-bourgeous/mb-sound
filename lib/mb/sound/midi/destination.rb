@@ -145,10 +145,13 @@ module MB
         end
 
         # The channel number checked: 1..16.  0 raises (channels count from
-        # 1 here; a silent 0 would send to the wrong synth).
+        # 1, as everywhere a person types them; a silent 0 would send to
+        # the wrong synth).  Always 1-based, also inside
+        # MIDI::Channel.zero_based (old take replays; midi_out came after
+        # channels counted from 1).
         def self.check_channel(channel)
-          unless channel.is_a?(Integer) && channel.between?(1, 16)
-            hint = channel == 0 ? ' (channels count from 1, as on the synths: channel 1 is the first)' : ''
+          unless channel.is_a?(Integer) && Channel::RANGE.cover?(channel)
+            hint = channel == 0 ? " (#{Channel::HINT})" : ''
             raise ArgumentError, "MIDI channels are 1 to 16 (got #{channel.inspect})#{hint}"
           end
           channel
@@ -221,6 +224,15 @@ module MB
         # The shared MIDI::Output, or nil (see #connected?).
         def output
           @output
+        end
+
+        # The port's counters (MIDI::Output#stats: messages, dropped,
+        # too_large (long messages that no longer fit a cycle, dropped),
+        # timed_sent, timed_late, ...), or an empty Hash when not connected
+        # or not on JACK.  Warns once for long messages dropped since the
+        # last report.
+        def stats
+          @output.nil? || @output.closed? ? {} : @output.stats
         end
 
         # A MIDI::OutNode playing +source+ (a Clip, Kit, Stream, or anything

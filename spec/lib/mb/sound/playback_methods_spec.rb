@@ -662,7 +662,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       %i[bg cue swap].each do |cmd|
         expect { in_session { MB::Sound.public_send(cmd, :bowl, stream) } }.to raise_error(ArgumentError, /#{cmd} :bowl: arp\(.*live MIDI stream of a clip.*riff\.bake\(arp\(\.\.\.\)\)/)
       end
-      expect { in_session { MB::Sound.bg(:bowl, MB::Sound::Notes.new(MB::Sound::MIDI::Stream.new(MB::Sound::MIDI::LiveSource.new(MB::Sound::MIDI::VirtualInput.new)))) } }.to raise_error(ArgumentError, /live MIDI \(no clip\).*rec/) if defined?(MB::Sound::MIDI::VirtualInput)
+      expect { in_session { MB::Sound.bg(:bowl, MB::Sound::Notes.new(MB::Sound::MIDI::Stream.new(MB::Sound::MIDI::LiveSource.new(MB::Sound::MIDI::VirtualInput.new)))) } }.to raise_error(ArgumentError, /live MIDI, not a clip.*arm :bowl \(or wire :bowl, stream\).*capture :bowl \(or rec 4\)/) if defined?(MB::Sound::MIDI::VirtualInput)
       40.times { @session.process_buffer }
       expect(@session.players.keys).to eq([:bowl])
       expect(@session.players[:bowl]).not_to include('MIDI')

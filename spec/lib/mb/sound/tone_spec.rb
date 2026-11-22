@@ -312,19 +312,20 @@ RSpec.describe MB::Sound::Tone do
 
   describe '#to_midi' do
     it 'returns a MIDI note-on event' do
-      result = 50.hz.to_midi(channel: 4, velocity: 3)
+      result = 50.hz.to_midi(channel: 5, velocity: 3)
       expect(result).to be_a(MB::Sound::MIDI::Event)
       expect(result.type).to eq(:note_on)
       expect(result.note).to eq(50.hz.to_note.number.round)
       expect(result.raw).to eq(3)
-      expect(result.channel).to eq(4)
+      expect(result.channel).to eq(4) # (the Event holds the wire's 0-based channel)
       expect(result.bytes.bytes).to eq([0x94, 50.hz.to_note.number.round, 3])
     end
 
-    it 'defaults to velocity 64 on channel 0, for Notes and Pitches too' do
+    it 'defaults to velocity 64 on channel 1, for Notes and Pitches too; channels count from 1' do
       expect(MB::Sound::C4.to_midi.bytes.bytes).to eq([0x90, 60, 64])
       expect(440.hz.to_midi.bytes.bytes).to eq([0x90, 69, 64])
-      expect(MB::Sound::A4.to_midi(velocity: 127, channel: 15).bytes.bytes).to eq([0x9f, 69, 127])
+      expect(MB::Sound::A4.to_midi(velocity: 127, channel: 16).bytes.bytes).to eq([0x9f, 69, 127])
+      expect { MB::Sound::C4.to_midi(channel: 0) }.to raise_error(ArgumentError, /channels count from 1/)
     end
   end
 

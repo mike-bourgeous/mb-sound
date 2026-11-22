@@ -136,10 +136,12 @@ module MB
         end
 
         # The minimum, median, and maximum note number of #notes (only those
-        # on 0-based +:channel+ if given), or 64 for each without notes; e.g.
-        # for the initial scroll position of a piano roll.
+        # on +:channel+, 1 to 16, if given), or 64 for each without notes;
+        # e.g. for the initial scroll position of a piano roll.  (The
+        # notes' own :channel is the wire's 0-based number, as in
+        # Event#channel.)
         def note_stats(channel: nil)
-          NoteList.stats(notes, channel: channel)
+          NoteList.stats(notes, channel: Channel.of_optional(channel))
         end
 
         private

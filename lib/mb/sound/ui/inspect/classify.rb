@@ -63,6 +63,8 @@ module MB
             'GraphNode::FilterBank::Output' => 'multi-output wiring',
             'GraphNode::Chorus::Tail' => 'multi-output wiring', 'GraphNode::Grains::Output' => 'multi-output wiring', 'GraphNode::MultitapDelay::DelayTap' => 'multi-output wiring',
             'GraphNode::FeedbackLoop::Variable' => 'multi-output wiring', 'Drums::Voice::Tap' => 'multi-output wiring',
+            # (ping_pong's taps and the stereo bundle it reads; n109-1)
+            'GraphNode::DelayNetwork::Tap' => 'multi-output wiring', 'GraphNode::Channels' => 'multi-output wiring',
             'Sequence::TempoNode' => 'tempo', 'SQ80::TimeScale' => 'tempo',
             'GraphNodeInput' => 'synth wiring', 'Drums::Kit' => 'synth wiring',
           }.freeze
@@ -81,7 +83,7 @@ module MB
           SHAPERS = %w[GraphNode::Shaper GraphNode::CurveShaper].freeze
           EFFECTS = %w[
             GraphNode::Reverb GraphNode::Chorus GraphNode::MultitapDelay GraphNode::FeedbackLoop GraphNode::Dynamics
-            GraphNode::Dynamics::Crossover::Band GraphNode::Decimator GraphNode::Sounding GraphNode::Limiter
+            GraphNode::Dynamics::Crossover::Band GraphNode::Decimator GraphNode::Sounding GraphNode::Limiter GraphNode::DelayNetwork
           ].freeze
           ARITHMETIC = %w[GraphNode::Multiplier GraphNode::Mixer GraphNode::ProcNode GraphNode::BinaryOperation].freeze
           TRIGGERS = %w[Notes::Trigger Notes::KeyTrigger GraphNode::Dust].freeze

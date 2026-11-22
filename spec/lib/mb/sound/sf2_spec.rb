@@ -80,7 +80,7 @@ RSpec.describe(MB::Sound::Sampler::SF2, :aggregate_failures) do
       expect(m.sf2(path, preset: 'Grand').name).to eq('Grand Piano')
       expect { f.preset('Pad') }.to raise_error(ArgumentError, /matches 2 presets: 000:089 Warm Pad, 000:093 Metal Pad/)
       expect { f.preset('Grand Pino') }.to raise_error(ArgumentError, /did you mean "Grand Piano"/)
-      expect { f.preset(5) }.to raise_error(ArgumentError, /no preset 5/)
+      expect { f.preset(5) }.to raise_error(ArgumentError, /no preset 5.*counted from 0 as SoundFont editors show them/)
       expect(f.play(m.seq(m::C4.n4).notes).sample(800).abs.max).to be > 0.01 # the first preset
     end
 

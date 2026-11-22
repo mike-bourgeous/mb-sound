@@ -50,7 +50,8 @@ module MB
         # The controller of a spill-over's choke (see #ring_out).
         ALL_SOUND_OFF = 120
 
-        # The MIDI channel (0-based) given to the clip's events.
+        # The MIDI channel given to the clip's events: 0-based, as on the
+        # wire (Event#channel); Clip#stream takes it 1-based.
         attr_reader :channel
 
         # Read spans the clip's edges can't land in take a quiet path:
@@ -112,6 +113,38 @@ module MB
           @carried_sounding = nil
           @content_from = nil # (see #chase_at_position)
           @hold_state = nil # (nil, :pending, :held; see #timeline_hold)
+          @preparers = nil # (see #prepare_with)
+        end
+
+        # Adds +preparer+ (an object with #cover(clip), e.g. a
+        # Sampler::Reach) to be told of every clip #prepare_clip announces,
+        # so it can get ready for the clip off the render thread.
+        def prepare_with(preparer)
+          @preparers ||= []
+          @preparers << preparer unless @preparers.any? { |p| p.equal?(preparer) }
+          self
+        end
+
+        # Gets the preparers (see #prepare_with) ready for +clip+, which a
+        # swap will play here (Session#swap calls this on its own thread
+        # before the swap is queued: a drum kit builds the tables of the
+        # clip's new keys there, not in the buffer where the swap lands).
+        #
+        # With +at:+ (the timeline position, whole notes, where the clip
+        # will start playing here: a swap's time, or a new graph's launch)
+        # and +epoch:+ (the playing Session's, Session#epoch), a generator
+        # clip also makes what its first reads need, so the buffer where
+        # the change lands only reads it (Sequence::Clip#pregenerate;
+        # bg-latency-2): Session#swap and Arrangement#start_track call it
+        # so.  Returns the number of results made then (0 for clips on a
+        # clock, and clips that generate nothing).
+        def prepare_clip(clip, at: nil, epoch: 0)
+          @preparers&.each { |p| p.cover(clip) }
+          return 0 if at.nil? || @clock || clip.clocking
+
+          time = at.to_r + @ahead
+          origin = clip_origin(clip, time, time)
+          clip.pregenerate(time - origin, origin: origin, epoch: epoch)
         end
 
         # Holds while the transport is paused (Session::TransportPause): the

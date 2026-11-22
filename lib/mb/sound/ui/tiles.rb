@@ -1388,13 +1388,13 @@ module MB
           when :palette then @router.open_line(:palette, ':', history: @palette_history)
           when :redraw then @full = @clear = true
           when :panic # (a script screen's own panic, e.g. a synth screen's notes off, else the console's)
-            @on_action ? @on_action.call(a) : run_safely { UI.run_line('panic', keys_session || Session.current) }
+            @on_action ? @on_action.call(a) : run_safely { UI.run_line('panic', transport_session) }
           when :pause # (a script screen's own pause, else the console's transport toggle: start or pause, a take line)
             if @on_action
               @on_action.call(a)
             else
               run_safely {
-                s = keys_session || Session.current
+                s = transport_session
                 line = TransportMethods.toggle_line(s)
                 # (an answer on the next frame: a first start warms every
                 # track before the music, 1.8 s for a demo's 8; the painter
@@ -1465,6 +1465,15 @@ module MB
         # The Session the keyboard plays into.
         def keys_session
           @keyboard.out.respond_to?(:target_session) ? @keyboard.out.target_session : Session.existing
+        end
+
+        # The Session NAV Space (the transport toggle) and panic act on: the
+        # screen's own (Tiles.new(session:)), else the keyboard's, else the
+        # current one.  (fixes-16: a screen given its own Session paused the
+        # default Session's transport with Space, and a later at_bar block
+        # in that Session waited for a resume that never came.)
+        def transport_session
+          @session || keys_session || Session.current
         end
 
         # Step entry's swap key: the clip into each armed track at its next

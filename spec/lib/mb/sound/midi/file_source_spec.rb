@@ -183,6 +183,10 @@ RSpec.describe(MB::Sound::MIDI::FileSource) do
       expect(src.notes[0]).to include(:channel, :on_velocity, :off_velocity, :on_time, :off_time, :sustain_time)
       expect(src.note_stats).to eq([0, 64, 127])
       expect(src.note_stats(channel: 5)).to eq([64, 64, 64])
+      # channels count from 1: the file's notes are on the wire's channel 0
+      expect(src.notes.map { |n| n[:channel] }.uniq).to eq([0])
+      expect(src.note_stats(channel: 1)).to eq([0, 64, 127])
+      expect { src.note_stats(channel: 0) }.to raise_error(ArgumentError, /channels count from 1/)
     end
 
     it 'returns sustain pedal release times with notes, without moving the source' do

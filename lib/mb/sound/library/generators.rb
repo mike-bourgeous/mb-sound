@@ -226,6 +226,9 @@ module MB
               return value unless value.kind == :generator && value.builder
               [value, {}]
             when Sequence::Clip
+              # (a morph of generators: its sides with the track's knobs,
+              # and the knob :"track/morph"; generator_morph.rb)
+              m = MORPHS[value] and return morph_track_clip(value, m, track, session, reuse)
               b = ORIGINS[value] or return value
               [b.entry, b.kwargs]
             else
@@ -256,6 +259,27 @@ module MB
 
         # Clips .track_clip built => { param => knob } (keys weak).
         KNOBS = ObjectSpace::WeakKeyMap.new
+
+        # A copy of track clip +clip+ (.track_clip; or of a clip made from
+        # one by transforms, made again from the copy) whose generator
+        # reads +session+'s knobs of the same names: what a warm-up
+        # sandbox's copy of a track's patch plays (Session::Warming plays
+        # a copy only if it shares no node with the live graph, and the
+        # live track knobs made every warm-up of a generator track only
+        # build, so YJIT compiled the new patch where it landed, 24-45 ms
+        # at 128 and 256 frames; bg-latency-2).  +clip+ itself when it
+        # isn't one, or +session+ lacks one of the knobs.
+        def copy_reading(clip, session)
+          return clip unless clip.is_a?(Sequence::Clip) # (a track's Kit of rows, a Hash)
+          lineage = clip.lineage
+          idx = lineage.index { |c| KNOBS.key?(c) } or return clip
+          root = lineage[idx]
+          built = ORIGINS[root] or return clip
+          knobs = KNOBS[root].transform_values { |k| session.knobs[k.name] }
+          return clip if knobs.value?(nil)
+          copy = run(built.entry, BLOCKS[built.entry], [], built.kwargs, knobs: knobs)
+          lineage[0...idx].reverse.reduce(copy) { |c, step| step.rederive(c) }
+        end
 
         # Clips .track_clip built from a clip => that clip (keys weak; set
         # documents print a track's clip in the place of the clip it was
@@ -386,6 +410,8 @@ module MB
         # The instrument name a generator clip's entry plays on (see
         # .generator), or nil.
         def instrument(clip)
+          # (a morph plays on its first side's, else the second's)
+          m = morph_of(clip) and return m.sides.lazy.filter_map { |s| instrument(s) }.first
           origin(clip)&.entry&.settings&.[](:instrument)
         end
 

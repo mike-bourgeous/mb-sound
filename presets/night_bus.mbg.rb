@@ -1,10 +1,10 @@
 # mb-sound set document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
-graph 7,
+graph 15,
   name: "night_bus",
   kind: :set,
-  saved: "2026-10-30T06:35:19Z",
-  mb_sound: "0.12.0.usegit (28b121e2)",
+  saved: "2026-11-22T06:42:49Z",
+  mb_sound: "0.12.0.usegit (a754f79)",
   from: "bin/songs/night_bus_flow.rb",
   description: "Set :night_bus from bin/songs/night_bus_flow.rb (\"Night Bus: Last Stop\", tech house at 126 BPM in A minor): drums, sub, bass, hooks, plucks, pad, riser; scenes intro..outro; knobs :cut, :space, :echo, :air, :morph; its flow (play_form doc.form).  `demo` loads it."
 knob :cut, (200.hz..6000.hz).at(700.hz)
@@ -40,7 +40,7 @@ kit_outro = Sequence::Kit.new({ kick: kit[:kick], clap: kit[:clap], hat: kit[:ha
 master(:streaming, lufs: :apple_music) { |mix|
   mix.filter(:highpass, cutoff: air, quality: 0.8).softclip(0.5, 0.97)
 }
-track(:drums) { |kit|
+track(:drums, kit_intro) { |kit|
   tr808(kit, kick: { tune: 50, decay: 0.5, tone: 0.4 }, clap: { decay: 0.25, tone: 0.6 }, closed_hat: { decay: 0.04 }, open_hat: { decay: 0.25 }, cymbal: { decay: 0.9, tone: 0.65 }, maracas: { level: 0.22 }, low_tom: { decay: 0.6 }, accent: 6.db, seed: drawn_seed(3969543146641149120)) * 0.85
 }
 track(:sub) { |clip|

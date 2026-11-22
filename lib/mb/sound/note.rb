@@ -140,11 +140,14 @@ module MB
 
       # Returns a note-on MB::Sound::MIDI::Event for this note (rounded to
       # the nearest note number), with a raw +velocity+ (1 to 127) on
-      # 0-based +channel+.  Its #bytes can be sent with MIDI::Output:
+      # +channel+ (1 to 16, 1 by default; channels count from 1, while the
+      # Event's own #channel is the wire's 0-based number).  Its #bytes
+      # can be sent with MIDI::Output:
       #
       #     out << C4.to_midi(velocity: 100).bytes
-      def to_midi(velocity: 64, channel: 0)
-        MIDI::Event.note_on(number.round, velocity / 127.0, channel: channel)
+      #     out << C4.to_midi(channel: 10)    # GM drums
+      def to_midi(velocity: 64, channel: nil)
+        MIDI::Event.note_on(number.round, velocity / 127.0, channel: MIDI::Channel.of(channel, default: 0))
       end
 
       # Returns true if this Note represents a white key on a piano keyboard.

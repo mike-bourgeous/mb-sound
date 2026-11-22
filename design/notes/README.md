@@ -152,7 +152,7 @@ Texture nodes in `fast_texture` and `fast_resonator` (exact Ruby mirrors, the sa
 
 ### [Generative music](generative.md)
 
-A generator is a looping Clip whose events per cycle are a pure function of (seed, cycle): every draw is counter-based (`Generative::Dice`, splitmix64 over the seed and a key path, C `fast_generative` with an exact Ruby mirror), so cycles come out the same cold or in order (seeks, takes, documents, any buffer size).  Probability scales (`Weights`, `Chord`, `Field`, `Harmony`) are printable values with operators; `generate`, `strikes`, `melody`, `motifs` (phrase memory), and `beats` (evolving drum rows) make generator clips, steered by knobs and LFOs read for each beat's or cycle's start, following the key live (a rootless scale, no source, `progression(:i, :VI)`); `markov` and `lsystem` write long forms that `flow { generate ... }` plays and `Form::Plan` works out ahead.  The shipped ones are library entries under `L.gen` and `L.flow`.  Help `help :generative`, `help :long_form`.
+A generator is a looping Clip whose events per cycle are a pure function of (seed, cycle): every draw is counter-based (`Generative::Dice`, C with a Ruby mirror), so cycles come out the same cold or in order (seeks, takes, documents, any buffer size).  Probability scales (`Weights`, `Chord`, `Field`, `Harmony`) are printable values with operators; `generate`, `strikes`, `melody`, `motifs` (phrase memory), and `beats` (evolving drum rows) make generator clips, steered by knobs and LFOs read for each beat's or cycle's start, following the key live (a rootless scale, no source, `progression(:i, :VI)`); `markov` and `lsystem` write long forms that `flow { generate ... }` plays and `Form::Plan` works out ahead.  The shipped ones are `L.gen` and `L.flow` entries; `L.gen.beat.dnb.morph(:house)` crossfades two on a knob `:"drums/morph"`.  Help `help :generative`, `help :long_form`.
 
 ### [MIDI](midi.md)
 
@@ -160,6 +160,7 @@ A generator is a looping Clip whose events per cycle are a pure function of (see
 Moving parameters (`MIDI::Param`) are read once per decision; `MIDI::Lock` maps keys into scales; `midi_clip`/`midi_kit` import MIDI files as exact clips.
 Live MIDI uses JACK ports when a server answers, else RtMidi; `sysex.capture` saves hardware SysEx dumps; specs use synthetic MIDI files only.
 MIDI out: `track :kronos, midi_out('KRONOS', channel: 1)` plays a synth or program (on JACK each note on its audio's frame); `MIDI::Ports` finds ports by name (`midi_ports`, `:midi_ports` pane).
+Channels and programs count from 1 for people (`MIDI::Channel`); `Event#channel` and the wire stay 0-based.
 
 ### [Structure analysis (music information retrieval)](structure.md)
 
@@ -187,7 +188,7 @@ The hand-tune loop (`hand_tune.rb`, `hand_tune/`, `fit_patch.rb`, `reference.rb`
 
 The Session groundwork: `Session::Stamp` (frame + Rational position), `Session::Journal`, and one change queue (`Session#change`) through which every command lands on an exact sample, with mute/solo, undo, launch points (`on:`/`in:`/`at:`), and takes that replay exactly at any buffer size.
 On top, the Set layer (`MB::Sound::Arrangement`, `Session#arrangement`): `track`, `scene`, `go`, the clip matrix (`launch`, `tweak`), ring-outs, song forms (`flow` with labels, gotos, picks, fills), seeks, markers, knobs (`knob`, `turn`, scenes and sections turning them), clocks, recording (`arm`, `rec`, `capture`, `rec_audio`), wires (`wire`).
-Rules: changes go through `Session#change`; scene graphs build ahead of their landing on the scheduler thread, new graphs warm in a sandbox first; never enable a TracePoint in library code (YJIT drops its code); Sessions keep one instance variable layout.
+Rules: changes go through `Session#change`; scene graphs build ahead on the scheduler thread and warm in a sandbox; the render lock never waits for a song form's lock (seeks try-lock it); no TracePoint in library code (YJIT); Sessions keep one ivar layout.
 
 ### [Master effects](master_effects.md)
 

@@ -47,6 +47,16 @@ RSpec.describe(MB::Sound::RecordMethods) do
   RECORDING_PLAYED = [[60, 2.1r, 2.35r], [64, 2.6r, 2.9r], [67, 3.3r, 4.5r], [72, 3.99r, 4.2r]].freeze
 
   describe 'rec (MIDI looper)' do
+    it 'keeps one channel with channel:, counted from 1 (midi-one-based-1)' do
+      s = new_session
+      # (the wire's channels 0 and 1: channels 1 and 2 for people)
+      events = [[0x90, 60, 100, 2.1r], [0x80, 60, 64, 2.3r], [0x91, 64, 100, 2.5r], [0x81, 64, 64, 2.7r]].map { |a, b, c, t| ev.parse([a, b, c], time: t) }
+      s.midi_in.input = MB::Sound::MIDI::Stream.new(MIDIListSource.new(*events))
+      setup_lead(s)
+      perform(s, { 0 => ['bg :clock, 0.constant, on: :now'], 10 => ['arm :lead, monitor: false', 'rec 1, channel: 2'] }, 96000 * 2 + 1600)
+      expect(s.arrangement.captures[:lead_1].events.map(&:value)).to eq([64])
+    end
+
     it 'records the next bars into an armed track, swapping the loop in on the frame where it closes, at any buffer size' do
       results = RECORDING_SIZES.map { |sizes|
         s = new_session

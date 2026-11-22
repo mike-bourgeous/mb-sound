@@ -421,6 +421,8 @@ module MB
         @reading_player = nil # (MidiOuts: the player being read)
         @sound_end_frame = 0 # (see #sound_end_frame)
         @schedule_ran_kept = nil # (see #schedule_ran_frame)
+        @ran_frame = nil # (see #note_schedule_ran_frame)
+        @ran_frame_pos = nil
         @span_end_pos = nil # (see #keep_schedule_ran_frame)
         @asleep_ids = nil # (unused since dropouts-2; see Strip#span_graphs)
         @span_graph_scratch = nil
@@ -624,15 +626,23 @@ module MB
           # this time or later is superseded (this build has its changes
           # too: it is cancelled, and this one carries from the current
           # graph); anything else lands first, and this one follows it,
-          # carrying from the graph it starts.
+          # carrying from the graph it starts.  A superseded rebuild that
+          # followed an earlier queued start hands that on: this one follows
+          # it in turn (undo-one-step-1: before, it carried from the current
+          # graph, which that start replaced first, so it was dropped where
+          # it landed; a bind's rebuild queued for an earlier launch point
+          # than the redefinitions after it kept only the first, SessionFuzz
+          # seed 382's :carry relation).
           follows = @render_lock.synchronize {
-            pending = @changes.reverse_each.find { |c| c.subject == name && START_KINDS.include?(c.kind) }
-            if pending&.kind == :bg && pending.split && pending.time >= time
+            pending = nil
+            loop do
+              pending = @changes.reverse_each.find { |c| c.subject == name && START_KINDS.include?(c.kind) }
+              break unless pending&.kind == :bg && pending.split && pending.time >= time
+
               cancel_changes(pending)
-              nil
-            else
-              pending&.kind == :bg && pending.graph ? pending : nil
+              note_command_cancel(pending) # (undoing this command brings it back: Undo#revert_step)
             end
+            pending&.kind == :bg && pending.graph ? pending : nil
           }
           old = follows ? nil : @mutex.synchronize { @players.each_value.find { |p| p.name == name && p.current? } }
           carried = Carry.plan(follows ? follows.graph : old.input, nodes) if follows || old
@@ -665,6 +675,11 @@ module MB
             add_now(name: name, input: input, description: description, timeline_nodes: timeline_nodes, start: t, fade: fade, explicit_fade: explicit_fade,
                     carry: carried, clip: clip, spill: spill)
           }
+          if carried # (see Undo#revert_step)
+            c.carries = carried.old_input
+            # (queued: what plays now, or the graph the start it follows plays)
+            c.base = follows ? pending_state(follows) : undo_snapshot(snapshot_subject(c)) unless c.lands
+          end
           hold&.hold(c, -> { start_time ? @transport.position : launch_time(point, timeline_nodes, default: default) })
           end_cue_at_start(name, time) unless carried # (see Cue; a rebuild of the name isn't a launch: its cue plays on)
         }
@@ -717,6 +732,7 @@ module MB
             if time.nil?
               waiting = waiting.select { |c| c.time.nil? || c.time <= due } if due
               cancel_changes(*waiting)
+              waiting.each { |c| note_command_cancel(c) } # (undo issues them again)
             end
 
             if playing || (time && !waiting.empty?)
@@ -905,12 +921,19 @@ module MB
       # had come is kept from before the seek (#keep_schedule_ran_frame):
       # a block seeking back from its own time ends a render there at any
       # buffer size (seed 768014, fix-batch-1101).
+      #
+      # The frame is the one found in the span that reached the block's
+      # time (#note_schedule_ran_frame), so it is the same at any buffer
+      # size while the tempo moves (fixes-16, soak seed 789018: counted
+      # back from the end of the last buffer at the tempo there, a ramp
+      # started by the block put it 1-3 frames late with 800-frame buffers
+      # and on time with 367).
       def schedule_ran_frame
         kept = @schedule_ran_kept
         pos = @scheduler.ran_ahead_time or return kept
         now = @transport.position
         return kept if pos > now
-        f = @frame - @transport.frames_of(now - pos, Rational(output.sample_rate)).floor
+        f = pos == @ran_frame_pos ? @ran_frame : @frame - @transport.frames_of(now - pos, Rational(output.sample_rate)).floor
         kept && kept > f ? kept : f
       end
 
@@ -1274,10 +1297,25 @@ module MB
         rate = Rational(output.sample_rate)
         return if @transport.frames_of(pos - last, rate) >= 1
 
-        f = @frame - @transport.frames_of(last - pos, rate).floor
+        f = pos == @ran_frame_pos ? @ran_frame : @frame - @transport.frames_of(last - pos, rate).floor
         @schedule_ran_kept = f if @schedule_ran_kept.nil? || f > @schedule_ran_kept
       end
       private :keep_schedule_ran_frame
+
+      # Notes the session frame of the latest time a scheduled block ran
+      # for once a span (+from+ to +to+ on the timeline, +per_sample+ whole
+      # notes a frame, starting at frame @frame) reaches it: the first
+      # frame at or past it, in the span's own tempo (see
+      # #schedule_ran_frame).  Called with the render lock held, for spans
+      # whose timeline moves.
+      def note_schedule_ran_frame(from, to, per_sample)
+        pos = @scheduler.ran_ahead_time or return
+        return if pos == @ran_frame_pos || pos < from || pos >= to
+
+        @ran_frame_pos = pos
+        @ran_frame = @frame + ((pos - from) / per_sample).ceil
+      end
+      private :note_schedule_ran_frame
 
       # Renders +count+ frames (one span of #process_buffer): scheduled
       # blocks, changes landing in the span, players, and the master chain.
@@ -1313,6 +1351,7 @@ module MB
             p.timeline_nodes.each { |n| n.start_at(from, origin: p.start, launch: p.launch, transport: @transport) } if p.started
           end
           keep_schedule_ran_frame
+          @ran_frame_pos = nil # (the times blocks ran for are forgotten too)
           @scheduler.seeked(from)
         end
 
@@ -1375,6 +1414,7 @@ module MB
           whole_notes = to - from
           @transport.advance_span(from, to, whole_notes)
           end_clock_span(count, whole_notes, moving)
+          note_schedule_ran_frame(from, to, per_sample)
         end
         @span_end_pos = @transport.position # (the timeline before a seek; see #keep_schedule_ran_frame)
         # Pre-chain master gain (the default; see #master_gain_post?)
@@ -2467,6 +2507,15 @@ module MB
         end
         @thread.name = 'MB::Sound::Session'
         @thread.priority = RENDER_THREAD_PRIORITY
+
+        # Generator cycles are computed ahead on the scheduler thread
+        # while this session renders (Scheduler#background starts that
+        # thread on first use).  The scheduler joined Ahead only when its
+        # thread started for a scheduled block, so a console session with
+        # nothing scheduled (`track`, `bg`, `swap`) computed every new cycle
+        # of a generator on the render thread, 0.3-0.9 ms at 128 frames
+        # for the drum beats (bg-latency-2).
+        Generative::Ahead.attach(@scheduler)
 
         # Stop the thread and close the output cleanly at exit (held
         # weakly: an at_exit block would keep this Session and every graph
