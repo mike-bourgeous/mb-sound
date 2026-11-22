@@ -86,12 +86,23 @@ module MB
           def to_s
             what = kind == :key ? "key #{data.values_at(:root, :mode).compact.map(&:to_s).join(' ')}" : "#{kind} #{subject.inspect}"
             case status
-            when :queued then "#{what} lands #{lands} (queued)"
-            when :landed then "#{what} landed #{lands}"
+            when :queued then "#{what} lands #{lands} (queued)#{fade_text}"
+            when :landed then "#{what} landed #{lands}#{fade_text}"
             when :cancelled then "#{what} cancelled (was for #{lands})"
             when :failed then "#{what} failed at #{lands}: #{data[:error]}"
             else "#{what} #{status} #{lands}"
             end
+          end
+
+          # ", fading over 4 bars to 13:1" for a stop with a fade (data
+          # :fade, in bars), else "" (the maintainer's take, 2026-11-21:
+          # fadeout "does not show fade length").  The end is counted in the
+          # meter of the stop's bar.
+          def fade_text
+            return '' unless kind == :stop && data.is_a?(Hash) && (f = data[:fade]).is_a?(Numeric) && f > 0 && lands&.pos
+            n = f.to_r.denominator == 1 ? f.to_i : f.to_f.round(3)
+            ends = lands.with(pos: lands.pos + f.to_r * lands.bar_length, frame: nil)
+            ", fading over #{n} bar#{'s' unless n == 1} to #{ends}"
           end
 
           def inspect

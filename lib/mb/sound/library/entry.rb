@@ -132,6 +132,15 @@ module MB
             # (ux-friction-1: the maintainer's L.fx.cabinet.call(L.fx.asymmetric))
             raise ArgumentError, "#{head_path}.call takes a signal, not #{args.first.head_path}: #{Entry.chain_hint(head_path, args.first.head_path)}"
           end
+          if args.empty? && kind == :effect
+            # (followups-1: the maintainer's `fx :drums, L.fx.circle(mix: 0.5)`
+            # and `(dry: -3.db, wet: -6.db)` said only "wrong number of
+            # arguments (given 1, expected 2)")
+            opts = kwargs.empty? ? 'mix: 0.5' : RubyValue.kwargs(kwargs)
+            raise ArgumentError, "#{head_path} takes the signal first: sig.then { #{head_path}.(it, #{opts}) }, " \
+                                 "or on a track fx :track, ->(s) { #{head_path}.(s, #{opts}) } " \
+                                 "(which settings an effect takes: help #{head_path}; any effect mixed in: sig.blend(0.5) { it.then(&#{head_path}) })"
+          end
           Library.index.note_use(self)
           builder.call(*args, **kwargs, &block)
         end

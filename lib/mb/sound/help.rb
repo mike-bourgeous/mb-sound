@@ -196,12 +196,93 @@ module MB
 
       # Wraps Pry's printer so help pages print as their text, without
       # Pry's "=> " and inspect quoting, through Help.show.
+      #
+      # Other results print as Pry prints them, cut at Help.result_lines
+      # lines with a dim line saying how to see the rest (followups-1; the
+      # maintainer, 2026-11-21: "default pry output should not be to inspect
+      # the full ruby object": a probe's result once printed thousands of
+      # lines of instance variables over his screen).  `_` still holds the
+      # whole value.  Only Pry's own printer is cut; another one set in
+      # Pry.config.print before this prints as it would.
       class PagePrinter < Proc
         def self.new(fallback)
           super() { |output, value, pry|
-            value.is_a?(Page) ? Help.show(value, output, pry) : fallback.call(output, value, pry)
+            if value.is_a?(Page)
+              Help.show(value, output, pry)
+            elsif Help.result_lines.to_i > 0 && fallback == Pry::ColorPrinter.method(:default)
+              Help.print_result(output, value, pry)
+            else
+              fallback.call(output, value, pry)
+            end
           }
         end
+      end
+
+      # The most lines a console result prints (PagePrinter; nil or 0: no
+      # limit).  MB_SOUND_RESULT_LINES sets it at start.
+      RESULT_LINES = 30
+      @result_lines = ENV.key?('MB_SOUND_RESULT_LINES') ? ENV['MB_SOUND_RESULT_LINES'].to_i : RESULT_LINES
+      class << self
+        attr_accessor :result_lines
+      end
+
+      # Collects a result's printed text up to +max+ lines, then stops the
+      # printer (Pry's StopPaging, which Pry's printer lets through), so a
+      # huge value's inspect is never built past what shows.
+      class ResultText
+        attr_reader :text
+
+        def initialize(max)
+          @max = max
+          @text = +''
+          @lines = 0
+          @cut = false
+        end
+
+        def cut? = @cut
+
+        def write(*strs)
+          strs.each do |str|
+            str.to_s.each_line do |l|
+              if @lines >= @max
+                @cut = true
+                raise Pry::Pager::StopPaging
+              end
+              @text << l
+              @lines += 1 if l.end_with?("\n")
+            end
+          end
+          nil
+        end
+
+        def <<(str)
+          write(str)
+          self
+        end
+
+        def print(*strs) = write(*strs)
+      end
+
+      # Prints +value+ as Pry's printer would ("=> " and pp, in color when
+      # Pry's is on), cut at .result_lines lines (see PagePrinter).
+      def self.print_result(output, value, pry)
+        max = result_lines.to_i
+        buf = ResultText.new(max)
+        begin
+          Pry::ColorPrinter.pp(value, buf, pry.output.width - 1)
+        rescue Pry::Pager::StopPaging
+          nil
+        end
+        text = buf.text
+        output.print(pry.config.output_prefix)
+        if buf.cut?
+          text = "#{text.chomp}\e[0m\n" if pry.config.color
+          output.write(text.end_with?("\n") ? text : "#{text}\n")
+          output.puts("\e[2m... cut at #{max} lines: `pp _; nil` prints all of it (MB::Sound::Help.result_lines = nil: no cut)\e[0m")
+        else
+          output.write(text)
+        end
+        nil
       end
 
       # pry-byebug's stepping commands (only useful inside binding.pry, and

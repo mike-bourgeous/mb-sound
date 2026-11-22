@@ -27,7 +27,8 @@ module MB
 
           Stream::TRANSFORMS.each do |name|
             define_method(name) do |*args, **kwargs, &block|
-              Spec.new(@steps + [[name, args.freeze, kwargs.freeze, block].freeze])
+              # (in canonical order, so the chain prints one way: Stream.ordered_args)
+              Spec.new(@steps + [[name, Stream.ordered_args(name, args).freeze, kwargs.freeze, block].freeze])
             end
           end
 

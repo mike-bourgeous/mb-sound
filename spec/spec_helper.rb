@@ -114,6 +114,9 @@ require_relative 'support/spawn_guard' # (process starts while a Session plays)
 # load files while a Session plays pass the spawn guard the way the console
 # does
 MB::Sound::Starter.start
+# (scripts played live in this process leave Kernel#require alone; scripts
+# the specs start as processes install RequireOnce as they would for him)
+MB::Sound::ScriptRunner.require_once = false
 require_relative 'support/child_guard' # (examples leaving the starter's children running)
 require_relative 'support/no_gnuplot'
 require_relative 'support/recipe_helpers'

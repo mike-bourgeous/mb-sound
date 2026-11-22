@@ -237,6 +237,29 @@ RSpec.describe(MB::Term::Viewports, :aggregate_failures) do
       expect(t.undo?).to eq(false) # focus isn't an undo step
     end
 
+    # (the maintainer, 2026-11-21: "Add the pane swap action")
+    it 'swaps the focused pane with its neighbor by direction: the same neighbor as focus, sizes kept, focus following, one undo step each' do
+      slots = studio.rects(120, 40)
+      t.focus!(:tracks)
+      expect(t.neighbor(:right)).to eq(:repl)
+      expect(t.swap_dir(:right)).to eq(:repl)
+      expect(t.focus).to eq(:tracks)
+      expect(t.rects[:tracks]).to eq(slots[:repl])
+      expect(t.rects[:repl]).to eq(slots[:tracks])
+      expect(t.swap_dir(:right)).to eq(:scope) # (walks on across)
+      expect(t.rects[:tracks]).to eq(slots[:scope])
+      expect(t.swap_dir(:right)).to be_nil # (nothing that way: no change)
+      expect(t.rects[:tracks]).to eq(slots[:scope])
+      expect(t.swap_dir(:up)).to eq(:transport)
+      expect(t.rects[:tracks]).to eq(slots[:transport])
+      t.focus!(:journal)
+      expect(t.swap_dir(:up)).to eq(:scope).or eq(:repl)
+      expect(t.focus).to eq(:journal)
+      4.times { t.undo }
+      expect(t.rects).to eq(MB::Term::Viewports::Tiler.new(studio, 120, 40).rects)
+      expect { t.swap_dir(:sideways) }.to raise_error(MB::Term::Viewports::Error, /Directions are/)
+    end
+
     it 'shows a pane already on screen by swapping' do
       t.show(:repl, at: :tracks)
       expect(t.rects[:repl]).to eq(studio.rects(120, 40)[:tracks])

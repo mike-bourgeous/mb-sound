@@ -98,6 +98,7 @@ module MB
           :synth, :feedback, :fb, :delay, :feedback_delay, :unison, :swarm, :oversample, :new, :map_notes, :bands, :multiband,
           :fill, # Kit#fill { grid(...) }
           :blend, # sig.blend(0.3) { |s| fx }
+          :slot, # sig.slot(:color) { |s| fx } (racks R3)
           :sampler, # clip.sampler(brk) { |v, s| ... }, Instrument#sampler, MB::Sound.sampler
           # Rack constructors (MB::Sound::RackMethods): their blocks build
           # each application's graph.  The constructors aren't recorded
@@ -659,6 +660,9 @@ module MB
                 official = ([first] + aliases).to_h { |n| [n, official_name(target, n)] }
                 mod.define_method(first) do |*args, **kwargs, &block|
                   callee = __callee__
+                  # (MIDI transforms taking arguments in either order record
+                  # them canonically: `echo(3, 1.n32)` prints echo(1.n32, 3))
+                  args = MB::Sound::MIDI::Stream.ordered_args(callee, args) if MB::Sound::MIDI::Stream::ARGUMENT_ORDER.key?(callee)
                   Recipe.call(self, official[callee] || callee, args, kwargs, block, written: callee) { |b, a = args, kw = kwargs| super(*a, **kw, &b) }
                 rescue ArgumentError => e
                   raise ErrorFormat.argument_help(e, self, callee) || e

@@ -581,10 +581,12 @@ RSpec.describe('session fuzzing') do
   # (found checking that fix: seeds 777277 and 777701 of 777000-777799,
   # fix-batch23: a flow's scene started the cued track again between its
   # cue and `launch`, which found nothing cued: a player starting as the
-  # track ends its cue, by design)
+  # track ends its cue, by design; the seeds make their songs with the 26
+  # commands of then, as the other fix-batch23 seeds above do: each new
+  # command changes every seed's song)
   it 'drops cue and launch pairs where the cued track may start again in between (seeds 777277, 777701)', render_budget: { seconds: 60, reason: 'two random songs' } do
     [777277, 777701].each do |seed|
-      song = SessionFuzz.generate(Random.new(seed))
+      song = SessionFuzz.generate(Random.new(seed), commands: 26)
       expect(song.code).not_to include('cue :'), "seed #{seed}"
       expect(SessionFuzz.check(:runs, song)).to be_nil, "seed #{seed}"
     end

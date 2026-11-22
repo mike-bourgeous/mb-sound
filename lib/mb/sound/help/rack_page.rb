@@ -39,6 +39,14 @@ module MB
               out << "  #{pad(c(:key, Session::Racks.spec_text(n, spec)), 34)} #{c(:dim, where)}"
             end
           end
+          out << c(:head, 'slots') + c(:dim, '  (swap :"name/slot", arack { |s| ... }, fade: 1.n8)')
+          if info.slots.empty?
+            out << "  #{c(:dim, 'none (sig.slot(:name) { |s| default } inside the block)')}"
+          else
+            infos.flat_map(&:slots).uniq { |sl| sl[:path] || sl[:name] }.each do |sl|
+              out << "  #{pad(c(:key, sl[:name].to_s), 18)} #{pad(sl[:content].to_s, 24)} #{c(:dim, sl[:path] ? sl[:path].inspect : 'not playing')}"
+            end
+          end
           lat = info.latency
           out << "#{c(:head, 'latency')} #{lat.nil? ? 'unknown' : lat.zero? ? 'none' : "#{lat} samples (#{(lat * 1000.0 / 48000).round(2)} ms at 48 kHz)"}"
           plays = r.name && session ? session.racks.uses(r.name) : nil

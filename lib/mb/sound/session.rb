@@ -12,6 +12,7 @@ require_relative 'session/undo' # (before the modules registering undo subjects)
 require_relative 'session/strip'
 require_relative 'session/holds'
 require_relative 'session/faders'
+require_relative 'session/handover'
 require_relative 'session/master'
 require_relative 'session/master_rack'
 require_relative 'session/tails'
@@ -36,6 +37,7 @@ require_relative 'session/transport_pause'
 require_relative 'session/safety_limiter'
 require_relative 'session/buses'
 require_relative 'session/racks'
+require_relative 'session/slots'
 require_relative 'session/ui_feed'
 require_relative 'session/warming'
 require_relative 'session/carry'
@@ -106,6 +108,7 @@ module MB
       include Buses # (strip rules and steps, undo subjects: registered, so include order doesn't matter)
       include Cue
       include SetClear
+      include Slots
 
       # A graph being played by the session.  +serial+ is unique; +name+ is
       # shared by a graph and the graph replacing it until the switch.
@@ -352,6 +355,7 @@ module MB
         @closed = false
         @file_readers = ObjectSpace::WeakMap.new # (process-backed inputs its graphs read; see #close_file_readers)
         @plan_deferral = nil # (see #plan_deferral)
+        @plan_rebuilds = nil # (see #plan_rebuilds)
         @generation = @transport.generation
         @scheduler = Scheduler.new(self, realtime: realtime, raise_errors: raise_errors)
 
@@ -372,6 +376,7 @@ module MB
         init_buses
         init_cue(cue_output)
         init_warming
+        init_slots
         @names = Names.new
         @metadata = Meta::Store.new
         @racks = Racks.new(self)
@@ -570,6 +575,7 @@ module MB
         # (#adopt_knobs: then walked again).
         found = graph_nodes(nodes)
         joined = adopt_knobs(nodes, player: name, found: found) # graph documents' knobs and rack knobs join the Session (see Knobs#adopt_knobs)
+        adopt_slots(found, player: name) # rack slots' names (see Slots#adopt_slots)
         found = graph_nodes(nodes) if knobs_redirected?(joined, found)
         note_file_readers(found)
         adopt_clocks(playable.nodes) # graph documents' clocks too (see Clocks#adopt_clocks)
@@ -1387,11 +1393,18 @@ module MB
       end
       private :render_span
 
+      # Where this Session's plan rebuilds happen instead of Plan.rebuilds
+      # (nil: as Plan.rebuilds says).  A slot swap's warm-up sandbox defers
+      # them to the next span (see Slots#warm_slot_swap), so the new
+      # content's unfused first buffers run there, as they do live while
+      # the rebuild runs in the background.
+      attr_accessor :plan_rebuilds
+
       # The Plan::Deferral for plan rebuilds in this span, or nil to rebuild
       # at once (see Plan.rebuilds: by default a realtime Session's render
       # thread defers them).
       def plan_deferral
-        case Plan.rebuilds
+        case @plan_rebuilds || Plan.rebuilds
         when :inline
           nil
         when :auto

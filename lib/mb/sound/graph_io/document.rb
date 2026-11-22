@@ -13,7 +13,7 @@ module MB
         # Header calls, in order: graph first, then inputs (typed since
         # format 4: `inputs sig: :audio, side: :audio`), outputs (format 4,
         # optional: `outputs :audio`), params, knobs, and a bundle's assets.
-        HEADER = %i[graph inputs outputs param knob clock asset].freeze
+        HEADER = %i[graph inputs outputs param knob slot clock asset].freeze
 
         # The rack kinds (MB::Sound::Rack#kind) a rack document's `kind:`
         # takes.
@@ -92,7 +92,7 @@ module MB
 
         # The `graph` line's interpreters: what reads each structural key.
         HEADER_INTERPRETERS = [
-          HeaderKeys.new('GraphIO::Loader', %i[name kind rack options], 'the document says how to build it'),
+          HeaderKeys.new('GraphIO::Loader', %i[name kind rack slot options], 'the document says how to build it'),
           HeaderKeys.new('the fit tools (FitPatch, HandTune, Take::Reader)', %i[from tuned], 'the tool that wrote the document'),
           HeaderKeys.new('Library::Index', %i[description tags], "the library's index words"),
           MB::Sound::Facts::Consumer.new('GraphIO::Document#meta', %w[graph.meta]),
@@ -164,6 +164,11 @@ module MB
         # A rack document's Rack, once loaded (see #rack?).
         attr_accessor :rack
 
+        # A rack document's slots by name, with their types (`slot :color,
+        # :audio`; racks-r3-2): { color: :audio }.  The body's
+        # `sig.slot(:color) { ... }` holds the default content.
+        attr_reader :slots
+
         # A bundle's assets: SHA-256 sums by file name (`asset
         # "assets/pad.flac", sha256: "..."`), checked when the files are read.
         attr_reader :assets
@@ -194,6 +199,7 @@ module MB
           @input_defaults = {}
           @outputs = []
           @rack = nil
+          @slots = {}
           @comment_inputs = nil
           @assets = {}
           @verified = {}
@@ -359,6 +365,7 @@ module MB
             next unless used.include?(name.to_s)
             header.concat(knob_lines(writer, k))
           end
+          header.concat(slot_lines)
           writer.clocks_used.each do |name|
             c = MB::Sound::Session.existing&.clock_named(name)
             spec = @doc&.clocks&.[](name)
@@ -401,6 +408,21 @@ module MB
         end
 
         private
+
+        # Comments for slots swapping when saved (racks R3): documents keep
+        # the content playing (GraphNode::Slot prints it), as they keep a
+        # moving knob's value; swaps are performance (takes replay them).
+        def slot_lines
+          roots = @graph.is_a?(Array) ? @graph : [@graph]
+          slots = roots.flat_map { |r| r.respond_to?(:graph) ? r.graph : [] }.grep(GraphNode::Slot::Output).map(&:owner_slot).uniq(&:__id__)
+          slots.filter_map { |sl|
+            what = if !sl.waiting.empty? then 'about to swap (a swap queued)'
+                   elsif sl.chains.length > 1 then 'handing over to a new content'
+                   end
+            who = sl.name ? "slot #{(sl.path || sl.name).inspect}" : "an instance of rack #{sl.instance_of&.name.inspect}"
+            "# #{who} was #{what} when saved; documents keep the content playing" if what
+          }
+        end
 
         # The `knob` header line for +knob+ (as the console's `knob`
         # command takes it, with the knob's held value), after a comment

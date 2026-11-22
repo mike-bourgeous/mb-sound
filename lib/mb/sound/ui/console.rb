@@ -191,13 +191,72 @@ module MB
           []
         end
 
+        # Commands whose string argument names a file: Tab inside the
+        # quotes completes paths (the maintainer's UI note, 2026-11-21,
+        # after typing an sf2 path by hand: "Would like tab completion
+        # and/or a filesystem navigator for loading fonts").  The document
+        # loaders' file readers (GraphIO::Registry::FILE_METHODS) and the
+        # console's own.
+        PATH_COMMANDS = (GraphIO::Registry::FILE_METHODS.to_a + %i[read write play bg rec_audio soundfont loops mod_import tracker_import mod_samples Sample]).freeze
+
+        # At most this many paths are offered for one Tab.
+        PATH_LIMIT = 200
+
+        # Paths completing +str+ (a word Reline completes) when +line+ has
+        # it inside an open quote given to a PATH_COMMANDS method
+        # (`sf2('/usr/share/so<Tab>`, `read "tmp/a`, `Sample['dr`): the
+        # directory's entries starting with the word's last part,
+        # directories ending in a slash; nil otherwise.  The file system is
+        # read only here, on Tab (never per keystroke, never on the render
+        # path).
+        def self.paths_for(str, line)
+          str = str.to_s
+          return nil if str.match?(/['"]/)
+          line = line.to_s
+          # (the line up to the cursor, where Reline's word ends)
+          line = line.byteslice(0, ::Reline.point) if !line.end_with?(str) && defined?(::Reline) && ::Reline.respond_to?(:point) && ::Reline.point.to_i <= line.bytesize
+          return nil unless line.end_with?(str)
+          before = line[0, line.length - str.length]
+          m = before.match(/(?:\A|[\s;(=.,\[])(\w+)(?:\s+|\s*\(\s*|\[\s*)(?:[^'"()]*,\s*)?(['"])\z/) or return nil
+          return nil unless PATH_COMMANDS.include?(m[1].to_sym)
+
+          slash = str.rindex('/')
+          dir = slash ? str[0..slash] : ''
+          base = slash ? str[(slash + 1)..] : str
+          fsdir = dir.empty? ? '.' : File.expand_path(dir)
+          return nil unless File.directory?(fsdir)
+
+          found = path_entries(fsdir, dir, base)
+          # (one directory: its entries, so Reline completes to "dir/"
+          # without closing the quote, as it does after a lone candidate)
+          if found.length == 1 && found[0].end_with?('/')
+            inner = path_entries(File.join(fsdir, File.basename(found[0])), found[0], '')
+            found = inner unless inner.empty?
+          end
+          found.empty? ? nil : found
+        rescue SystemCallError
+          nil
+        end
+
+        # Entries of file system directory +fsdir+ (written +dir+) starting
+        # with +base+ (hidden ones only for a dotted +base+), directories
+        # ending in a slash.
+        def self.path_entries(fsdir, dir, base)
+          names = Dir.children(fsdir).select { |n| n.start_with?(base) && (base.start_with?('.') || !n.start_with?('.')) }.sort.first(PATH_LIMIT)
+          names.map { |n| File.directory?(File.join(fsdir, n)) ? "#{dir}#{n}/" : "#{dir}#{n}" }
+        end
+
         def call(str, options = {})
+          # File paths inside a file command's quotes (Completion.paths_for)
+          line = defined?(::Reline) ? ::Reline.line_buffer : nil
+          paths = Completion.paths_for(str.to_s, line || str.to_s)
+          return paths if paths
+
           # Library heads (L.fx.reverb.<Tab>): their words, walked without
           # running the chain (see Library::Heads.completions)
           heads = Library::Heads.completions(str.to_s)
           return heads if heads
 
-          line = defined?(::Reline) ? ::Reline.line_buffer : nil
           names = Completion.names_for(str.to_s, line || str.to_s)
           return names if names && Completion.contextual?(str.to_s, line || str.to_s)
 

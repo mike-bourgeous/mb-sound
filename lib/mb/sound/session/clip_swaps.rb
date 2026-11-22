@@ -143,7 +143,14 @@ module MB
 
           if player.nil?
             nodes = @changes.select { |c| c.subject == name && c.starts }.last&.starts&.grep(MIDI::ClipSource)
-            raise ArgumentError, "No background player #{name.inspect} is playing or stopped" if nodes.nil?
+            if nodes.nil?
+              # (the maintainer's take, 2026-11-21: `swap :acid, ...` with no
+              # :acid; what plays, the near names, and how to start one)
+              names = (@players.values.map(&:name) + @stopped.keys).grep(Symbol).uniq # (not the set's lock: render lock and @mutex held)
+              list = names.empty? ? 'nothing is playing' : "playing or stopped: #{names.map(&:inspect).join(', ')}"
+              raise ArgumentError, "No background player #{name.inspect} is playing or stopped (#{list})#{GraphIO.suggest(name, names) if name.is_a?(Symbol)}; " \
+                "bg #{name.inspect}, clip starts one"
+            end
           else
             nodes = player.timeline_nodes.grep(MIDI::ClipSource)
           end
