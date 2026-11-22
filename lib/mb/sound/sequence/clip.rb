@@ -788,14 +788,19 @@ module MB
           while cycle <= last
             if @units > 1
               # Steered per unit (a beat, ...): each unit is decided once
-              # the read reaches its decision point
+              # the read reaches its decision point, cycle start + unit
+              # start - lead (compared as unit starts against the read's
+              # ends relative to cycle start - lead: no arithmetic per unit)
+              base = cycle * @length - @steer_lead
+              rel_to = to - base
+              rel_from = from - base
               k = 0
               while k < @units
-                d = cycle * @length + @unit_starts[k] - @steer_lead
-                if to > d
-                  table = edge_table(cycle, k)
-                  out = table_edges(out, table, cycle, from, to, early, fills, from <= d) if table.hi >= from && table.lo < to
-                end
+                st = @unit_starts[k]
+                break unless st < rel_to
+
+                table = edge_table(cycle, k)
+                out = table_edges(out, table, cycle, from, to, early, fills, st >= rel_from) if table.hi >= from && table.lo < to
                 k += 1
               end
               cycle += 1
@@ -898,13 +903,14 @@ module MB
           end
 
           while first <= last
+            base = @steer_lead && first * @length - @steer_lead
             k = 0
             while k < @units
-              if @steer_lead && pos < (d = first * @length + (@units > 1 ? @unit_starts[k] : 0) - @steer_lead)
-                # Undecided: its decision point is where #edges reads it next
+              if base && pos < (d = @units > 1 ? base + @unit_starts[k] : base)
+                # Undecided: its decision point is where #edges reads it
+                # next (later units' points are later still)
                 best = d if best.nil? || d < best
-                k += 1
-                next
+                break
               end
               key = @units > 1 ? Generative::Steer.key(first * @units + k) : (@steer_lead ? Generative::Steer.key(first) : first)
               table = @edge_tables[key] or return nil
