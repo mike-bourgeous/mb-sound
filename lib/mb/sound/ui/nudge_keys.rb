@@ -246,10 +246,23 @@ module MB
           def close = flush
         end
 
+        # Loads the history file, then keeps each line only at its newest
+        # place (followups-1; the maintainer: "up-arrow, page-up, and ^r
+        # search order not returning recent commands first": the file is
+        # appended as lines are typed, by every console of the day, so a
+        # line rerun dozens of times, and every `exit`, sat in many places
+        # between the lines he wanted).  The file stays as written.
+        def load
+          n = super
+          mb_sound_newest_only!
+          n
+        end
+
         def push(line)
           unless NudgeKeys.take_submitted(line)
             NudgeHistory.flush
             @mb_sound_nudge_last = nil
+            mb_sound_move_to_end(line)
             return super
           end
           return line if line.empty?
@@ -262,13 +275,34 @@ module MB
             @history[-1] = line
           else
             NudgeHistory.flush
-            @history << line
+            mb_sound_move_to_end(line)
+            @history << line unless !@history.empty? && @history[-1] == line
             @history_line_count += 1
           end
           @mb_sound_nudge_last = line
           NudgeHistory.pending = [self, line]
           ExitClose.register(NudgeHistory) if defined?(ExitClose)
           line
+        end
+
+        # Takes an earlier copy of +line+ out of the history (the push puts
+        # it at the end), so a repeated line is found at its newest place;
+        # the last entry stays (Pry's push skips a repeat of it).
+        def mb_sound_move_to_end(line)
+          return if @history.empty? || line.to_s.empty?
+          i = @history.rindex(line)
+          @history.delete_at(i) if i && i != @history.length - 1
+        end
+
+        # Keeps each line at its newest place only.
+        def mb_sound_newest_only!
+          seen = {}
+          keep = []
+          @history.to_a.reverse_each { |l| keep << l if seen[l].nil? && (seen[l] = true) }
+          return if keep.length == @history.length
+          keep.reverse!
+          @history.clear
+          keep.each { |l| @history << l }
         end
 
         # (Pry's `alias << push` names the original method: Pry::Instance
