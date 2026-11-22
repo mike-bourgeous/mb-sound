@@ -22,8 +22,10 @@ module MB
 
         TWO_PI = 2 * Math::PI
 
-        # How much a bin's magnitude must grow from one frame to the next
-        # near an onset for the phase vocoder to reset its phase (2: 6 dB).
+        # How much a peak's region (Spectral.regions) must grow, in
+        # magnitude, from the frame before an attack for the phase
+        # vocoder to reset its phases to the input's (2: 6 dB;
+        # Spectral.rising_regions).
         RESET_RISE = 2.0
 
         module_function
@@ -394,6 +396,7 @@ module MB
             @mag = nil
             @center = nil
             @advance = nil
+            @before = nil
           end
 
           # The last frame's phase rotation (output phase minus input
@@ -418,11 +421,17 @@ module MB
           # The next frame, centered on input sample +center+ and +hop+
           # output samples after the last: each channel's windowed output
           # (to overlap-add; nil without +synth+, when only the phases
-          # are wanted).  +attack+ says the frame holds an onset: bins
-          # whose level jumps (the attack) take their input phases, so
-          # the attack is rebuilt as it was; steady bins (a bass note
+          # are wanted).  +attack+ says the frame holds an onset: the
+          # peaks' regions that hold RESET_RISE times the level they had
+          # in the frame before the attack (the sounds it starts;
+          # Spectral.rising_regions) take their input phases, so the
+          # attack is rebuilt as it was; steady regions (a bass note
           # ringing through) keep theirs, so nothing cancels; and the
-          # frame is not randomized.  +extra+ (radians per bin) is added
+          # frame is not randomized.  (Whole regions, measured against
+          # the frame before the attack: resets bin by bin from one frame
+          # to the next split a new note's partial between bins reset and
+          # bins locked to an old peak, and frame by frame it flipped
+          # back, a dip of up to 15 dB at a note change, stretch-attacks-1.)  +extra+ (radians per bin) is added
           # to the phase advance before locking (Spectral.looped's
           # closing).  +index+ numbers the frame for the random phases.
           def frame(index, center, attack: false, hop: @hop, extra: nil, synth: true, scale: nil, track: false, free: false)
@@ -460,14 +469,17 @@ module MB
               winst_h += extra if extra
               advanced = @theta + winst_h
               advanced = Spectral.shape_lock(advanced, phi, mag, omega_inst, @window / 4) if @shape_lock && !free
-              @theta = Spectral.lock(advanced, phi, mag)
               if attack
-                rising = mag.gt(@mag * RESET_RISE)
-                if rising.count_true > 0
-                  @theta[rising] = phi[rising]
+                @before ||= @mag
+                rising = Spectral.rising_regions(mag, @before)
+                if rising && rising.count_true > 0
+                  advanced[rising] = phi[rising]
                   @advance[rising] = 0 if track
                 end
+              else
+                @before = nil
               end
+              @theta = Spectral.lock(advanced, phi, mag)
             end
             @phi = phi
             @mag = mag
@@ -739,6 +751,32 @@ module MB
             marker[bounds] = 1
           end
           peaks[marker.cumsum]
+        end
+
+        # The bins of +mag+ whose peak's region (#regions) holds
+        # RESET_RISE times the level (in magnitude; RESET_RISE squared in
+        # power) it held in +before+, the frame before an attack: the
+        # sounds the attack starts, which the vocoder resets to their
+        # input phases whole (a Numo::Bit, or nil without peaks).
+        def rising_regions(mag, before)
+          owner = regions(mag)
+          return nil if owner.nil? || before.nil?
+
+          nb = mag.length
+          now = Numo::DFloat.zeros(nb + 1)
+          now[1..] = (mag * mag).cumsum
+          pre = Numo::DFloat.zeros(nb + 1)
+          pre[1..] = (before * before).cumsum
+          cut = owner[1..].ne(owner[0...-1]).where + 1
+          starts = Numo::Int64[0].concatenate(cut)
+          ends = cut.concatenate(Numo::Int64[nb])
+          rose = (now[ends] - now[starts]).gt((pre[ends] - pre[starts]) * RESET_RISE**2)
+          return nil if rose.count_true == 0
+
+          # (each bin takes its region's verdict)
+          region = Numo::Int64.zeros(nb)
+          region[cut] = 1
+          rose[region.cumsum]
         end
 
         # Phase locking modes (Vocoder, lock:): :peaks, identity locking

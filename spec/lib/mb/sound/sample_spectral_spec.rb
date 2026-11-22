@@ -68,6 +68,30 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
     end
   end
 
+  it "keeps a new note's attack where it takes over the old note's bins: no dip at a note change" do
+    # Two bass notes a fourth apart (55 and 73.4 Hz: under two bins apart
+    # in the 4096-sample window), the second starting on a step at 1 s.
+    # Resets bin by bin split the new note between bins taking their
+    # input phases and bins locked to the old note's peak, flipping from
+    # frame to frame: up to 15 dB down for its first 10 ms at some
+    # ratios, looped or not, in every lock (stretch-attacks-1)
+    n = 96_000
+    tt = Numo::DFloat.new(n).seq / 48000
+    env = 0.6 + 0.4 * Numo::NMath.exp(-(tt % 1.0) * 30)
+    f = Numo::DFloat.new(n).fill(55.0)
+    f[48000..] = 73.42
+    x = env * Numo::NMath.sin(tt * f * (2 * Math::PI)) * 0.5
+    s = MB::Sound::Sample[Numo::SFloat.cast(x)].looped
+    first10 = ->(d, at) { rms(d[at...(at + 480)]) }
+    src = first10.(x, 48000)
+    [0.9, 1.285].each do |r|
+      [{}, { lock: :peaks }, { wrap: false }].each do |kw|
+        d = Numo::DFloat.cast(s.stretch(r, mode: :spectral, **kw).data(0))
+        expect(20 * Math.log10(first10.(d, (48000 * r).round) / src)).to be_within(1.5).of(0), "ratio #{r} #{kw}"
+      end
+    end
+  end
+
   it 'Paulstretches with seeded random phases at the input level' do
     a = pad.stretch(8, mode: :paul)
     b = pad.stretch(8, mode: :paulstretch)
