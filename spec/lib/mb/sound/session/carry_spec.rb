@@ -22,13 +22,15 @@ RSpec.describe(MB::Sound::Session::Carry, :aggregate_failures) do
 
   # The mono mix of +track+ playing +patch+ (a block, or an instrument
   # name) from CARRY_CLIP, with +act+ run (in the Session's context) after the
-  # first 3200 frames; 160000 frames in +size+-frame buffers.  Returns
+  # first 3200 frames; 160000 frames in +size+-frame buffers (+exact_lanes+:
+  # Session#exact_lanes).  Returns
   # [samples, Session#last_carry].
-  def play(act = nil, patch: CARRY_LEAD, size: 800, frames: 160_000, after: nil)
+  def play(act = nil, patch: CARRY_LEAD, size: 800, frames: 160_000, after: nil, exact_lanes: nil)
     MB::Sound.rewind
     MB::Sound.seed(1)
     out = MB::Sound::Sampler::CaptureOutput.new(channels: 2, buffer_size: size)
     s = MB::Sound::Session.new(output: out, realtime: false, buffer_size: size)
+    s.exact_lanes = exact_lanes
     MB::Sound::Session.with_context(session: s) do
       patch.is_a?(Symbol) ? MB::Sound.track(:lead, patch) : MB::Sound.track(:lead, &patch)
       MB::Sound.bg(:lead, CARRY_CLIP)
@@ -241,6 +243,38 @@ RSpec.describe(MB::Sound::Session::Carry, :aggregate_failures) do
     positions = synth.instance_variables.grep(/position\z/)
     expect(positions).to include(:@skip_position, :@out_position)
     expect(positions - MB::Sound::Session::Carry::SYNTH_STATE).to eq([])
+  end
+
+  # (fix-master-rack-fuzz, SessionFuzz seed 788988: the rebuilt Synth took
+  # the old one's @grid_started, so the Session's exact_lanes, set when its
+  # player starts, was ignored; the new synth measured its lanes per
+  # buffer, and a buffer split at another track's landing freed a released
+  # lane one note early.  The lanes' quiet positions are stream times of
+  # the old allocator, moved to the new one's.)
+  it "keeps exact lane allocation across a rebuild, with the lanes' quiet positions in the new stream time" do
+    synths = nil
+    play(CARRY_REBUILD, frames: 100_000, after: ->(s) {
+      synths = MB::Sound::Session::Carry.graph_nodes(s.ui_graphs.fetch(:lead).instance_variable_get(:@nodes)).grep(MB::Sound::Synth)
+    }, exact_lanes: true)
+    expect(synths.length).to eq(1)
+    expect(synths[0]).to be_exact_lanes
+
+    old = MB::Sound.seq(MB::Sound::C3.n8, MB::Sound::E3.n8).loop.synth(voices: 2, exact_lanes: true) { |v| v.hz.saw * v.amp_env(0.002, 0.05, 0.6, 0.02) }
+    5.times { old.sample(800) }
+    fresh = MB::Sound.seq(MB::Sound::C3.n8, MB::Sound::E3.n8).loop.synth(voices: 2) { |v| v.hz.saw * v.amp_env(0.002, 0.05, 0.6, 0.02) }
+    shift = MB::Sound::Session::Carry.carry_synth(old, fresh)
+    expect(shift).to be > 0
+    expect(fresh).to be_exact_lanes
+    before = old.instance_variable_get(:@quiet_pos)
+    expect(before.compact).not_to be_empty
+    expect(fresh.instance_variable_get(:@quiet_pos)).to eq(before.map { |t| t && t - shift })
+
+    # (settings a Synth fixes at its first sample, ignored once
+    # @grid_started is set, go over with it: SYNTH_STATE has them all)
+    src = File.read(File.expand_path('../../../../../lib/mb/sound/synth.rb', __dir__))
+    fixed = src.scan(/(@\w+) = .* unless @grid_started$/).flatten.map(&:to_sym).uniq
+    expect(fixed).to include(:@exact_lanes, :@grid_offset)
+    expect(fixed - MB::Sound::Session::Carry::SYNTH_STATE).to eq([])
   end
 
   # (ux-notes-1, the maintainer's note of 2026-10-31: "now the clip is

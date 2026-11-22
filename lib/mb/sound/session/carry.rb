@@ -377,6 +377,11 @@ module MB
             v = o.instance_variable_get(iv)
             n.instance_variable_set(iv, v.frozen? ? v : Marshal.load(Marshal.dump(v))) # (Arrays, QuietRuns: copies)
           end
+          # (stream times measured by the old synth, moved to the new
+          # allocator's stream time like the voice states' times above)
+          SYNTH_STREAM_TIMES.each do |iv|
+            n.instance_variable_set(iv, n.instance_variable_get(iv).map { |t| time.(t) })
+          end
           shift
         end
 
@@ -387,11 +392,24 @@ module MB
         # output's (@out_position, which #end_frame is compared with); with
         # only the first carried, a rebuilt synth's one-shot ended as many
         # frames late as the old synth had played before the rebuild
-        # (SessionFuzz seed 768044, fix-batch-1101).
+        # (SessionFuzz seed 768044, fix-batch-1101).  The settings a synth
+        # fixes at its first sample (#exact_lanes, the grid offset) go over
+        # with the state measured under them: the new synth's grid has
+        # started once @grid_started is carried, so the Session's
+        # Synth#exact_lanes= at its start does nothing (fix-master-rack-fuzz,
+        # SessionFuzz seed 788988: a rebuilt synth measured its lanes per
+        # buffer, so a buffer split at another track's landing freed a
+        # released lane one note early).
         SYNTH_STATE = %i[
-          @skipping @skip_generation @lane_runs @skip_position @out_position @grid_offset @grid_started @quiet @quiet_pos @peaks
-          @cell_lo @cell_hi @cell_fresh @done @end_quiet
+          @skipping @skip_generation @lane_runs @skip_position @out_position @grid_offset @grid_started @exact_lanes @quiet @quiet_pos
+          @peaks @cell_lo @cell_hi @cell_fresh @done @end_quiet
         ].freeze
+
+        # The SYNTH_STATE entries holding stream times of the synth's
+        # allocator (per lane, nil where none): where each lane's quiet
+        # state was measured (Synth#quiet_lanes; the allocator compares it
+        # with its lanes' last note times), shifted by #carry_synth.
+        SYNTH_STREAM_TIMES = %i[@quiet_pos].freeze
 
         # Seconds of the old source read ahead for the held notes'
         # note-offs, at most, in steps.
