@@ -200,6 +200,15 @@ module MB
         @default ||= new(fade_in: DEFAULT_FADE_IN, fade_out: DEFAULT_FADE_OUT)
       end
 
+      # The track names of the default session the last .use_output closed
+      # (a new output, as `latency :low` opens, starts a new session
+      # without the old one's tracks, knobs, and scenes), so a command
+      # naming one of them can say where it went (PlaybackMethods#bg;
+      # beat-halftime-1).  Empty if none.
+      def self.left_behind
+        @left_behind || []
+      end
+
       # True if the default session's output was chosen by the user (given
       # to .use_output with +chosen: true+, e.g. through
       # PlaybackMethods#use_output or #latency), rather than opened
@@ -221,6 +230,7 @@ module MB
       def self.use_output(output, chosen: true)
         if @default && !@default.closed?
           raise ArgumentError, 'Stop the background players first (e.g. panic)' unless @default.idle?
+          @left_behind = @default.arrangement.tracks.keys.freeze
           @default.close
         end
 
