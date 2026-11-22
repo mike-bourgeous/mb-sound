@@ -40,7 +40,7 @@ module MB
 
         # Builds the clip from +events+ (an Array of [pos, MIDI::Event],
         # sorted by pos; pos in whole notes).  +length+ is the clip's
-        # length in whole notes.  +channel+ (0-based) keeps one channel's
+        # length in whole notes.  +channel+ (0-based, as Event#channel) keeps one channel's
         # notes (all channels if nil).  +align+ (:timeline or :launch, see
         # Sequence::Clip#loop) is how a loop lines up: in timeline phase
         # (starts are positions mod +length+), or from where it launches

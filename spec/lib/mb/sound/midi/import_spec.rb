@@ -13,7 +13,7 @@ RSpec.describe(MB::Sound::MIDI::Import) do
       list = MB::Sound.midi_tracks(reese)
       expect(list.length).to eq(4)
       expect(list.map(&:name)).to eq(['Conductor', 'Unnamed', 'Unnamed', 'Pad'])
-      expect(list[1]).to have_attributes(notes: 8, channels: [0], polyphony: 2, slides: 6, drums: false, controls: { cc1: 66, cc7: 1 })
+      expect(list[1]).to have_attributes(notes: 8, channels: [1], polyphony: 2, slides: 6, drums: false, controls: { cc1: 66, cc7: 1 })
       expect(list[3]).to have_attributes(polyphony: 3, slides: 0, controls: { bend: 2, pressure: 1 })
       text = list.inspect
       expect(text).to start_with('reese.mid: 180 BPM, 4/4')
@@ -46,8 +46,11 @@ RSpec.describe(MB::Sound::MIDI::Import) do
       path = MidiWriter.write(tmp_path('f0.mid'), conductor: false, tracks: [
         { channel: 0, notes: [[0, q, 36, 100], [q, 2 * q, 60, 90, 1]] },
       ])
-      expect { MB::Sound.midi_clip(path) }.to raise_error(ArgumentError, /notes on channels 0, 1 \(0-based\): pick one with channel:/)
-      expect(MB::Sound.midi_clip(path, channel: 1).events.map(&:value)).to eq([60])
+      # (the file's channels 0 and 1 on the wire are channels 1 and 2)
+      expect { MB::Sound.midi_clip(path) }.to raise_error(ArgumentError, /notes on channels 1, 2: pick one with channel: \(channels count from 1\)/)
+      expect(MB::Sound.midi_clip(path, channel: 2).events.map(&:value)).to eq([60])
+      expect(MB::Sound.midi_clip(path, channel: 1).events.map(&:value)).to eq([36])
+      expect { MB::Sound.midi_clip(path, channel: 0) }.to raise_error(ArgumentError, /channels count from 1/)
     end
   end
 

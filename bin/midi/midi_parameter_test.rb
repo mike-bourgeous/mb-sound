@@ -20,7 +20,7 @@ MB::U.sigquit_backtrace
 MB::Sound.script(args: 0..1) { |(port)|
   input = MB::Sound::MIDI::Input.open_live(port)
   source = MB::Sound::MIDI::LiveSource.new(input, timing: :asap)
-  midi = MB::Sound::Notes.new(MB::Sound::MIDI::Stream.new(source).channel(0))
+  midi = MB::Sound::Notes.new(MB::Sound::MIDI::Stream.new(source).channel(1))
 
   # Several controller nodes on one controller, each with its own range
   nodes = {

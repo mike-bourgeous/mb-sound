@@ -3236,6 +3236,7 @@ struct jack_midi {
 	_Atomic size_t repeated; // messages of a repeated cycle, not queued again
 	_Atomic size_t too_large; // output messages larger than the port buffer holds
 	_Atomic size_t max_message; // output: the port buffer's room for one event, last cycle
+	_Atomic size_t message_cap; // output, #cap_message (specs): a smaller room than the port's, 0 for none
 
 	// Output only: timed short messages (see mb_midi_timed.h), and the
 	// last cycle's frame time (JACK's thread; see midi_out_process)
@@ -3381,8 +3382,10 @@ static void midi_in_process(struct mb_jack_unit *unit, uint32_t nframes)
 // JACK's thread: queued messages out of the ring into the output port (all
 // at the start of the cycle; what doesn't fit waits for the next cycle),
 // then the timed messages due in this cycle at their frames (see
-// mb_midi_timed.h).  A message that doesn't fit an empty port buffer never
-// will: it is dropped and counted (stats[:too_large]).  A cycle an
+// mb_midi_timed.h).  A message larger than this cycle's room for one event
+// (the empty port buffer's; it can shrink after the message was queued,
+// e.g. when the period changes) is dropped and counted
+// (stats[:too_large]) rather than blocking the queue behind it.  A cycle an
 // asynchronous server runs twice (the same frame time) leaves the port
 // buffer as the first call wrote it (as playback_jack_process does), so
 // nothing sent in it is lost or sent twice.
@@ -3399,7 +3402,12 @@ static void midi_out_process(struct mb_jack_unit *unit, uint32_t nframes)
 
 	void *buffer = mb_jack_port_buffer(unit->ports[0], nframes);
 	mb_jack_midi_clear(buffer);
-	atomic_store_explicit(&m->max_message, mb_jack_midi_max_event_size(buffer), memory_order_relaxed);
+	size_t room = mb_jack_midi_max_event_size(buffer);
+	atomic_store_explicit(&m->max_message, room, memory_order_relaxed);
+	size_t cap = atomic_load_explicit(&m->message_cap, memory_order_relaxed);
+	if (cap != 0 && cap < room) {
+		room = cap;
+	}
 
 	size_t rp = atomic_load_explicit(&m->read_pos, memory_order_relaxed);
 	size_t wp = atomic_load_explicit(&m->write_pos, memory_order_acquire);
@@ -3415,6 +3423,14 @@ static void midi_out_process(struct mb_jack_unit *unit, uint32_t nframes)
 		if (start + size > m->capacity) {
 			ring_get(m, rp + MIDI_HEADER, midi_scratch, size);
 			bytes = midi_scratch;
+		}
+
+		if (size > room) {
+			// Too large for this cycle's room, which may have shrunk since
+			// it was queued: drop it rather than block the queue
+			atomic_fetch_add_explicit(&m->too_large, 1, memory_order_relaxed);
+			rp += MIDI_HEADER + size;
+			continue;
 		}
 
 		if (mb_jack_midi_write(buffer, 0, bytes, size) != 0) {
@@ -3846,6 +3862,23 @@ static VALUE jack_midi_max_message(VALUE self)
 }
 
 /*
+ * call-seq:
+ *   output.cap_message(bytes) -> nil
+ *
+ * For specs: limits the room for one message to +bytes+ (0 lifts the
+ * limit) in JACK's thread only, as if the port buffer shrank after
+ * messages were queued (a period change): queued messages larger than that
+ * are dropped and counted (stats[:too_large]) when their turn comes.
+ * #write and #max_message keep the port's own room.
+ */
+static VALUE jack_midi_cap_message(VALUE self, VALUE bytes)
+{
+	struct jack_midi *m = get_jack_midi_output(self);
+	atomic_store(&m->message_cap, NUM2SIZET(bytes));
+	return Qnil;
+}
+
+/*
  * The messages of repeated cycles received once (stats[:repeated], without
  * allocating a Hash; MIDI::Input checks it on every read).
  */
@@ -3900,6 +3933,7 @@ static void init_jack_midi(VALUE fast_audio)
 	rb_define_method(output, "write_at", jack_midi_write_at, 4);
 	rb_define_method(output, "discard_timed", jack_midi_discard_timed, 0);
 	rb_define_method(output, "max_message", jack_midi_max_message, 0);
+	rb_define_method(output, "cap_message", jack_midi_cap_message, 1);
 }
 
 void Init_fast_audio(void)

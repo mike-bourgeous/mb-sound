@@ -54,7 +54,7 @@ module MB
           base =
             case root
             when MIDI::ClipSource
-              "#{clip_text.call(root.clip)}.stream#{root.channel.zero? ? '' : "(channel: #{root.channel})"}"
+              "#{clip_text.call(root.clip)}.stream#{root.channel.zero? ? '' : "(channel: #{MIDI::Channel.show(root.channel)})"}"
             when MIDI::FileSource
               name = root.midi_file.filename
               return nil unless name.is_a?(String)

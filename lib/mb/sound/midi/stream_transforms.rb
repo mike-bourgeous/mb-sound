@@ -363,7 +363,7 @@ module MB
           Stream.new(Transform::VelocityCurve.new(self, ->(_) { v }, name: "vel(#{velocity})"))
         end
 
-        # Moves every channel message to 0-based +channel+ (e.g. to layer a
+        # Moves every channel message to +channel+ (1 to 16, e.g. to layer a
         # stream onto another synth's channel).  Also #to_channel.
         def rechannel(channel)
           Stream.new(Transform::Rechannel.new(self, channel))

@@ -701,7 +701,10 @@ module MB
         `sf2('GM.sf2', 0)` (a GM program in bank 0: 0 is the piano),
         `sf2(path, preset: 'Strings')` (a name, or the one name containing
         it), `sf2(path, preset: [128, 0])` (bank 128: GM drum kits), or
-        `font[48]`, `font['Pad']`, `font[128, 0]`.  Each is a sampler
+        `font[48]`, `font['Pad']`, `font[128, 0]`.  Preset numbers are
+        the file's own, counted from 0 as SoundFont editors show them (GM
+        program 1, the piano, is preset 0), unlike MIDI channels and
+        programs elsewhere, which count from 1.  Each is a sampler
         Instrument: `synth(midi) { |v| piano.play(v) }`,
         `beat.sampler(kit, voices: 8)`, or a track's patch.  Only the
         chosen preset's samples are read (a 30 MB GM font opens in a few
@@ -1651,7 +1654,9 @@ module MB
         Stuck note on live input (a keyboard dropped a note-off)?  Press
         the key again and let go: live input restrikes held keys
         (`same_key: :restrike`; files and clips count overlaps,
-        `same_key: :count`).
+        `same_key: :count`).  Channels and programs count from 1, as on
+        synths: `midi.channel(10)` keeps the drums, `cc(1, channel: 2)`
+        listens to channel 2, `C4.to_midi(channel: 1)` (channel 0 raises).
       TEXT
       commands :midi, :midi_file, :midi_stream, :synth, :per_voice, :close_midi, :mod_sum, :mod_scale
       dsl :gate, :trigger, :velocity, :amp_env, :hz, :cutoff, :reso, :arp, :echo, :chord
@@ -1671,7 +1676,7 @@ module MB
         added); `offset: 4.ms` moves one synth later for its own response
         (`midi_out(...).offset = 6.ms` while it plays).  `level :kronos,
         -6.db` sends CC 7.  Channels and programs count from 1, as on the
-        synths.  `midi_out('SQ-80').test` plays a test note; `midi_out(port:
+        synths (channel 0 or program 0 raises).  `midi_out('SQ-80').test` plays a test note; `midi_out(port:
         'to_surge')` makes a port another program connects to.  `ui.show
         :midi_ports` (alias `:midi_devices`) shows them in a pane: Enter
         puts a track line on the console, a plays a test note.
@@ -1698,7 +1703,8 @@ module MB
         keeps a rubato file's tempo map.
         `midi_kit 'beat.mid'` makes the drum tracks a grid-like Kit for
         tr808/tr909.  Saved graph documents keep the notes and lanes as
-        `events(...)`, not the file.
+        `events(...)`, not the file.  Channels count from 1, as the
+        listing shows them: `midi_clip 'song.mid', channel: 10`.
       TEXT
       commands :midi_tracks, :midi_clip, :midi_kit, :midi_file
       note :midi
@@ -1720,7 +1726,8 @@ module MB
         the stream).  `wires` lists them; set documents save the ones that
         print as Ruby; takes replay them all.  A clip on a track's
         instrument is `swap :lead, clip`; `arm :lead, input: stream` wires
-        it now.
+        it now.  Channels count from 1 here as everywhere:
+        `riff.stream(channel: 2)`, `midi.channel(10)`, `.rechannel(3)`.
       TEXT
       commands :wire, :unwire, :wires
       note :arrangement

@@ -1860,7 +1860,7 @@ module MB
 
       # Converts this Tone to a note-on MB::Sound::MIDI::Event at the
       # nearest note (see Note#to_midi).
-      def to_midi(velocity: 64, channel: 0)
+      def to_midi(velocity: 64, channel: nil)
         to_note.to_midi(velocity: velocity, channel: channel)
       end
 
