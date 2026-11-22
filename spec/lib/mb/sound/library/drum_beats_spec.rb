@@ -111,6 +111,37 @@ RSpec.describe MB::Sound::Library::Generators, 'drum beats', :aggregate_failures
     end
   end
 
+  # (beat-halftime-1: the drum-gen tests looked at 8 bars, so a beat that
+  # ended or changed character after its first phrase would not have shown)
+  it 'keeps its character for 72 bars: anchors through fill bars, hold blocks repeat and differ, energy acts in every bar' do
+    beats.each do |e|
+      bars = { 0.1 => nil, 0.5 => nil, 1.0 => nil }.to_h { |en, _| c = e.call(seed: 4, energy: en); [en, (0...72).map { |cy| hits(c, cy) }] }
+      bars.each do |en, list|
+        list.each_with_index do |h, cy|
+          what = "#{e.name} at #{en}, bar #{cy + 1}"
+          expect(h).to include([0, roles.note(:kick)]), what
+          expect(h.length).to be > 0, what
+        end
+        # hold: 2 repeats each pair of bars, except a fill bar; every block differs from the next
+        (0...36).each do |k|
+          next if (2 * k + 2) % 8 == 0
+          expect(list[2 * k + 1]).to eq(list[2 * k]), "#{e.name} at #{en}: bars #{2 * k + 1} and #{2 * k + 2}"
+        end
+        # (sparse at low energy: fewer different bars, still varying)
+        expect(list.uniq.length).to be >= (en < 0.5 ? 18 : 36), "#{e.name} at #{en}: #{list.uniq.length} different bars in 72"
+      end
+      # the backbeat's anchors play in every bar, fill bars included, above the lowest energy
+      backbeat = { 4 => roles.note(:snare), 12 => roles.note(:snare) }
+      backbeat = { 8 => roles.note(:snare) } if e.name == :halftime
+      backbeat = { 4 => roles.note(:clap), 12 => roles.note(:clap) } if %i[house techno].include?(e.name)
+      bars[0.5].each_with_index { |h, cy| backbeat.each { |st, k| expect(h).to include([st, k]), "#{e.name} bar #{cy + 1}: no #{roles::NAMES[k]} on step #{st}" } }
+      72.times do |cy|
+        expect(bars[0.1][cy] - bars[1.0][cy]).to eq([]), "#{e.name} bar #{cy + 1}: more energy dropped hits"
+        expect(bars[1.0][cy].length).to be > bars[0.1][cy].length, "#{e.name} bar #{cy + 1}: energy did nothing"
+      end
+    end
+  end
+
   it 'gives the same bars for the same values (and a seed picks another)' do
     beats.each do |e|
       a = e.call(seed: 7, energy: 0.8)

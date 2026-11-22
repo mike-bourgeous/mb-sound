@@ -1654,7 +1654,29 @@ module MB
       commands :midi, :midi_file, :midi_stream, :synth, :per_voice, :close_midi, :mod_sum, :mod_scale
       dsl :gate, :trigger, :velocity, :amp_env, :hz, :cutoff, :reso, :arp, :echo, :chord
       note :midi
-      see :record, :midi_files, :wire
+      see :record, :midi_files, :wire, :midi_out
+    end
+
+    Help.topic :midi_out, 'MIDI out: tracks on synths and other programs', group: :perform do
+      about <<~TEXT
+        `midi_ports` lists the MIDI ports: synths bridged by JACK or
+        PipeWire, other programs' inputs, keyboards.  `track :kronos,
+        midi_out('KRONOS', channel: 1, program: 12)` makes a track whose
+        sound is the synth: `bg :kronos, riff`, scenes, flows, generators,
+        swaps, stops, mutes, `pause` and `panic` all play or end its notes.
+        Notes leave so the synth sounds with mb-sound's own audio at the
+        speakers (on JACK to the sample: the output queue's latency is
+        added); `offset: 4.ms` moves one synth later for its own response
+        (`midi_out(...).offset = 6.ms` while it plays).  `level :kronos,
+        -6.db` sends CC 7.  Channels and programs count from 1, as on the
+        synths.  `midi_out('SQ-80').test` plays a test note; `midi_out(port:
+        'to_surge')` makes a port another program connects to.  `ui.show
+        :midi_ports` (alias `:midi_devices`) shows them in a pane: Enter
+        puts a track line on the console, a plays a test note.
+      TEXT
+      commands :midi_out, :midi_ports
+      note :midi
+      see :midi, :sets, :mixing
     end
 
     Help.topic :midi_files, 'MIDI files as clips and kits', group: :perform do

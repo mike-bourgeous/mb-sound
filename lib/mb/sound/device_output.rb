@@ -500,6 +500,17 @@ module MB
         @playback.jack_clock
       end
 
+      # For JACK outputs, the JACK frame time (32 bits, wrapping) at which
+      # the frame +ahead+ frames past the queue's write position (0: the
+      # next frame #write queues) reaches the ports, by the latest cycle's
+      # clock (see #jack_clock), without allocating; nil for other backends
+      # and before the first cycle.  +ahead+ is at the card's rate.  Timed
+      # MIDI output (MIDI::Destination) leaves on it, so a note goes with
+      # the audio of the same frame.
+      def jack_frame_of(ahead)
+        @playback.jack_frame_of(ahead)
+      end
+
       def inspect
         rate = resampling? ? "#{@sample_rate.round}Hz->#{@device_rate.round}Hz" : "#{@sample_rate.round}Hz"
         "#<#{self.class.name} #{@backend} #{@device_name.inspect} #{@channels}ch #{rate} #{@profile}#{' closed' if closed?}>"

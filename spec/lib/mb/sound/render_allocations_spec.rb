@@ -125,6 +125,17 @@ RSpec.describe('render-path allocations') do
       expect_budget(objects: 150, bytes: 11_000, warm: 400, buffers: 300) # (before: 172.5, 10.1 kB; alloc-2: 138.5, 9.2 kB; dropouts-2: 126.5, 8.6 kB; MIDI events' Rationals lead)
     end
 
+    it 'a MIDI out track on 16ths (clip notes to a destination, the level as CC 7; offline, so nothing reaches a port)' do
+      ctx do
+        session.arrangement.track(:hw, MB::Sound.midi_out(log: true, channel: 2))
+        session.arrangement.play(:hw, MB::Sound.seq(MB::Sound::A2, MB::Sound::C3, MB::Sound::E3, MB::Sound::G3).n16.loop, start_time: 0)
+        session.level(:hw, -6.db)
+      end
+      d = MB::Sound::Arrangement::InstrumentPatch.voice_of(session.arrangement.tracks[:hw].patch)
+      expect_budget(objects: 24, bytes: 2_600) # (midi-out-1: 18.8 objects, 2.0 kB, none from the MIDI out node in the top allocators: the Session's own)
+      expect(d.log.length).to be > 60 # (it played: about 40 notes)
+    end
+
     it 'key-synced 7-voice unison saws on 32nds (a band-limited phase jump per copy and note)' do
       ctx do
         riff = MB::Sound.seq(MB::Sound::A2, MB::Sound::C3, MB::Sound::E3, MB::Sound::G3).n32.loop
