@@ -42,19 +42,24 @@ module MB
 
           mode_keys do
             group 'Clip matrix'
-            on [:up, 'k'], :move, 0, -1, help: 'cursor up', label: 'arrows hjkl'
-            on [:down, 'j'], :move, 0, 1, help: 'cursor down', label: 'arrows hjkl'
-            on [:left, 'h'], :move, -1, 0, help: 'cursor left', label: 'arrows hjkl'
-            on [:right, 'l'], :move, 1, 0, help: 'cursor right', label: 'arrows hjkl'
-            on [:home], :move_to, :first, help: 'first column'
-            on [:end], :move_to, :last, help: 'last column'
+            on [:up, 'k'], :move, 0, -1, help: 'move the cursor', label: 'arrows hjkl'
+            on [:down, 'j'], :move, 0, 1, help: 'move the cursor', label: 'arrows hjkl'
+            on [:left, 'h'], :move, -1, 0, help: 'move the cursor', label: 'arrows hjkl'
+            on [:right, 'l'], :move, 1, 0, help: 'move the cursor', label: 'arrows hjkl'
+            on [:home], :move_to, :first, help: 'first, last column', label: 'Home End'
+            on [:end], :move_to, :last, help: 'first, last column', label: 'Home End'
             on :enter, :launch, help: 'launch the cell: its clip on the track (■: stop the track)'
             on 'g', :scene, help: "launch the cursor column's scene (go)"
             on ['x', '.'], :stop, help: 'stop the track (rings out)'
+            on ' ', :play_stop, help: 'the cell: stop it if it plays, else launch it', label: 'Space'
+            on 's', :solo, help: 'solo, mute the track (again: un-)', label: 's m'
+            on 'm', :mute, help: 'solo, mute the track (again: un-)', label: 's m'
+            on 'a', :cue_cell, help: 'audition the cell in CUE (cue :bass, 3), again: uncue'
             group 'Tweak the track\'s clip (a new slot, at its launch point)'
             EDITS.each { |key, help, _| on key, :tweak, key, help: help }
             group 'Clip matrix'
             on 'u', :undo, help: 'undo the last change (at the next bar)'
+            on 'e', :edit_line, help: PaneKeys::EDIT_HELP
           end
 
           keys do
@@ -154,7 +159,7 @@ module MB
               x = c.line(c.h - 1, ['⏱ ', :dim])
               s.clocks.each do |k|
                 break if x >= c.w - 4
-                x = c.text(x, c.h - 1, c.fit("#{k.name} ", c.w - x), :name)
+                x = c.text_fit(x, c.h - 1, "#{k.name} ", c.w - x, :name)
                 x = c.meter(k.phase, width: 4, x: x, y: c.h - 1, role: :key) if x < c.w - 5
                 x = c.text(x, c.h - 1, '  ', nil)
               end
@@ -165,15 +170,15 @@ module MB
             state[:top] = top = [top, 0].max
 
             # Header: scene names (▶ current, ◆ queued), then "more"
-            c.text(0, 0, c.fit(left > 0 ? '…' : '', name_w), :dim)
+            c.text_fit(0, 0, left > 0 ? '…' : '', name_w, :dim)
             (left...[left + vis_cols, cols].min).each do |j|
               x = name_w + (j - left) * cell_w
               if j < m.scenes.length
                 sc = m.scenes[j]
                 mark = sc.current ? c.glyph(:play) : sc.queued ? '◆' : ' '
-                c.text(x, 0, c.fit("#{mark}#{sc.name}", cell_w - 1), sc.current ? :ok : sc.queued ? :queued : :title)
+                c.text_fit(x, 0, "#{mark}#{sc.name}", cell_w - 1, sc.current ? :ok : sc.queued ? :queued : :title)
               elsif j == m.scenes.length
-                c.text(x, 0, c.fit(' slots', cell_w - 1), :dim)
+                c.text_fit(x, 0, ' slots', cell_w - 1, :dim)
               end
             end
 
@@ -183,7 +188,7 @@ module MB
               lstate = s.lane_state(t.name)
               on = %i[playing starting].include?(lstate)
               x = c.text(0, y, on ? c.glyph(:play) : ' ', on ? :ok : :dim)
-              c.text(x, y, c.fit("#{t.name}#{lstate == :muted ? ' m' : ''}", name_w - 2), lstate == :muted ? :dim : :name)
+              c.text_fit(x, y, "#{t.name}#{lstate == :muted ? ' m' : ''}", name_w - 2, lstate == :muted ? :dim : :name)
               (left...[left + vis_cols, cols].min).each do |j|
                 draw_cell(c, s, m, t, j, name_w + (j - left) * cell_w, y, cell_w - 1, state[:mode] && r == row && j == col, lstate)
               end
@@ -243,6 +248,44 @@ module MB
             end
           end
 
+          # Space (ui-phase1-1, the plan's Phase 1 item 15: the tracks
+          # pane's keys in the matrix): the cell's track stops if the cell
+          # is what it plays, else the cell launches (Enter's line).
+          def key_play_stop(state)
+            cell = cursor_cell(state) or return 'no clip here'
+            t, slot, = cell
+            return PaneKeys::Run["stop #{t.name.inspect}", "stop #{t.name.inspect}"] if slot.is_a?(Integer) && t.playing == slot && t.state == :playing
+            key_launch(state)
+          end
+
+          # s: solos the cursor's track, or unsolos it (the player's flag).
+          def key_solo(state)
+            name = cursor_track(state) or return 'no track here'
+            part = state[:snap].players.find { |p| p.name == name }
+            part&.soloed ? PaneKeys::Run["unsolo #{name.inspect}", "#{name} unsoloed"] : PaneKeys::Run["solo #{name.inspect}", "#{name} soloed"]
+          end
+
+          # m: mutes the cursor's track, or unmutes it (the player's flag).
+          def key_mute(state)
+            name = cursor_track(state) or return 'no track here'
+            part = state[:snap].players.find { |p| p.name == name }
+            part&.muted ? PaneKeys::Run["unmute #{name.inspect}", "#{name} unmuted"] : PaneKeys::Run["mute #{name.inspect}", "#{name} muted"]
+          end
+
+          # a: auditions the cell on CUE (`cue :bass, 3`), or ends the
+          # track's CUE when it has one playing (`uncue :bass`).
+          def key_cue_cell(state)
+            cell = cursor_cell(state) or return 'no clip here'
+            t, slot, = cell
+            cue = MB::Sound::Session::Name.cue(t.name)
+            return PaneKeys::Run["uncue #{t.name.inspect}", "#{t.name} out of CUE"] if state[:snap].players.any? { |p| p.name == cue }
+            return "#{t.name.inspect}: nothing in this cell to audition" unless slot.is_a?(Integer)
+            PaneKeys::Run["cue #{t.name.inspect}, #{slot}", "#{label(t, slot)} in CUE (the phones; a again: uncue, launch :#{t.name} takes it to MAIN)"]
+          end
+
+          # e: Enter's line for the cell (PaneKeys#key_edit_line).
+          def edit_line(state) = key_launch(state)
+
           def key_scene(state)
             cell = cursor_cell(state) or return 'no scene here'
             _, _, sc = cell
@@ -268,6 +311,9 @@ module MB
           def key_undo(_state) = PaneKeys::Run['undo', 'undo']
 
           private
+
+          # The cursor's track name, or nil.
+          def cursor_track(state) = cursor_cell(state)&.first&.name
 
           def cursor_cell(state)
             m = state[:snap]&.matrix or return nil
@@ -323,11 +369,11 @@ module MB
             hist = clip.respond_to?(:history) ? clip.history : []
             if !hist.empty? && c.h > 5
               # (what made this tweak version: tweak keys name versions bass_a_v2, _v3, ...)
-              c.text(0, y, c.fit("#{hist[0]} → #{hist.drop(1).join(' → ')}", c.w), :dim)
+              c.text_fit(0, y, "#{hist[0]} → #{hist.drop(1).join(' → ')}", c.w, :dim)
               y += 1
             end
             if clip.ruby && c.h > 4
-              c.text(0, y, c.fit(clip.ruby.lines.first.to_s.strip, c.w), :key)
+              c.text_fit(0, y, clip.ruby.lines.first.to_s.strip, c.w, :key)
               y += 1
             end
             roll(c.sub(0, y, c.w, c.h - y), clip, len.to_r)
@@ -356,7 +402,7 @@ module MB
             return if span < 4
             shown = keys.first(c.h)
             shown.each_with_index do |k, y|
-              c.text(0, y, c.fit(kit ? k.to_s : note_name(k), label_w), k.is_a?(Integer) && k % 12 == 0 ? :key : :dim)
+              c.text_fit(0, y, kit ? k.to_s : note_name(k), label_w, k.is_a?(Integer) && k % 12 == 0 ? :key : :dim)
               c.text(label_w + 1, y, '·' * span, :dim)
             end
             clip.events.each do |e|
@@ -382,6 +428,9 @@ module MB
         # the Session (`turn :"bass/dub/space", 0.42` for one press, else
         # its fitted keyframes, `turn :"bass/dub/space", 0 => 0.32, 1.n4 =>
         # 0.48`), journaled at its first step with the raw steps takes replay.
+        # 0 sets the picked knob's default and Enter types its value (the
+        # knobs pane's and the inspector's prompt, UI::KnobTurns#key_ask:
+        # one `turn` line; knobs-pane-keys-1, the maintainer's 2026-11-21).
         #
         # Data: Snapshot#racks (Rack::RackInfo per instance), knob values
         # from Snapshot#knobs.
@@ -415,6 +464,8 @@ module MB
             on ['L'], :turn, FINE, help: 'turn up, fine'
             on ['H'], :turn, -FINE, help: 'turn down, fine'
             on '0', :reset, help: "the knob's default"
+            on :enter, :ask, help: 'type a value (turn :"bass/dub/tone", 3000.hz)', label: 'Enter'
+            on 'e', :edit_line, help: PaneKeys::EDIT_HELP
           end
 
           keys do
@@ -455,7 +506,7 @@ module MB
               # Title: path kind  latency
               lat = r.latency.nil? ? '' : r.latency.to_i > 0 ? "  lat #{r.latency} smp" : '  lat 0'
               x = c.line(y, [(r.path || r.name || 'rack').to_s, :name], ['  ', nil], [r.kind.to_s, :key])
-              c.text(x, y, c.fit(lat, [c.w - x, 0].max), :dim)
+              c.text_fit(x, y, lat, [c.w - x, 0].max, :dim)
               y += 1
               break if y >= c.h
               ins = r.ports.map { |p| "#{p[:name]}:#{p[:type]}#{p[:role] == :main ? '' : p[:required] ? '' : '?'}" }
@@ -478,7 +529,7 @@ module MB
                 x = c.meter(spec ? spec.position(value).to_f : 0.0, width: mw, x: x + 1, y: y, role: k ? :key : :dim)
                 # (the queued color while a gesture turns it: its line comes when the keys stop)
                 x = c.text(x + 1, y, vtext, target ? :queued : :text)
-                c.text(x, y, c.fit(range, [c.w - x, 0].max), :dim)
+                c.text_fit(x, y, range, [c.w - x, 0].max, :dim)
                 y += 1
               end
             end

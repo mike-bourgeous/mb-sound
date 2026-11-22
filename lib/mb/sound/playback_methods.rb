@@ -188,7 +188,7 @@ module MB
         raise ArgumentError, ':all is reserved for stop(:all)' if name == :all
         # (a clip's echo or arp stream on a track: it would replace the
         # track's instrument with the default patch; ux-notes-1)
-        if (e = Internal.stream_for_track_error('bg', name, sound))
+        if (e = Internal.stream_for_track_error('bg', name, sound) || Internal.clip_name_for_track_error('bg', name, sound))
           return MB::Sound.live_error(e)
         end
 
@@ -292,13 +292,29 @@ module MB
       # by default (+:fade+ sets the number of bars), starting now or at a
       # launch point (`outro on: 4`, `outro at: bar(33)`).  A flow playing
       # ends at the same point (no section begins after it; as `stop
-      # :all`).  Also available as #fadeout.  Returns the journal entries,
-      # as #stop.  See #stop, and #panic to stop everything right away.
+      # :all`).  #fadeout without names does the same.  Returns the journal
+      # entries, as #stop.  See #stop, and #panic to stop everything right
+      # away.
       def outro(fade: nil, at: nil, on: nil, in: nil)
         point = LaunchPoint.of(binding) or return nil
         stop(:all, fade: fade, at: point)
       end
-      alias fadeout outro
+
+      # Fades out and stops the named tracks or players (+names+, as #stop
+      # takes them; unknown names get a did-you-mean) over four bars by
+      # default (+:fade+ sets the number of bars), now or at a launch point;
+      # with no names, ends everything, exactly as #outro.  Returns the
+      # journal entries, as #stop.  (gen-ux-1, the maintainer, 2026-11-17:
+      # "I'd like fadeout to accept a track name".)
+      #
+      #     fadeout :pad                 # the pad fades out over 4 bars
+      #     fadeout :pad, :bell, fade: 8, on: :bar
+      #     fadeout                      # everything (outro)
+      def fadeout(*names, fade: nil, at: nil, on: nil, in: nil)
+        point = LaunchPoint.of(binding) or return nil
+        return outro(fade: fade, at: point) if names.empty?
+        stop(*names, fade: fade, at: point)
+      end
 
       # Stops every background player immediately, with no fade, including
       # players that are fading out or waiting to start.  The master effects
@@ -401,23 +417,36 @@ module MB
       # with a new output (see #use_output), so stop all players first.
       # Light patches (e.g. a few band-limited oscillators) can use :low;
       # heavy graphs need :default or :safe.  An AUDIO_PROFILE environment
-      # variable still takes precedence.  Without a profile, returns the
+      # variable still takes precedence.  Without a profile, prints what the
+      # output gets (DeviceReport.report: backend, device, rate, buffer,
+      # period, how many frames the sound server pulls at a time, the queue,
+      # and the underruns (xruns) so far; console-offers-1) and returns the
       # current output's profile (nil if it has none).  Also available as
       # #lag.
       #
       # Example (bin/sound.rb):
       #     latency :low     # about 16-19 ms on the user's Mac
       #     lag :default     # about 45-56 ms
-      #     latency          # => :default
+      #     latency          # prints the facts, => :default
       def latency(profile = nil)
         if profile.nil?
           out = Session.default.output
+          puts DeviceReport.report(out)
           return out.respond_to?(:profile) ? out.profile : nil
         end
 
+        name = profile.to_s.delete_prefix(':').to_sym
+        unless DeviceOutput::PROFILES.key?(name)
+          # (ux-friction-1: the maintainer's `latency :Low` and `:video`
+          # guesses; a null output took any name silently)
+          names = DeviceOutput::PROFILES.keys
+          close = names.find { |n| n.to_s.casecmp?(name.to_s) }
+          hint = close ? " (did you mean #{close.inspect}?)" : GraphIO.suggest(name, names)
+          return MB::Sound.live_error(ArgumentError.new("latency #{profile.inspect}: no such profile#{hint}; the profiles are #{names.map(&:inspect).join(', ')}"))
+        end
         type = Internal.detect_output == :null ? :null : :device
-        use_output(MB::Sound.output(output_type: type, channels: 2, shared: false, profile: profile))
-        profile.to_s.delete_prefix(':').to_sym
+        use_output(MB::Sound.output(output_type: type, channels: 2, shared: false, profile: name))
+        name
       end
       alias lag latency
 
@@ -508,7 +537,9 @@ module MB
         elsif !block.nil? && effects != :show
           raise ArgumentError, 'Pass a block for master effects, or nil to remove them, not both'
         elsif block.nil? && effects
-          raise ArgumentError, "Pass a block for master effects, a mastering preset (#{Mastering.names.map(&:inspect).join(', ')}), or nil to remove them (got #{effects.inspect})"
+          # (ux-friction-1 round 2: the maintainer's `master -30.db`)
+          level = effects.is_a?(Numeric) ? "; the master level is master_gain #{effects.inspect}" : ''
+          raise ArgumentError, "Pass a block for master effects, a mastering preset (#{Mastering.names.map(&:inspect).join(', ')}), or nil to remove them (got #{effects.inspect})#{level}"
         end
 
         label = preset ? "master #{preset.call_ruby}" : block ? 'master' : 'master nil'
@@ -600,7 +631,15 @@ module MB
       # swapped too, and play the new clip when resumed.  On a track (see
       # ArrangementMethods#track), the new clip becomes the track's clip,
       # as with `bg :name, clip`, so `bg :name` or a scene's :on after a
-      # stop plays it.  See Session#swap.
+      # stop plays it; a track that isn't playing (stopped, or its
+      # one-shot clip ended) starts with the new clip, exactly as `bg
+      # :name, clip` at the same launch point (a line says so in the
+      # console).  A graph given for a player that isn't a track (`bg :x,
+      # graph` earlier, or nothing yet) replaces its graph, or starts it,
+      # as `bg :x, graph` at the swap's launch point.  See Session#swap.
+      #
+      #     bg :hum, 55.hz.saw.lp4(300)
+      #     swap :hum, 55.hz.square.lp4(500)        # the new hum on the next bar
       #
       # Example (bin/sound.rb):
       #     bass = seq(C2, C2, rest, C3).n16.loop
@@ -620,7 +659,7 @@ module MB
           example = name.length == 1 ? "swap #{name.keys.first.inspect}, clip" : 'swap :bass, clip'
           return MB::Sound.live_error(ArgumentError.new("swap takes the player's name first, then its new clip: #{example} (a Hash in parentheses is the name; old => new pairs follow the name: swap :drums, beat => beat2)"))
         end
-        if (e = Internal.stream_for_track_error('swap', name, clips, any: true))
+        if (e = Internal.stream_for_track_error('swap', name, clips, any: true) || Internal.clip_name_for_track_error('swap', name, clips))
           return MB::Sound.live_error(e)
         end
         raise ArgumentError, 'Pass a new clip or old => new pairs, not both' if clips && !pairs.empty?
@@ -634,6 +673,7 @@ module MB
           ))
         end
         clips = clips.call if clips.is_a?(Library::Entry) && clips.kind != :generator
+        given = clips
 
         name = player_name(name)
         if clips.is_a?(Library::Entry) || clips.is_a?(Sequence::Clip)
@@ -642,14 +682,35 @@ module MB
           track = name.is_a?(Symbol) && Session.current.arrangement.tracks[name]
           clips = track ? Library::Generators.track_clip(clips, name, Session.current, reuse: true) : (clips.is_a?(Library::Entry) ? clips.call : clips)
         end
-        # (ux-notes-1: the maintainer's `swap :growl, riff` after a one-shot
-        # clip had ended the track; Session#swap said only "No background
-        # player :growl is playing or stopped")
+        # A track that isn't playing (stopped, never started, or a one-shot
+        # clip ended) starts with the new clip, as `bg :name, clip`, at the
+        # same launch point (gen-ux-1, the maintainer, 2026-11-17: "swap on
+        # a track that's not playing should act like bg instead of
+        # displaying an error"; since ux-notes-1 it was an error naming bg)
         session = Session.current
-        if name.is_a?(Symbol) && session.arrangement.tracks[name]&.patch? && !session.playing_after_queue?(name) && !session.resumable?(name)
-          return MB::Sound.live_error(ArgumentError.new(
-            "swap #{name.inspect}: track #{name.inspect} isn't playing (a one-shot clip ended, or it was stopped); bg #{name.inspect}, clip plays a clip on its instrument"
-          ))
+        if name.is_a?(Symbol) && (track = session.arrangement.tracks[name]) && !session.playing_after_queue?(name)
+          unless clips.is_a?(Hash)
+            $stdout.puts "swap #{name.inspect}: #{name.inspect} wasn't playing; starting it with the new clip (as bg #{name.inspect}, clip)" if MB::Sound.live?
+            return bg(name, given, at: point.given? ? point : nil)
+          end
+          if track.patch? && !session.resumable?(name)
+            return MB::Sound.live_error(ArgumentError.new(
+              "swap #{name.inspect}: track #{name.inspect} isn't playing, so there are no clips to pair with old => new; bg #{name.inspect}, clip plays a clip on its instrument"
+            ))
+          end
+        end
+        # A graph (not a clip, kit, or pairs) for a player that isn't a
+        # track replaces the player's graph, or starts it, as `bg :name,
+        # graph` at the swap's launch point (gen-ux-1 round 2, the maintainer,
+        # 2026-11-21: "don't make me type bg first and then swap"; it raised
+        # "Player :x doesn't play any clips")
+        graph = !(clips.is_a?(Sequence::Clip) || clips.is_a?(Sequence::Kit) || clips.is_a?(Hash) || clips.is_a?(Library::Entry))
+        if graph && name.is_a?(Symbol) && !session.arrangement.tracks[name]
+          if MB::Sound.live?
+            what = session.playing_after_queue?(name) ? "the new graph replaces #{name.inspect}'s" : "#{name.inspect} wasn't playing; starting it with the new graph"
+            $stdout.puts "swap #{name.inspect}: #{what} (as bg #{name.inspect}, graph)"
+          end
+          return bg(name, given, at: point.given? ? point : nil)
         end
         session_command(name, label: "swap #{name.inspect}", kind: :swap) { |session, time|
           session.swap(name, clips, at: point, start_time: point.given? ? nil : time)
@@ -671,7 +732,9 @@ module MB
       # or nil if there was nothing to resume.
       #
       # Only players with Symbol names are kept after stopping; see
-      # #stopped and #forget.
+      # #stopped and #forget.  A player a stop is still fading out comes
+      # back from where its fade is (the stop is cancelled; its clips play
+      # on in phase), as a player still ringing out does.
       #
       # Example (bin/sound.rb):
       #     bg :pad, pad_graph

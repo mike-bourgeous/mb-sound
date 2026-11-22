@@ -21,8 +21,11 @@ module MB
         # This producer with +fn+ (called with a cycle's Events and the
         # cycle number, returning Events) applied to each cycle's events as
         # a whole (Clip#ratchet, #permute, #ghost_chords, ...).
-        def cycle_mapped(fn)
-          Mapped.new(self, cycle: fn)
+        # +extra_cycles+ is how many cycles past the producer's own reach
+        # the map may move events (echo tails, Clip#bake_cycles), so the
+        # clip looks back that much further for their notes.
+        def cycle_mapped(fn, extra_cycles: 0)
+          Mapped.new(self, cycle: fn, extra_cycles: extra_cycles)
         end
       end
 
@@ -34,11 +37,13 @@ module MB
         # The producer this one maps.
         attr_reader :inner
 
-        def initialize(inner, map = nil, cycle: nil)
+        def initialize(inner, map = nil, cycle: nil, extra_cycles: 0)
           raise ArgumentError, 'Give an event map or a cycle map' unless map.nil? != cycle.nil?
+          raise ArgumentError, "extra_cycles is a non-negative Integer (got #{extra_cycles.inspect})" unless extra_cycles.is_a?(Integer) && extra_cycles >= 0
           @inner = inner
           @map = map
           @cycle = cycle
+          @extra_cycles = extra_cycles
         end
 
         def events(cycle, clip_length = nil)
@@ -74,7 +79,7 @@ module MB
         end
 
         def reach_cycles
-          @inner.reach_cycles
+          @inner.reach_cycles + @extra_cycles
         end
 
         def to_s

@@ -57,10 +57,11 @@
 #     OUTPUT_TYPE=device AUDIO_BACKEND=null bin/dropout_probe.rb --seconds 40 --inject all
 #
 # Any live script can be probed too: MB_SOUND_DROPOUT_PROBE=1 (or a .json
-# path) bin/songs/memory_card.rb --ui.  In bin/sound.rb:
-#     probe = MB::Sound::DropoutProbe.start(MB::Sound::Session.current, json: 'tmp/dropouts_console.json')
+# path) bin/songs/memory_card.rb --ui, and so can a whole console session:
+# MB_SOUND_DROPOUT_PROBE=1 bin/sound.rb.  In bin/sound.rb:
+#     dropouts                                # start (again: how it goes)
 #     ...                                     # play, load things, take notes
-#     probe.finish
+#     dropouts :stop                          # the report; saved in tmp/dropout_probe/
 
 require 'bundler/setup'
 require 'mb-sound'
@@ -188,7 +189,7 @@ module MB::Sound
     song_script(
       song: ['techno', String, '-S', 'A genre (its endless form: techno, dnb, house, ambient, funk, jungle), a song script in bin/songs (tunnel_vision, memory_card, ...), or a path'],
       seconds: [300.0, Float, '-s', 'How long to probe (0: until the song ends or Ctrl-C)', 0.0..86_400.0],
-      json: [nil, String, '-J', 'The JSON log (the .csv and .txt go beside it; default tmp/dropout_probe/<song>-<time>.json)'],
+      json: [nil, String, '-J', 'The JSON log (the .csv and .txt go beside it; default tmp/dropout_probe/<song>-<time>.json in the main checkout)'],
       gc: [:normal, Symbol, 'GC mode while playing: normal, or quiet (majors held off, as the console\'s `gc :quiet`)', %i[normal quiet]],
       system: [true, 'Run the LatencyProbe beside it (system stalls, load, CPU, memory)'],
       ticker: [false, "The LatencyProbe's Ruby ticker too (adds GVL traffic of its own)"],

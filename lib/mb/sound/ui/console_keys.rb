@@ -35,9 +35,29 @@ module MB
           # Returns the editing keys installed.
           def install
             return [] unless defined?(::Reline::LineEditor)
+            @console_mode ||= (STDIN.console_mode if STDIN.tty?) rescue nil
             ::Reline::LineEditor.prepend(self) unless ::Reline::LineEditor.ancestors.include?(self)
             BINDINGS.each { |seqs, func| seqs.each { |s| MB::Term::Input::RelineKeys.bind(s, func) } }
             @editing ||= MB::Term::Input::RelineKeys.install_editing_keys
+          end
+
+          # The terminal's mode when the console started (before Reline
+          # first read a line; nil if stdin wasn't a terminal): what a
+          # screen entered from a Reline key (Ctrl-], F2), while Reline
+          # holds the terminal raw, puts back when it leaves (see
+          # #mode_to_restore).
+          attr_reader :console_mode
+
+          # The mode a screen taking +input+ should put back when it
+          # leaves (MB::Term::Terminal#enter's +mode:+): the console's
+          # starting mode while +input+ is raw without echo (a line editor
+          # reading it: Ctrl-] or F2 from the console), else nil (the mode
+          # as it is).
+          def mode_to_restore(input)
+            return nil unless @console_mode && input.respond_to?(:echo?) && input.tty?
+            input.echo? ? nil : @console_mode
+          rescue SystemCallError, IOError
+            nil
           end
 
           # Ctrl-] or F2 outside the tiles: switches to the tiled screen

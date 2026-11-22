@@ -77,7 +77,7 @@ module MB
           on 'z', :zoom, help: 'zoom (again: back)'
           on 's', :split, :rows, help: 'split below, beside'
           on 'v', :split, :cols, help: 'split below, beside'
-          on 'x', :close, help: 'close (the REPL stays)'
+          on 'x', :close, help: 'close (the REPL stays; u brings it back)'
           on '=', :equalize, help: 'even out sizes'
           %i[left right up down].each do |dir|
             on [dir, :shift], :resize, dir, 1, help: 'resize by 1 (Ctrl-Shift: 5)', label: 'S-arrows'
@@ -428,6 +428,12 @@ module MB
         # MIDI bindings ({[type, number] => action}).
         def midi_map
           @midi.dup
+        end
+
+        # True when any MIDI binding is set (no copy: screens ask every
+        # frame).
+        def midi_bound?
+          !@midi.empty?
         end
 
         # A MIDI event (+type+ :note or :cc, +number+, +value+ 0..1):

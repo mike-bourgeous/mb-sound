@@ -123,7 +123,7 @@ enum { TONE_NAIVE = 0, TONE_SYNTH = 1, TONE_WAVETABLE = 2 };
 
 typedef struct { float r, i; } mb_cf;
 
-static ID id_phase, id_blep, id_noise, id_jump_buffer, id_jump_left, id_last_freq, id_last_width;
+static ID id_phase, id_blep, id_noise, id_jump_buffer, id_jump_left, id_last_freq, id_last_width, id_last_scan;
 static ID id_plan_start, id_plan_reset, id_note, id_frequency, id_state, id_ring1, id_ring2, id_table, id_plan_wavetable;
 static ID id_held, id_prev, id_plan_draw, id_settings;
 
@@ -566,6 +566,11 @@ static void run_tone(const int32_t *op, const struct regs *R, const double *sc, 
 	rb_ivar_set(state, id_last_freq, fr >= 0 ? DBL2NUM(R->p[fr][(n - 1) * (R->c[fr] ? 2 : 1)]) : freq_v);
 	VALUE width_v = rb_ary_entry(obj, 3);
 	rb_ivar_set(state, id_last_width, wr >= 0 ? DBL2NUM(R->p[wr][(n - 1) * (R->c[wr] ? 2 : 1)]) : width_v);
+	// and last_scan (a wavetable's scan position; the sound-design
+	// screen's live displays read it, ui-wave-perf-1)
+	if (kernel == TONE_WAVETABLE && n > 0) {
+		rb_ivar_set(state, id_last_scan, DBL2NUM(scr >= 0 ? (double)R->p[scr][(n - 1) * (R->c[scr] ? 2 : 1)] : scan_s));
+	}
 
 	RB_GC_GUARD(obj);
 	RB_GC_GUARD(phase_state);
@@ -2066,6 +2071,7 @@ void Init_fast_plan(void)
 	id_jump_left = rb_intern("@jump_left");
 	id_last_freq = rb_intern("@last_freq");
 	id_last_width = rb_intern("@last_width");
+	id_last_scan = rb_intern("@last_scan");
 	id_plan_reset = rb_intern("plan_reset");
 	id_note = rb_intern("note");
 	id_frequency = rb_intern("frequency");

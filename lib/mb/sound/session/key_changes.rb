@@ -20,6 +20,23 @@ module MB
           @transport.key
         end
 
+        # The session key at timeline position +pos+ as planned: the key
+        # map's key there, changed by the key and mode changes queued to
+        # land by then (a mode given as a param counts once it lands).
+        # Generators following the key read it a beat ahead of each cycle
+        # (Generative::KeyFollow; gen-ux-1).  Reads the queue without the
+        # render lock (a copy; the render thread calls this).
+        def planned_key_at(pos)
+          k = @transport.key_at(pos)
+          @changes.dup.each do |c|
+            next unless c.kind == :key && c.time && c.time <= pos
+            data = c.entry&.data or next
+            k = k.with_root(data[:root]) if data[:root]
+            k = k.with_mode(data[:mode]) if data[:mode].is_a?(Symbol)
+          end
+          k
+        end
+
         # Changes the root (+root+: :ab, 'F#', Ab2, a pitch class) and/or
         # the mode (+mode+: a scale name) of the session key at the launch
         # point (+on:+, +in:+, +at:+; right away by default) or

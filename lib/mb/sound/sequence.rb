@@ -23,6 +23,7 @@ require_relative 'sequence/fill_map'
 require_relative 'sequence/tempo_map'
 require_relative 'sequence/transport'
 require_relative 'sequence/timeline_node'
+require_relative 'sequence/timeline_hold_fade'
 require_relative 'sequence/tempo_node'
 require_relative 'sequence/node_duration'
 

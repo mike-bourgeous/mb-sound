@@ -61,8 +61,9 @@ module MB
 
         # Changes whose landing reads which players are playing, fading
         # out, or stopped (a swap's target, a resume's stopped player, the
-        # stopped players a forget discards; see #state_change?).
-        STATE_KINDS = %i[swap resume forget].freeze
+        # stopped players a forget discards, whether a stop finds a player
+        # already fading out; see #state_change?).
+        STATE_KINDS = %i[swap resume forget stop].freeze
 
         # True for a change whose action depends on the players' state
         # where it lands (STATE_KINDS): the buffer splits on its frame, so
@@ -77,12 +78,20 @@ module MB
         # `.ratchet(2)` in the same bar played the ratchet at 367 frames,
         # since the swap fell through to the queued launch, and the plain
         # kit at 800, where it swapped the stopped player).
+        #
+        # A stop splits too (fix-fuzz-788022, batch 39's soak seed 788022):
+        # landing at its span's start, a stop for a later frame of the span
+        # moved the stop time of a player already fading out (one a
+        # replacement's crossfade was handing over from) back to that
+        # fade's start, so a cut ended the fade at the span's first frame,
+        # up to a buffer before the stop, at 367 frames, and on the stop's
+        # frame at 800, where the stop began a buffer.
         def state_change?(c)
           STATE_KINDS.include?(c.kind)
         end
 
         def timeline_change?(c)
-          c.kind == :seek || c.kind == :tempo || c.kind == :tempo_base || (c.kind == :restore && (c.subject == :timeline || c.subject == :tempo))
+          c.kind == :seek || c.kind == :tempo || c.kind == :tempo_base || c.kind == :pause || c.kind == :play_on || (c.kind == :restore && (c.subject == :timeline || c.subject == :tempo))
         end
 
         # The undo subject of a seek (see Undo#snapshot_subject).
@@ -130,6 +139,8 @@ module MB
           case ArgTypes.classify(target)
           when :number, :ratio
             return @transport.bar_position(target) if target >= 1
+            # (ux-friction-1: the maintainer's `seek 0` for the start)
+            raise ArgumentError, "seek #{target.inspect}: bars count from 1, so the start is seek 1 (or seek 0.bars, a length from the start)" if target >= 0
           when :duration, :seconds, :samples
             pos = target.to_whole_notes(sample_rate: output_open? ? sample_rate : 48000, transport: @transport).to_r
             return pos if pos >= 0
@@ -261,7 +272,7 @@ module MB
         # between samples landed inside the first piece, so the state was
         # copied up to a buffer before the old graph stopped; SessionFuzz's
         # :carry relation found it at 137.5 BPM).  Changes reading the
-        # players' state (#state_change?: swaps, resumes, forgets) split on
+        # players' state (#state_change?: swaps, resumes, forgets, stops) split on
         # the floor sample too, so they land after the players that ended
         # before them retired (fix-808-fuzz).
         #

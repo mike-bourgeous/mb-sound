@@ -132,7 +132,7 @@ module MB
             state[:snap] = s
             w = wizard
             unless w
-              c.text(0, 0, c.fit('the tuner is closed: tuner (or NAV h) opens it', c.w), :dim)
+              c.text_fit(0, 0, 'the tuner is closed: tuner (or NAV h) opens it', c.w, :dim)
               return
             end
             draw_steps(c, w)
@@ -150,14 +150,14 @@ module MB
             top = pick - rows + 1 if pick >= top + rows
             top = tops[w.state] = top.clamp(0, [list.length - rows, 0].max)
             if list.empty?
-              c.text(0, 2, c.fit(empty_text(w), c.w), :dim)
+              c.text_fit(0, 2, empty_text(w), c.w, :dim)
             else
               shown = list[top, rows]
               width = [shown.map { |x| x.name.to_s.length }.max.to_i + 1, (c.w * 0.45).to_i].min
               shown.each_with_index { |x, i| draw_row(c, 2 + i, w, x, width, top + i == pick, state) }
               # (the cursor's entry last: the background works on it first)
               w.state == :synth ? want_score(w, list[pick], state) : w.summary(list[pick])
-              c.text(0, 2 + rows, c.fit("  +#{list.length - top - rows} more", c.w), :dim) if top + rows < list.length
+              c.text_fit(0, 2 + rows, "  +#{list.length - top - rows} more", c.w, :dim) if top + rows < list.length
             end
             draw_detail(c, c.h - detail, w, list[pick], detail) if detail > 0 && !list.empty?
           end
@@ -174,7 +174,7 @@ module MB
               x = c.text(x, 0, " #{w.synth.name}", :name) if st == :synth && w.synth && w.state == :tuning
             end
             right = w.state == :reference ? " #{w.folder}" : " track #{w.track.inspect}"
-            c.text([c.w - right.length, x + 1].max, 0, c.fit(right, [c.w - x - 1, 0].max), :dim) if c.w - x > 12
+            c.text_fit([c.w - right.length, x + 1].max, 0, right, [c.w - x - 1, 0].max, :dim) if c.w - x > 12
           end
 
           def draw_find(c, y, w, state)
@@ -185,12 +185,12 @@ module MB
             elsif !q.empty?
               c.line(y, ['find ', :dim], [q, :text], [" (#{n}; Backspace: less)", :dim])
             elsif w.state == :reference && w.scanning?
-              c.text(0, y, c.fit("#{n} references so far: reading #{w.folder}…", c.w), :dim)
+              c.text_fit(0, y, "#{n} references so far: reading #{w.folder}…", c.w, :dim)
             elsif w.state == :reference
-              c.text(0, y, c.fit(state[:mode] ? "#{n} references: Enter pick  a listen (then Up Down play each)  / find  d folder  r again  Esc NAV" : "#{n} references (in: NAV h, or Enter on this pane)", c.w), :dim)
+              c.text_fit(0, y, state[:mode] ? "#{n} references: Enter pick  a listen (then Up Down play each)  / find  d folder  r again  Esc NAV" : "#{n} references (in: NAV h, or Enter on this pane)", c.w, :dim)
             else
               note = Note.new(w.note.to_i).name rescue '?'
-              c.text(0, y, c.fit(state[:mode] ? "#{n} synths on #{note}: Enter tune  a listen  b A/B  / find  e edit the line  Esc back" : "#{n} synths (in: NAV h)", c.w), :dim)
+              c.text_fit(0, y, state[:mode] ? "#{n} synths on #{note}: Enter tune  a listen  b A/B  / find  e edit the line  Esc back" : "#{n} synths (in: NAV h)", c.w, :dim)
             end
           end
 
@@ -207,20 +207,20 @@ module MB
             kind = w.state == :reference ? KIND_MARKS[x.kind] : SYNTH_MARKS[x.kind]
             c.text(1, y, kind.to_s, :dim)
             role = x.respond_to?(:problem) && x.problem ? :dim : (on ? :key : :name)
-            col = c.run(3, y, c.pad(x.name.to_s, width), role, reverse: on && state[:mode])
+            col = c.run_pad(3, y, x.name.to_s, width, role, reverse: on && state[:mode])
             col += 1
             if w.state == :reference
               secs = x.seconds ? format('%5.2f s', x.seconds) : '    ? s'
               col = c.text(col, y, secs, :dim) + 2
               sm = w.summary(x)
               txt = sm ? sm.to_s : '…'
-              c.text(col, y, c.fit(txt, [c.w - col, 0].max), sm&.error ? :warn : :text)
+              c.text_fit(col, y, txt, [c.w - col, 0].max, sm&.error ? :warn : :text)
             else
               sc = w.score(x, want: false)
               score = sc.is_a?(HandTune::Wizard::Score) && sc.total ? format('L3 %5.2f', sc.total) : (sc.is_a?(HandTune::Wizard::Score) && sc.error ? 'L3   err' : '        ')
               col = c.text(col, y, score, sc&.total ? :ok : :dim) + 2
               about = x.problem ? "can't load: #{x.problem}" : x.about.to_s
-              c.text(col, y, c.fit(about, [c.w - col, 0].max), x.problem ? :warn : :dim)
+              c.text_fit(col, y, about, [c.w - col, 0].max, x.problem ? :warn : :dim)
             end
           end
 
@@ -276,7 +276,7 @@ module MB
               elsif i == lines.length - 1 && room - i > 1
                 c.wrap(l, y: y + 1 + i, rows: room - i, role: :text)
               else
-                c.text(0, y + 1 + i, c.fit(l, c.w), i.zero? ? :text : :dim)
+                c.text_fit(0, y + 1 + i, l, c.w, i.zero? ? :text : :dim)
               end
             end
           end
@@ -487,9 +487,9 @@ module MB
             end
             keys = TuneStrip.keys.zip(ACTIONS).map { |(k, _), a| "#{k} #{SHORT[a]}" }.join('  ')
             if c.h >= 2
-              c.text(0, 1, c.fit("keys (inspector): #{keys}  Esc NAV", c.w), :dim)
+              c.text_fit(0, 1, "keys (inspector): #{keys}  Esc NAV", c.w, :dim)
             else
-              c.text(x + 2, 0, c.fit(keys, [c.w - x - 2, 0].max), :dim)
+              c.text_fit(x + 2, 0, keys, [c.w - x - 2, 0].max, :dim)
             end
           end
 

@@ -28,9 +28,8 @@ module FormatWords
 
   # Files at the edges, where format words belong, with why.
   EDGES = {
-    'lib/mb/sound/sample/riff.rb' => 'the WAV chunk reader and fixture writer (acid, smpl chunks)',
-    'lib/mb/sound/sample/loop_info.rb' => 'the loop file interpreter: reads the acid and smpl chunks, names them in provenance',
-    'lib/mb/sound/sample/source.rb' => 'a file\'s description: which chunks were read (strc once Riff reads it)',
+    'lib/mb/sound/sample/riff.rb' => 'the WAV chunk reader and fixture writer (acid, smpl, strc chunks)',
+    'lib/mb/sound/sample/loop_info.rb' => 'the loop file interpreter: reads the acid, smpl, and strc chunks, names them in provenance',
     'lib/mb/sound/midi/control_map.rb' => 'the exporter of controller maps as ACID XML (to_acid_xml)',
     'lib/mb/sound/script_runner.rb' => 'the scripts\' --acid-xml option, the exporter\'s edge',
     'lib/mb/sound/help/content/topics.rb' => 'help :meta\'s importer example, a provenance value (`format: :acd`)',

@@ -26,6 +26,34 @@ RSpec.describe(MB::Sound::UI::Feed, :aggregate_failures) do
     expect(kept.tracks.map(&:clip)).to eq(['roll'])
   end
 
+  # ui-perf-1: a painter taking the snapshot while the output write blocks
+  # (as with 800-frame buffers at 60/s) comes after that buffer's capture
+  # point, so by default every other buffer publishes; Feed.every_buffer
+  # captures whenever none is pending, so every buffer publishes, with one
+  # capture per snapshot either way (no extra render-thread garbage).
+  it 'publishes every buffer for a painter taking during the write with Feed.every_buffer, one capture per snapshot' do
+    session.ui_feed = feed
+    take_in_write = output.method(:write)
+    f = feed
+    output.define_singleton_method(:write) { |data| take_in_write.call(data).tap { f.take } }
+    captures = 0
+    allow(session).to receive(:ui_parts).and_wrap_original { |m| captures += 1; m.call }
+    run = lambda do |eb|
+      old = described_class.every_buffer
+      described_class.every_buffer = eb
+      p0 = feed.published
+      c0 = captures
+      20.times { session.process_buffer }
+      [feed.published - p0, captures - c0]
+    ensure
+      described_class.every_buffer = old
+    end
+    expect(run.(false)).to eq([10, 10])
+    published, caps = run.(true)
+    expect(published).to be >= 19
+    expect(caps).to eq(published)
+  end
+
   it 'publishes a snapshot after a buffer only when the last one was taken' do
     session.ui_feed = feed
     session.add(220.hz.triangle.at(-12.db), name: :tri)
@@ -187,6 +215,58 @@ RSpec.describe(MB::Sound::UI::Feed, :aggregate_failures) do
         tail = all.last(100)
         expect(ring.to_a[0].to_a.last(tail.length)).to eq(tail)
       end
+    end
+
+    # ui-perf-2 round 3: Kernels.circular_read instead of a concatenate of
+    # views, frozen SFloats of the ring's length, oldest first
+    it 'gives frozen copies oldest first, the same under every kernel mode' do
+      ring = described_class.new(2, 64)
+      [40, 50, 64, 3].each_with_index do |n, k|
+        ring.write([Numo::SFloat.new(n).seq(k * 100), Numo::SFloat.new(n).seq(-k * 100, -1)])
+        a = ring.to_a
+        expect(a).to be_frozen
+        expect(a.map(&:frozen?)).to eq([true, true])
+        expect(a.map(&:length)).to eq([64, 64])
+        old = MB::Sound::Kernels.mode
+        MB::Sound::Kernels.mode = :ruby
+        ruby = ring.to_a
+        MB::Sound::Kernels.mode = old
+        expect(ruby.map(&:to_a)).to eq(a.map(&:to_a))
+      end
+      expect(ring.to_a[0][-3..].to_a).to eq([300.0, 301.0, 302.0])
+    end
+  end
+
+  # ui-perf-2 round 3: the render thread allocated two objects per knob per
+  # snapshot; unchanged knobs now keep their KnobValues and the Array
+  describe 'knob values' do
+    def snap = (session.process_buffer; feed.take)
+
+    it 'keeps the Array while no knob changes, and the unchanged KnobValues when one does' do
+      session.knob(:cut, 800, range: 100..8000, curve: :exp, unit: 'Hz')
+      session.knob(:drive, 0.3, range: 0.0..1.0)
+      session.ui_feed = feed
+      feed.knob_refs = session.knobs.to_a
+      a = snap.knobs
+      expect(a.map(&:name)).to eq(%i[cut drive])
+      expect(a).to be_frozen
+      expect(snap.knobs).to equal(a)
+      feed.knob_refs = session.knobs.to_a # (a new poll's refs, the same knobs)
+      expect(snap.knobs).to equal(a)
+
+      MB::Sound::Session.with_context(session: session) { MB::Sound.turn(:cut, 1200) }
+      b = snap.knobs
+      expect(b).not_to equal(a)
+      expect(b.map(&:value)).to eq([1200, 0.3])
+      expect(b[1]).to equal(a[1])
+      expect(b[0].spec).to equal(a[0].spec)
+
+      session.knob(:wet, 0.5, range: 0.0..1.0)
+      feed.knob_refs = session.knobs.to_a
+      c = snap.knobs
+      expect(c.map(&:name)).to eq(%i[cut drive wet])
+      feed.knob_refs = session.knobs.to_a.first(1)
+      expect(snap.knobs.map(&:name)).to eq(%i[cut])
     end
   end
 

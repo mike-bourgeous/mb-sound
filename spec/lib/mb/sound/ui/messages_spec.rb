@@ -46,6 +46,31 @@ RSpec.describe(MB::Sound::UI::Messages, :aggregate_failures) do
     expect(@tiles.tiler.layout.root).to eq(before.root)
   end
 
+  # (ui-phase1-1, the plan's Phase 1 item 8)
+  it 'opens the picked message in full with Enter in the messages pane, e its ui.message line' do
+    pane = MB::Sound::UI.panes.fetch(:messages)
+    st = { mode: true }
+    expect(pane.key_action(:open_message, st)).to eq('no messages to open')
+    expect(pane.key_action(:edit_line, st)).to eq('no messages')
+    @tiles, @term = ui_tiles(:tiles, rows: 40, cols: 120, source: -> { ui_fake_snapshot })
+    MB::Sound::UI.instance_variable_set(:@tiles, @tiles)
+    expect(@term.wait_for('t> ')).to eq(true)
+    expect { %w[first second third].each { |w| warn "spec warning: the #{w} one" } }.to output(/third/).to_stderr
+    expect(@term.wait_for('the third one')).to eq(true)
+    @tiles.enter(:messages)
+    st = @tiles.instance_variable_get(:@states)[:messages]
+    expect(wait_until { @tiles.router.mode == :pane && st[:mode] }).to eq(true)
+    @term.write("\e[A") # (Up: the next older is the picked one, the bottom shown)
+    expect(wait_until { st[:scroll] == 1 }).to eq(true)
+    expect(pane.key_action(:edit_line, st)).to eq(MB::Sound::UI::PaneKeys::Paste['ui.message 2', 'on the console line: edit it, Enter runs it'])
+    @term.write("\r")
+    expect(wait_until { @tiles.tiler.layout.panes.include?(:message) }).to eq(true)
+    expect(@term.wait_for(/#2 warn/)).to eq(true), @term.text
+    expect(@term.text).to include('the second one')
+    expect(pane.key_action(:open_message, st)).to eq(MB::Term::Input::Action.of(:message, 2))
+    expect(MB::Sound::UI::Panes::Messages.mode_keymap.entries.find { |b| b.chord == [:enter, []] }&.action).to eq(:open_message)
+  end
+
   # The painter notices messages on its next frame, which may come before
   # or after an action's own flash; holding the screen's lock fixes the
   # order (the 2026-10-17 Mac failure of tiles_keys_spec's capture example,

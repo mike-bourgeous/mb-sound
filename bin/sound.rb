@@ -63,6 +63,13 @@ end
 # playing (see MB::Sound::LiveMethods)
 MB::Sound.live = true
 
+# Every Pry result printed requires io/console again, and Ruby looks a C
+# extension's feature up on the load path each time, holding the GVL: over
+# a network mount of the checkout that held it up to 135 ms a line
+# (dropouts).  Features already required return at once (see
+# MB::Sound::RequireOnce).
+MB::Sound::RequireOnce.install
+
 # Shared Tee buffer checks are off unless MB_SOUND_CHECK_SHARED is set; here
 # they only warn, so a live set keeps playing (see GraphNode::Tee)
 MB::Sound::GraphNode::Tee.shared_check = :warn if MB::Sound::GraphNode::Tee.shared_check
@@ -99,6 +106,17 @@ MB::Sound::Session::Cue::Prefs.apply # the saved phones blend (cue_mix 0.3, save
 MB::Sound::Help.first_level_check # first launch only, in a terminal, with a sound card
 puts MB::Sound::Help.welcome, ''
 
+# MB_SOUND_DROPOUT_PROBE=1 probes the whole session's dropouts, as it does for
+# scripts (`dropouts :stop`, or quitting, prints the report; see
+# MB::Sound::DropoutMethods)
+MB::Sound::DropoutMethods.start_from_env
+
+# A line when the sound card opens (backend, rate, buffer, and how many frames
+# it pulls at a time), and a warning when it pulls more than the buffer; checked
+# after every console line, on the console's thread (MB::Sound::DeviceReport)
+MB::Sound::DeviceReport.poll
+Pry.config.hooks.add_hook(:after_eval, :mb_sound_device_report) { |_result, _pry| MB::Sound::DeviceReport.poll }
+
 # The take: an always-on log of every line typed and exactly where each change
 # it made landed (see MB::Sound::Take); `take.save` writes a script that
 # replays the performance.  Started after warm_up, so it records the random
@@ -125,9 +143,17 @@ MB::Sound::UI.install_pry!
 # Continuation lines of Reline's multiline editor get a dim prompt naming the
 # open constructs, and Enter runs a complete command wherever the cursor is
 # (Alt-Enter for a new line; see MB::Sound::UI::Prompt and
-# MB::Sound::UI::EnterSubmits)
+# MB::Sound::UI::EnterSubmits); deleting the first word of a line keeps the
+# space after it (MB::Sound::UI::FirstLineSpaces), and Backspace after a
+# continuation line's indentation joins it to the line above
+# (MB::Sound::UI::BackspaceJoins).  Alt-Up/Alt-Down on a number steps it and
+# runs the line again; Alt-Shift-Left/Right jump between numbers
+# (MB::Sound::UI::NudgeKeys)
 MB::Sound::UI::Prompt.install!
 MB::Sound::UI::EnterSubmits.install!
+MB::Sound::UI::FirstLineSpaces.install!
+MB::Sound::UI::BackspaceJoins.install!
+MB::Sound::UI::NudgeKeys.install!
 
 # Pry 0.16 reads with Reline's multiline editor, which treats piped input as
 # one paste and evaluates it as a single block (so `printf 'a\nb\n' |

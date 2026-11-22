@@ -84,6 +84,7 @@ module MB::Sound
       type: [nil, 'With --tiles: console lines (comma-separated) typed into the REPL one by one, measuring the buffer gaps around each', String],
       type_every: [2.0, 'Seconds between --type lines', Float],
       warm_console: [true, "Warm up the console's line path first (UI.warm_up_console, as bin/sound.rb does)"],
+      perf: [false, 'With --tiles: record the ui.perf frame instruments while the screen is on (what they cost the audio)'],
     ) { |_args, p|
       tiles = p.tiles || !p.design.nil?
       ENV['AUDIO_PROFILE'] = p.latency.to_s if p.latency
@@ -195,6 +196,8 @@ module MB::Sound
           threads << band.host.thread
         end
         FastUI::GVLProbe.start(threads)
+        # (after the probe: ui.perf then leaves it to this script)
+        band.start_perf if p.perf && tiles && on && band.perf.nil?
         x0 = underruns.call
         gc0 = [GC.count, GC.stat(:time)]
         stop_at = [start + elapsed + window, start + p.seconds].min

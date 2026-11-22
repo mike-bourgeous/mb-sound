@@ -19,7 +19,9 @@ module MB
         player on a shared timeline; `play` is the foreground version
         (waits until the sound ends; Ctrl-C to stop).  Commands return
         journal entries that say where they land.  Sounds end through
-        envelopes, clips, `until` (alias `for`: `.for(2.bars)`), or `stop`.  `play`, `bg`, and `render`
+        envelopes, clips, `until` (alias `for`: `.for(2.bars)`), or `stop`
+        (`fadeout :pad` fades one track out over 4 bars; `outro` ends
+        everything).  `play`, `bg`, and `render`
         take graphs and more: files, audio arrays, Samples (once), Slices
         (one by one), clips (on their instrument, e.g. a chop's slices, or
         a soft saw), grids (a TR-909, or a TR-808 for its own voices like
@@ -32,7 +34,7 @@ module MB
         (no 45-80 ms stalls; memory grows about 1-2 MB/s until `gc
         :normal`; `now` shows it).
       TEXT
-      commands :bg, :stop, :outro, :panic, :players, :stopped, :resume, :forget, :play, :wait, :master_gain, :monitor_gain, :warm_up, :gc
+      commands :bg, :stop, :outro, :fadeout, :panic, :players, :stopped, :resume, :forget, :play, :wait, :master_gain, :monitor_gain, :warm_up, :gc
       dsl :at, :until, :for, :and_then
       note :method_modules, :scripts
       see :sets, :now, :files
@@ -96,6 +98,12 @@ module MB
         `440.hz` is a Pitch; oscillator methods make a Tone (antialiased by
         default, `a*` twins are naive).  Phases are in cycles.  Lengths
         (`250.ms`, `1.n8`) and intervals (`7.semitones`) work everywhere.
+        LFOs (`0.2.hz.lfo`, `1.bar.lfo`) start where their shape starts: a
+        sine or triangle in the middle, rising; a square at its top; a saw
+        in the middle, jumping to the bottom halfway (beat 3 of
+        `1.bar.lfo.saw`).  `1.bar.lfo.drumramp` (a saw with
+        `with_phase(0.5)`) starts at the bottom and jumps on the downbeat;
+        `with_phase` moves any shape's start (`help :lfo` has the table).
       TEXT
       commands :silence, :impulse
       dsl :ramp, :square, :triangle, :sine, :pulse, :pwm, :fm, :pm, :fm_feedback, :sync, :unison, :swarm,
@@ -107,6 +115,9 @@ module MB
       end
       example 'FM bell' do
         bg :try, 440.hz.fm(660.hz.at(400) * env([[1, 0], [0, 1.5, 60]])).at(-16.db) * env([[1, 0.005], [0, 2, 40]])
+      end
+      example 'a filter sweep that rises each bar and jumps back on the downbeat' do
+        bg :try, 110.hz.saw.at(-16.db).lp4(1.bar.lfo.drumramp.at(150..2000)).until(2.bars)
       end
     end
 
@@ -711,8 +722,9 @@ module MB
     Help.topic :loops, 'Loop files and tempo-following loops', group: :sound do
       about <<~TEXT
         Loop libraries: `Sample['Funk/break_98bpm.wav']` reads a loop with
-        its metadata: ACID chunks (tempo, beats, meter, root, one-shot),
-        `smpl` (root, loop points), cue points (`sample.markers`), FLAC
+        its metadata: ACID chunks (tempo, beats, meter, root, one-shot,
+        stretch markers), `smpl` (root, loop points), cue points
+        (`sample.markers` are the stretch markers, else the cue points), FLAC
         tags, then tempo and key words in file and folder names ("98bpm",
         "98 BPM", "Am_120"; a name's tempo counts only when the file is a
         whole number of its beats).  Loops loop the whole file; one-shots
@@ -735,10 +747,35 @@ module MB
         words or how noisy it sounds; `stretch: :slice` or `:spectral`
         to say); `follow(:resample)` lets the pitch follow
         the tempo like a varispeed.  `.stretch(r, mode: :slice)` cuts at
-        the hits (markers, else onsets, else the 16th grid) and starts
+        the hits (markers, else onsets, else the 16th grid; `slices:
+        :transients` cuts only at attacks, the clear ones and the softer
+        ones a marker stands for, so no hit is cut in two) and starts
         each slice at its stretched time, attacks copied exactly:
-        slowing down leaves a gap after each hit (`fill: :stretch` draws each
-        decay out instead), speeding up truncates with a 4 ms fade.
+        slowing down leaves a gap after each hit (`fill: :stretch` draws
+        each slice out to the next hit instead: evenly, so what is inside
+        it stays in time, or, for a hit that dies down, the hit whole and
+        its tail drawn out; `fill: :even` and `:decay` say which),
+        speeding up truncates with a 4 ms fade.  `slot_fade: 2/3r,
+        fade_law: :power` makes that a crossfade over two thirds of each
+        cut slice's slot (its time until the next slice starts), at
+        equal power, into what led up to the next hit, so a soft hit
+        just before a cut keeps its place.  `fill: :repeat, slot_fade:
+        1/2r, fade_law: :parabola` fills a slowed slice by playing it
+        twice, crossfaded in the middle of its slot, instead of a gap
+        (a noisy sound stays smooth).  `positions:` (one per cut)
+        puts each slice at a place of its own: a groove.
+
+        A file's own loop info counts: a loop with stretch markers is
+        sliced at them, and a file that declares itself a one-shot
+        (`sample.declared_one_shot?`) is never stretched by `follow`: it
+        plays as recorded from each loop start
+        (`stretch: :none`; give it a length to repeat at with
+        `shot.with(bpm: 120)` or a clock, `shot.clocked(2.seconds)`).
+        `stretch: { mode: :spectral, transients: :markers }` runs the
+        phase vocoder with its attacks at the markers instead of at
+        detected onsets; add `confirm: true` to keep only the markers
+        that have an attack, each on its attack (for `stretch: :slice`
+        too: no cut inside a hit's decay).
       TEXT
       commands :loops
       dsl :follow
@@ -782,7 +819,34 @@ module MB
         `overlap:`, `shape: :paul` (a smooth window for washes), and `link:
         false` (random phases per channel) for both; for voices try
         `.stretch(8, mode: :paul, overlap: 2,
-        shape: :paul, link: false)`.
+        shape: :paul, link: false)`.  At long ratios the vocoder's
+        window would become a buzz (the stretch repeating itself 11.7
+        times a second), so from 1.5x up (fully from 2x) everything that
+        is not a clear partial gets random phases: noise stays noise
+        while partials and hits stay as they are (`noise: 0` for the
+        plain vocoder, `noise: 1` at any ratio).  `randomize: 0.3` to
+        `0.6` loosens every phase
+        (`randomize: 1` is a wash that keeps its hits), and `transients:
+        0.5` (an amount, 0 to 1) keeps less of the sound around each hit
+        unstretched.  A sample that loops (a loop file,
+        `.looped`, anything `follow` plays) gets a spectral stretch
+        that is a loop itself: read round and round, its end flowing
+        into its start (`wrap: true` asks for it, `wrap: false` gives a
+        stretch with its own ends).  `lock: :shape` keeps a tone's
+        waveform as it stretches (its harmonics in step with each
+        other: what a distortion after it hears); a loop's phases close
+        evenly over the loop, or over `closure_length: 0.5` before its
+        end, or with a pitch change of a few cents (`closure: :shift`).
+        `follow(stretch: { mode: :spectral, live: true })` runs
+        the vocoder as the loop plays: any tempo, nothing restretched.
+        The vocoder finds the attacks it keeps sharp by itself
+        (`transients: true`); `transients: :markers` takes the sample's
+        markers instead (a loop file's stretch markers; detected
+        onsets when it has none), and `transients: [0, 1.n8, 13230.samples]`
+        any positions; `transients: false` is the plain vocoder.
+        `confirm: true` keeps only the markers or positions with a
+        detected attack within 15 ms (`confirm: 5.ms` for another
+        reach), each moved onto its attack.
         They are offline edits: a new Sample, made once; results over 30
         s read with `mips: :octave` (smaller playback tables).
       TEXT
@@ -831,6 +895,9 @@ module MB
         them without wrapping (notes that leave drop out; live streams only
         shift later).  Grid kits take the same transforms, row by row
         (`beat.reverse`, `beat.swing(0.6)`, `beat.humanize`).
+        `clip.echo(3.n16, 3, pitch: 7.st)` bakes echoes into the clip
+        (a generator keeps generating, echoed cycle by cycle); an Array of
+        gaps is cycled like `pitch:` (`echo([3.n32, 5.n32], 4)`).
         `clip.show` prints a clip as text: `:grid` (grid characters, so a
         kit's `show.rows` parse back), `:roll` (a piano roll), or
         `:degrees` (scale degrees in the session key).
@@ -880,13 +947,19 @@ module MB
         `knob(:reg).choose(A2..A4, A3..A5)` for `range:`), read once per
         cycle a `lead:` (one beat) before it starts, so a `turn` steers the
         next cycle and takes replay it; `generate(1.bar, busy: knob(:busy))
-        { |cycle, dice, busy:| }` hands them to your block.  The demo
+        { |cycle, dice, busy:| }` hands them to your block.  They follow
+        the session key live: `motifs(scale(:phrygian), 8)` (a scale
+        without a root) plays phrygian on whatever root `key` sets, cycle by
+        cycle; no source at all (`motifs(8)`, `melody(8, vary: true)`,
+        `strikes`) is the key's own scale; `progression(:i, :VI, :III,
+        :VII)` is a chord a bar on degrees of the key, so the lines re-voice
+        into each chord and move when the key does.  The demo
         songs' and genre templates' generators are in the library:
         `L.gen` (`L.gen.koto_motif(seed: 3)`, `play L.gen.techno_beat`)
         and `L.flow` for their section chains (`help :library`);
         `lesson :generative` puts them on tracks step by step.
       TEXT
-      commands :tones, :chord, :weights, :harmony, :generate, :strikes, :dice, :melody, :motifs, :beats, :rhythm
+      commands :tones, :chord, :weights, :harmony, :progression, :generate, :strikes, :dice, :melody, :motifs, :beats, :rhythm
       note :generative
       see :sequences, :random, :long_form
       example 'a melody that blurs and changes key' do
@@ -898,6 +971,12 @@ module MB
         h = scale(:dorian, :d).weights + chord(:min7, root: :d).weights * 1.5
         tune = motifs(h, 8, form: %i[a a b a], answer: { b: :a }, range: A3..A5, around: D4)
         bg :try, tune.synth(voices: 2) { |v| v.hz.triangle * v.env(0.005, 0.2, 0.3, 0.2) }.at(-14.db)
+      end
+      example 'motifs over a chord progression, following the key' do
+        key :a, :minor
+        tune = motifs(progression(:i, :VI, :III, :VII), 8, range: A3..A5)
+        bg :try, tune.synth(voices: 2) { |v| v.hz.triangle * v.env(0.005, 0.2, 0.3, 0.2) }.at(-14.db)
+        key :d, at: bar(3)
       end
       example 'an evolving beat steered by a knob' do
         knob :energy, 0.3
@@ -956,13 +1035,17 @@ module MB
 
     Help.topic :schedule, 'Scheduling', group: :time do
       about <<~TEXT
-        Blocks on the Session timeline: commands inside them land exactly at
-        the block's time, and each block is one undo step.  `at_bar`,
-        `after`, and `every` take launch points too (`at_bar in: 2.beats`,
-        `every 1.n4, on: :beat`) and return a handle that prints when it
-        runs and has `cancel`.  `reset_scheduler` (or `panic`, which also
-        stops the players) cancels everything scheduled, stops a song
-        form, and replaces a stuck scheduler.
+        Blocks on the Session timeline.  `at_bar`, `after`, `every`, and
+        `at_marker` return a handle: `.cancel` takes the block back
+        (`ticks = every(1) { ... }; ticks.cancel`), `cancel` alone cancels
+        every scheduled block, `scheduled` lists them, and
+        `reset_scheduler` (or `panic`, which also stops the players)
+        cancels everything, stops a song form, and replaces a stuck
+        scheduler.  `cancel queued: :bass, kind: :stop` takes back a change
+        still waiting to land (the queue pane's x; one undo step).
+        Commands inside a block land exactly at its time, and each block is
+        one undo step.  `at_bar`, `after`, and `every` take launch points
+        too (`at_bar in: 2.beats`, `every 1.n4, on: :beat`).
       TEXT
       commands :at_bar, :after, :every, :scheduled, :cancel, :reset_scheduler, :marker, :at_marker
       note :method_modules
@@ -1009,13 +1092,16 @@ module MB
         notes playing on and the old effect's tail ringing out (one undo
         step); `fx :keys, :off` takes it out, `fx :keys` says what it is.
         `untrack :clap` removes a track from the set (it stops now; undo
-        brings it back; d twice in the tracks pane).
+        brings it back; d twice in the tracks pane).  `clear_set` stops
+        everything and takes out the whole set (tracks, scenes, flow,
+        knobs, buses, master chain; tempo and key stay), one undo step;
+        a `demo` does it first.
         A track's insert is its `master { }`: a Proc takes the track's signal,
         `fx :drums, -> { it.softclip(0.1, 0.9).limiter(ceiling: -6.db) }`.
         In `ui :sound` the library picker's Enter on an effect does this
         for the inspected track.
       TEXT
-      commands :track, :tracks, :untrack, :fx, :scene, :scenes, :go, :launch, :tweak, :quant, :undo, :redo!, :changes, :swap
+      commands :track, :tracks, :untrack, :clear_set, :fx, :scene, :scenes, :go, :launch, :tweak, :quant, :undo, :redo!, :changes, :swap
       note :arrangement
       see :flow, :knobs, :now, :library
       example 'two scenes' do
@@ -1049,14 +1135,23 @@ module MB
         same name) with labels, gotos, and picks decided at commit points;
         perform it with loop!, onward, goto, skip, finish, practice, seek.
         `flow` alone shows it (where it is, what comes next, how to end
-        it); `start` (or `play`, `go` with nothing) plays the loaded flow
-        and `pause` (NAV Space) toggles.  `outro in: 4.bars` and `stop
-        :all` end the flow too; `go :scene` during it seeks the flow to
-        the next section playing that scene (else the nearest behind;
+        it), `sections` lists its sections like `players` (the one playing,
+        the next), `section` alone names the one playing; `start` (or
+        `play`, `go` with nothing) plays the loaded flow (its first
+        section's tracks start together, first notes included, once the
+        last is built: "starting: building 4 tracks ...") and `pause` (NAV
+        Space) toggles: the bar stops, sounding notes
+        release, loops and drones fade out and hold their place, and
+        echoes and reverbs ring out; playing on doesn't retrigger notes
+        (`start resync: true` puts tempo-synced LFOs back on the grid).
+        `suspend` is the old freeze (silence, nothing renders).  `outro
+        in: 4.bars` and `stop :all` end the flow too; `go :scene` during
+        it seeks the flow to the next section playing that scene (else the
+        nearest behind;
         `go :drop, section: :drop2` picks one; a scene no section plays
         ends the flow: you're driving).
       TEXT
-      commands :flow, :start, :pause, :play_form, :section, :loop!, :onward, :goto, :skip, :finish, :practice, :seek, :marker, :meter
+      commands :flow, :start, :pause, :play_form, :section, :sections, :loop!, :onward, :goto, :skip, :finish, :practice, :seek, :marker, :meter, :suspend
       note :arrangement
       see :sets, :long_form
       example 'a tiny song form' do
@@ -1122,23 +1217,32 @@ module MB
       about <<~TEXT
         `demo` loads a whole set into the session, paused at bar 1: Night
         Bus (bin/songs/night_bus_flow.rb), tech house at 126 BPM with 12
-        tracks, 12 scenes, 5 knobs, a master chain, and its song form.
+        tracks, 12 scenes, 5 knobs, a master chain, and its song form;
+        `demo :tunnel_vision` loads the other set (the list is below).
         Nothing plays until you do something: `go :groove` launches a
         scene, `turn :cut, 3000, over: 2` opens the hook's filter, `play_form
         demo.form` plays the whole song (steer it with `loop!`, `onward`,
         `finish`), and `tracks`, `scenes`, `knobs`, `ui :tiles` show what
-        is there.  With something already playing, `demo` asks first
-        (`demo :night_bus, replace: true` stops it).  `demos` lists the
-        sets.  The set is a set document in mb-sound's presets/ (saved by
-        bin/save_presets.rb), so `save :mine, set` keeps your changes.
+        is there.  A demo replaces the set before
+        it, another demo or your own: it stops everything and clears the
+        set first (`clear_set`), and `undo` puts that set back.  The set is a set document in
+        mb-sound's presets/ (saved by bin/save_presets.rb), so `save :mine,
+        set` keeps your changes.
       TEXT
+      section do |d|
+        # (fixes-15: the maintainer's note asked for the list here, not a
+        # pointer to it)
+        d.heading('The demos  (demos prints this list)')
+        d.rows(DemoMethods::DEMOS.map { |name, about| ["demo #{name.inspect}", about] }, max_label: 22, wrap: true)
+      end
       commands :demo, :demos
       note :arrangement
       see :sets, :flow, :knobs, :presets
       example 'the demo sets', sound: false do
-        demos.keys
+        demos
       end
     end
+    Help::TOPIC_ALIASES.merge!(demos: :demo)
 
     Help.topic :genres, 'Genre templates', group: :arrange do
       about <<~TEXT
@@ -1195,6 +1299,11 @@ module MB
         `choose` keep their steps).  Takes keep the raw steps, so a replay
         sounds as you played it; `smooth_gesture` makes the last gesture the
         fitted curve on purpose (undoable).
+
+        A number written in a line needs no knob to try values: recall the
+        line (Up), put the cursor on the number (Alt-Shift-Left/Right jump
+        between numbers), and Alt-Up/Alt-Down step it and run the line
+        again, landing where the line lands (`help :ui` has the keys).
       TEXT
       commands :knob, :knobs, :turn, :snap, :snaps, :recall, :xfade, :learn, :smooth_gesture
       note :arrangement
@@ -1510,7 +1619,10 @@ module MB
         sections (`drop 8, key: :d, mode: :dorian`), and are undoable.
         `scale(:dorian)` without a root uses the key's root; bare `scale`
         is the key's scale; `degrees`, `snap`, and `lock` follow the key
-        as it changes.  `mode knob(:dark)` walks the modes from Lydian to
+        as it changes, and so do generators made from a scale without a
+        root, from no scale at all, or from a `progression(1, 6, 4, 5)`
+        (`motifs(scale(:phrygian), 8)` moves to the new root on the
+        cycle a `key :a, at: bar(9)` lands on; `help :generative`).  `mode knob(:dark)` walks the modes from Lydian to
         Locrian, one note at a time (`modes(:dorian..:phrygian, by:
         knob(:dark))` for part of the walk).
       TEXT
@@ -1882,10 +1994,14 @@ module MB
         `lesson` teaches the newer layers step by step.  When something
         goes wrong live, `debug_dump` writes the state (players, changes,
         graphs as Ruby, the screen, the take, recent MIDI, threads) to a
-        folder to read or send along.
+        folder to read or send along.  When the sound drops out,
+        `dropouts` starts a probe that names each dropout's likely cause
+        (`dropouts :report`, `dropouts :stop`; saved to tmp/dropout_probe/),
+        and `latency` shows what the sound card gets: how many frames it
+        pulls at a time, the queue, and the underruns so far.
       TEXT
-      commands :help, :now, :lesson, :players, :knobs, :scenes, :tracks, :mutes, :changes, :markers, :ruby, :debug_dump
-      see :sets, :knobs, :ui
+      commands :help, :now, :lesson, :players, :knobs, :scenes, :tracks, :mutes, :changes, :markers, :ruby, :debug_dump, :dropouts, :latency
+      see :sets, :knobs, :ui, :files
     end
 
     Help.topic :ui, 'Dashboard band and tiled screen', group: :look do
@@ -1895,6 +2011,16 @@ module MB
         of the screen, and scrolled lines stay in the terminal's scrollback.
         `ui :deck` adds knobs and CPU, `ui :mini` is one line, `ui off`
         hides it.
+
+        At the prompt (with or without a screen), Alt-Up/Alt-Down step the
+        number at the cursor and run the line again, as Enter would (the
+        take, the journal, undo; it lands where the line lands); the line
+        stays with the cursor on the number for the next step.  A number
+        steps by its last written digit (300 -> 301, 0.125 -> 0.126);
+        Alt-Shift is a fine step (0.125 -> 0.1251), Ctrl-Alt a coarse one
+        (10 steps); Alt-Shift-Left/Right jump between numbers, and Esc then
+        Up/Down works where Alt-arrows don't arrive.  Keys pressed together
+        run the line once; history keeps one entry for the run.
 
         `ui :tiles` (or `:studio`, `:keys`, `:wall`) takes the whole screen:
         panes tiled around the console, which keeps a 10 000-line scrollback
@@ -1920,7 +2046,26 @@ module MB
         it; `ui off` sums them up).  NAV f shows the frame rate and each
         pane's rate beside its number (`ui.fps` is what was drawn,
         `ui.target_fps` the painter's rate; meters and scopes run at it and
-        everything slows in steps when the CPU is busy).
+        everything slows in steps when the CPU is busy).  `ui.perf` records
+        what that number can't see (frame lateness, the worst stall, each
+        pane's update age, key-to-frame time, the terminal's answer time to
+        a query after a frame, the render thread's wake delay):
+        `ui.perf :report`, `:stop`, `:save`; `ui.perf :capture` records a
+        minute of the tiles and the sound screen in your terminal and saves
+        it under tmp/ui-perf/captures/ (`ui.perf :cancel` stops it early).
+        `ui.smooth :on` (off by default; `ui.smooth` says which) makes the
+        scope and meters change on every frame at any buffer size and typing
+        show at once: a snapshot after every buffer, frames timed to them,
+        and the console's echo waking the screen.  A terminal may show
+        fewer frames than are written: Konsole before 26.04 shows a frame
+        only 10 ms after output stops, so frames written closer show
+        together.  The screen paces for it by default (`ui.pace
+        :terminal`, since 2026-11-21): writes stay 12 ms apart, at most
+        about 83 a second whatever target is typed (whole frame periods
+        where they fit: 120 runs at 60, 240 at 80), so each one shows;
+        target 60 is the smoothest on a 120 Hz display (the report's Rates
+        estimate what the terminal showed).  `ui.pace :exact` turns pacing
+        off; other terminals pace the same either way.
 
         `ui.note 'the cutoff turns too slowly'` keeps a note for the next
         UI refinement round with the screen as text, the layout and focused
@@ -1962,15 +2107,35 @@ module MB
         ◆ is queued with its countdown in beats), the clip under its cursor
         (`clip`: a piano roll and the Ruby that made it), racks with their
         knobs, buses with meters.  Focus a pane in NAV (its number, or a
-        for clips, r racks, b buses) and press Enter for its keys: arrows
+        for clips, r racks, o knobs, b buses) and press Enter for its keys: arrows
         move, Enter launches the cell (`launch :bass, 3`), g its scene (`go
-        :drop`), x stops the track, + - > < transpose, L legato, S swing, Q
+        :drop`), x stops the track, Space plays or stops the cell, s m
+        solo and mute its track, a auditions it in CUE (`cue :bass, 3`),
+        + - > < transpose, L legato, S swing, Q
         quantize, D double, H half, R reverse (`tweak :bass, transpose: 1`),
-        u undo; in racks Left/Right turn the picked knob (Shift: fine;
-        a held key is one `turn :x, 0 => 0.3, 1.n8 => 0.5` line when you let
-        go: its fitted keyframes; the take keeps the raw steps).
-        Every key runs one console line, printed in the console: journaled,
-        undoable, in your take.  `ui :mixer` shows buses beside the master.
+        u undo; in racks and the knobs pane Up/Down pick a knob and
+        Left/Right turn it (Shift: fine; 0 its default; Enter types a
+        value; a held key is one `turn :x, 0 => 0.3, 1.n8 => 0.5` line
+        when you let go: its fitted keyframes; the take keeps the raw
+        steps).  In the tracks pane Left/Right set the level a dB a press
+        (held: live, then one `level :bass, -6.0.db` line), Space plays a stopped track again
+        (`resume :bass`) or stops a playing one (NAV Space is the
+        transport), x stops, s solos, m mutes, = types a level, Enter shows
+        the track's knobs in the knobs pane (t T other tracks, Esc back to
+        the track; on `ui :sound` Enter designs it), i designs it (`design
+        :bass` from any screen).  In the form pane Up/Down
+        pick a section, Enter goes there next (`goto :drop`), r loops it
+        (`loop!`, or `practice :drop`), n `onward`, > `skip`, f `finish`,
+        Space the transport.  In the buses pane Up/Down pick a bus or a
+        send, Left/Right the send's level (one `feed :pad, :verb, -9.0.db`
+        line when you let go), 0 closes it, Enter types it, m mutes the
+        bus.  In the messages pane Enter opens the bottom one in full
+        (`ui.message 2`).  In those panes (and the matrix, knobs, racks,
+        queue) e puts the picked row's line on the console unrun, to
+        edit.  Every key that changes the set runs one console
+        line: journaled, undoable, in your take (knob turns show on the
+        pane's last row, other lines in the console).  `ui :mixer` shows
+        buses beside the master.
       TEXT
       section do |d|
         rows = UI.layout_table.map do |name, kind, desc, size, panes, current|
@@ -1983,7 +2148,7 @@ module MB
       section do |d|
         # (The pane catalog, ui.panes: ux-1 r3 item 40)
         d.heading('Panes  (ui.panes; ui.list: what is on screen; ui.size)')
-        d.rows(UI.pane_catalog.entries.map { |e| [e.name.inspect, "#{e.description} (#{e.open})"] }, max_label: 12, wrap: true)
+        d.rows(UI.pane_catalog.entries.map { |e| [[e.name, *e.aliases].map(&:inspect).join(' '), "#{e.description} (#{e.open})"] }, max_label: 12, wrap: true)
         d.heading('Sizes  (one decision per terminal size: UI::Density)')
         d.rows(UI::Density.table.map { |t| t.split(': ', 2) }, max_label: 20)
       end
@@ -2047,6 +2212,15 @@ module MB
         of the voice (a settled cycle, its spectrum, half a second of
         envelope) after the knobs stop moving.  Small screens get fewer
         panes: the voice, its preview, and the console at 80x24.
+
+        `ui.waves :live` (a prototype, off by default; `ui.waves :off`
+        goes back, `ui.waves` says which) draws the preview every frame
+        from what the playing voice used in its latest buffer, the way a
+        wavetable synth's display moves: an oscillator's cycle with its
+        pulse width and wavetable scan, a filter's response at the cutoff
+        an LFO or envelope moves it to, an LFO's shape with a marker at its
+        phase, an envelope's playhead; an oscillator with no cheap cycle
+        (FM, sync, noise) shows one period of the voice's output.
       TEXT
       commands :design, :ui, :knob, :turn, :learn, :bind
       note :sound_design_ui

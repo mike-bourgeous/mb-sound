@@ -7,7 +7,7 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
   def peak_hz(d)
     m = d.length / 2
     seg = Numo::DFloat.cast(d[(m - 4096)...(m + 4096)])
-    (Numo::Pocketfft.rfft(seg * described_class.hann(8192)).abs.max_index * 48000.0 / 8192)
+    (Numo::Pocketfft.rfft(seg * MB::Sound::Sample::Spectral.hann(8192)).abs.max_index * 48000.0 / 8192)
   end
 
   def rms(d)
@@ -154,6 +154,487 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
     expect(short.stretch(64).mips).to eq(:octave)
     expect(short.read_as(mips: :half_octave).stretch(64, mode: :paul).mips).to eq(:half_octave)
     expect(short.read_as(:drop).stretch(64, mode: :paul).mips).to eq(false)
+  end
+
+  describe 'loops (wrap:)' do
+    # A pad that loops seamlessly: partials with whole numbers of cycles
+    # in one second, and a slow swell that also closes
+    let(:held) {
+      i = Numo::DFloat.new(48000).seq / 48000
+      (Numo::NMath.sin(i * (2 * Math::PI * 110)) * 0.3 + Numo::NMath.sin(i * (2 * Math::PI * 165) + 1) * 0.2 + Numo::NMath.sin(i * (2 * Math::PI * 331) + 2) * 0.1) *
+        (0.8 + 0.2 * Numo::NMath.cos(i * (2 * Math::PI * 2)))
+    }
+    let(:plain) { MB::Sound::Sample[Numo::SFloat.cast(held)] }
+
+    # [the step from the last sample back to the first, the largest step
+    # between neighbours inside]
+    def wrap_step(d)
+      d = Numo::DFloat.cast(d)
+      [(d[0] - d[-1]).abs, (d[1..] - d[0...-1]).abs.max]
+    end
+
+    # [the largest spectral flux across the wrap, the largest inside a
+    # pass] of three passes of +d+: the change between the magnitude
+    # spectra of 2048-sample frames 1024 samples apart, as a share of
+    # their sum
+    def flux(d)
+      d = Numo::DFloat.cast(d)
+      l = d.length
+      tiled = Numo::DFloat.zeros(3 * l)
+      3.times { |k| tiled[(k * l)...((k + 1) * l)] = d }
+      w = MB::Sound::Sample::Spectral.hann(2048)
+      mags = (0...((tiled.length - 2048) / 512)).map { |k| Numo::Pocketfft.rfft(tiled[(k * 512)...(k * 512 + 2048)] * w).abs }
+      at = []
+      inside = []
+      (2...mags.length).each do |k|
+        f = (mags[k] - mags[k - 2]).abs.sum / (mags[k].sum + mags[k - 2].sum)
+        ([l, 2 * l].any? { |e| (k - 2) * 512 < e && e < k * 512 + 2048 } ? at : inside) << f
+      end
+      [at.max, inside.max]
+    end
+
+    it 'stretches a looping sample as an endless stream: no step and no change of tone at the wrap' do
+      step, inside = wrap_step(held)
+      expect(step).to be < inside
+      at, within = flux(held)
+      expect(at).to be < within
+      [0.77, 1.25].each do |r|
+        old = plain.looped.stretch(r, mode: :spectral, wrap: false)
+        new = plain.looped.stretch(r, mode: :spectral)
+        # (a stretch with its own ends stops wherever its phases have
+        # got to: a step at every pass of the loop, and a jump in tone)
+        expect(wrap_step(old.data(0))[0]).to be > 3 * inside
+        at, within = flux(old.data(0))
+        expect(at).to be > 4 * within
+        step, inside_now = wrap_step(new.data(0))
+        expect(step).to be < inside
+        expect(inside_now).to be < 1.2 * inside
+        at, within = flux(new.data(0))
+        expect(at).to be < within
+        expect(rms(new.data(0)) / rms(held)).to be_within(0.02).of(1)
+        expect(new.length).to eq((48000 * r).round)
+        expect(new).to be_whole_loop
+        # Every partial comes round to its starting phase
+        report = {}
+        described_class.looped([held], r, report: report)
+        expect(report[:closure][0]).to be > 0.1
+        expect(report[:closure][1]).to be < 0.01
+      end
+    end
+
+    it 'needs its phases closed: a pass of several stretched as one does not loop alone; Paulstretch loops too' do
+      three = described_class.looped([held], 1.25, passes: 3)[0]
+      expect(three.length).to eq(180000)
+      at, within = flux(three)
+      expect(at).to be < within
+      at, within = flux(three[60000...120000])
+      expect(at).to be > 2 * within
+      expect { plain.looped.stretch(1.25, mode: :spectral, passes: 3) }.to raise_error(ArgumentError, /passes/)
+
+      wash = plain.looped.stretch(2, mode: :paul).data(0)
+      step, inside = wrap_step(wash)
+      expect(step).to be < inside
+      expect(rms(wash) / rms(held)).to be_within(0.1).of(1)
+    end
+
+    it 'follows the sample\'s loop unless told' do
+      expect(plain).not_to be_whole_loop
+      expect(plain.looped).to be_whole_loop
+      expect(plain.looped(0.1..0.5)).not_to be_whole_loop
+      expect(plain.stretch(0.77, mode: :spectral).data(0)).to eq(plain.stretch(0.77, mode: :spectral, wrap: false).data(0))
+      expect(plain.stretch(0.77, mode: :spectral, wrap: true).data(0)).to eq(plain.looped.stretch(0.77, mode: :spectral).data(0))
+      expect(plain.stretch(0.77, mode: :spectral, wrap: true).lineage[3]).to eq({ mode: :spectral, wrap: true })
+      expect { plain.stretch(0.77, wrap: true) }.to raise_error(ArgumentError, /wrap: and noise: are for/)
+      expect { plain.stretch(0.77, mode: :slice, wrap: true) }.to raise_error(ArgumentError, /wrap: and noise: are for/)
+      expect { plain.stretch(0.77, mode: :spectral, wrap: 1) }.to raise_error(ArgumentError, /wrap: is true/)
+    end
+
+    it 'keeps a hit at the loop start, and hears no attack where a held sound wraps' do
+      x = held * 0.3
+      x[0...2400] += Numo::NMath.sin(Numo::DFloat.new(2400).seq * 0.9) * Numo::NMath.exp(-Numo::DFloat.new(2400).seq / 300.0) * 0.6
+      hit = MB::Sound::Sample[Numo::SFloat.cast(x)].looped
+      expect(hit.onsets(wrap: true)).to eq([0])
+      # (a pad that starts loud has an onset at 0 only when nothing
+      # comes before it)
+      expect(plain.onsets).to eq([0])
+      expect(plain.onsets(wrap: true)).to eq([])
+      new = Numo::DFloat.cast(hit.stretch(1.25, mode: :spectral).data(0))
+      # The hit is the input's, and so is what leads into it
+      expect((new[0...240] - x[0...240]).abs.max).to be < 0.005
+      expect((new[-240..] - x[-240..]).abs.max).to be < 0.005
+
+      # Paulstretch keeps it on the loop point (its own edges: read in a
+      # circle, the random phases also played it up to 125 ms early)
+      wash = Numo::DFloat.cast(hit.stretch(2, mode: :paul).data(0))
+      expect(wash).to eq(Numo::DFloat.cast(hit.stretch(2, mode: :paul, wrap: false).data(0)))
+      expect(Numo::DFloat.cast(hit.stretch(2, mode: :paul, wrap: true).data(0))).to eq(wash)
+      # With transients: true as well: the hit is the input's, and the
+      # stretch does not end on the input's own tail (in the circle the
+      # frames before the loop point hold the attack and stay as they are)
+      # (a splash: a burst of noise dying away over a second)
+      Numo::NArray.srand(5)
+      c = Numo::DFloat.new(48000).rand(-0.5, 0.5) * Numo::NMath.exp(-Numo::DFloat.new(48000).seq / 12000.0)
+      splash = MB::Sound::Sample[Numo::SFloat.cast(c)].looped
+      expect(splash.onsets(wrap: true)).to eq([0])
+      kept = Numo::DFloat.cast(splash.stretch(2, mode: :paul, transients: true).data(0))
+      expect(kept).to eq(Numo::DFloat.cast(splash.stretch(2, mode: :paul, transients: true, wrap: false).data(0)))
+      expect((kept[0...240] - c[0...240]).abs.max).to be < 0.01
+      ring = MB::Sound::Sample::Spectral.looped(splash.to_a, 2, window: 12000, randomize: 1, onsets: [0])[0]
+      alike = ->(d) { (d[-3000..] * c[-3000..]).sum / Math.sqrt((d[-3000..]**2).sum * (c[-3000..]**2).sum) }
+      expect(alike.call(ring)).to be > 0.5
+      expect(alike.call(kept).abs).to be < 0.2
+      circle = MB::Sound::Sample::Spectral.looped(hit.to_a, 2, window: 12000, randomize: 1)[0]
+      expect(rms(wash[0...960]) / rms(wash[-960..])).to be > 2
+      expect(rms(circle[0...960]) / rms(circle[-960..])).to be < 1.5
+      # (a pad held through the loop point is still read in a circle)
+      expect(plain.looped.stretch(2, mode: :paul).data(0)).not_to eq(plain.stretch(2, mode: :paul, wrap: false).data(0))
+    end
+
+    it 'stretches for loop players as a loop' do
+      player = MB::Sound::GraphNode::LoopPlayer
+      expect(player.loop_stretch({ mode: :spectral })).to eq({ mode: :spectral, wrap: true })
+      expect(player.loop_stretch({ mode: :pv, transients: false })).to eq({ mode: :pv, transients: false, wrap: true })
+      expect(player.loop_stretch({ mode: :spectral, wrap: false })).to eq({ mode: :spectral, wrap: false })
+      expect(player.loop_stretch({ mode: :slice })).to eq({ mode: :slice })
+      expect(player.loop_stretch({})).to eq({})
+      # (a sample with no loop points, played as a loop a fifth slower)
+      loop = MB::Sound::Sample[Numo::SFloat.cast(held), bpm: 150, beats: 2.5]
+      played = loop.follow(stretch: :spectral).sample(60000).dup
+      expect(played).to eq(loop.stretch(1.25, mode: :spectral, wrap: true).data(0))
+      expect(played).not_to eq(loop.stretch(1.25, mode: :spectral).data(0))
+      expect(loop.follow(stretch: { mode: :spectral, wrap: false }).sample(60000)).to eq(loop.stretch(1.25, mode: :spectral).data(0))
+    end
+  end
+
+  describe 'waveform shape (lock:, closure:, closure_length:)' do
+    # A bandlimited sawtooth at 110.3 Hz, one second: its partials do not
+    # close by themselves at any stretch
+    let(:saw) {
+      i = Numo::DFloat.new(48000).seq / 48000
+      (1..50).sum { |k| Numo::NMath.sin(i * (2 * Math::PI * 110.3 * k)) / k } * 0.4
+    }
+
+    # How much +y+ (a stretch of +x+ by +ratio+, no onsets) keeps +x+'s
+    # waveform: per 4096-sample frame, the peaks' phase differences from
+    # the input at the same place, at the best time shift (1: the same
+    # waveform moved in time), weighted by the peaks, averaged
+    def shape_kept(y, x, ratio, upto: nil)
+      y = Numo::DFloat.cast(y)
+      n = 4096
+      w = described_class.hann(n)
+      taus = Numo::DFloat.new(1201).seq(-600)
+      vals = (n...(upto || (y.length - n))).step(4800).map { |c|
+        ic = (c / ratio).round
+        seg = x[(Numo::Int64.new(n).seq + ic - n / 2) % x.length]
+        fa = Numo::Pocketfft.rfft(y[(c - n / 2)...(c + n / 2)] * w)
+        fb = Numo::Pocketfft.rfft(seg * w)
+        mb = fb.abs
+        c2 = mb[1...-1]
+        pk = ((c2 > mb[0...-2]) & (c2 >= mb[2..]) & (c2 > mb.max * 0.01)).where + 1
+        om = pk.cast_to(Numo::DFloat) * (2 * Math::PI / n)
+        d = (fa[pk] * fb[pk].conj).arg
+        wt = fa[pk].abs * mb[pk]
+        (Numo::NMath.cos(d.reshape(1, d.length) - taus.reshape(taus.length, 1) * om.reshape(1, om.length)).dot(wt) / wt.sum).max
+      }
+      vals.sum / vals.length
+    end
+
+    it 'keeps the waveform of a looped tone with lock: :shape, its phases closing before the wrap' do
+      spread = {}
+      plain = described_class.looped([saw], 1.285, report: spread)[0]
+      shaped = {}
+      locked = described_class.looped([saw], 1.285, lock: :shape, report: shaped)[0]
+      # (the spread closure moves every harmonic by its own amount)
+      # (the frames before the closing span, a quarter of this short
+      # loop, are the input's waveform; in the span it drifts as in a
+      # spread closure)
+      expect(shape_kept(plain, saw, 1.285)).to be < 0.95
+      expect(shape_kept(locked, saw, 1.285, upto: locked.length * 3 / 4 - 2048)).to be > 0.98
+      expect(shape_kept(locked, saw, 1.285)).to be > shape_kept(plain, saw, 1.285) + 0.03
+      expect(spread[:closure][1]).to be < 0.01
+      expect(shaped[:closure][1]).to be < 0.01
+      expect(locked.length).to eq(plain.length)
+      expect(rms(locked) / rms(saw)).to be_within(0.05).of(1)
+      # Unlooped too (the vocoder's own drift)
+      free = described_class.vocoder([saw], 1.285, lock: :shape)[0]
+      expect(shape_kept(free, saw, 1.285)).to be > 0.98
+    end
+
+    it 'locks the shape of a sound with partials of several notes where they fit' do
+      i = Numo::DFloat.new(48000).seq / 48000
+      chord = [110.0, 138.6, 164.8].sum { |f| (1..30).sum { |k| Numo::NMath.sin(i * (2 * Math::PI * f * k)) / k } } * 0.15
+      a = shape_kept(described_class.vocoder([chord], 1.285)[0], chord, 1.285)
+      b = shape_kept(described_class.vocoder([chord], 1.285, lock: :shape)[0], chord, 1.285)
+      expect(b).to be > a + 0.05
+    end
+
+    it 'closes a harmonic tone with a small pitch change instead with closure: :shift' do
+      report = {}
+      y = described_class.looped([saw], 1.285, closure: :shift, report: report)[0]
+      expect(shape_kept(y, saw, 1.285)).to be > 0.98
+      expect(report[:closure][1]).to be < 0.01
+      expect(report[:shift].abs).to be > 0.1
+      expect(report[:shift].abs).to be <= described_class::SHIFT_CENTS
+    end
+
+    it 'closes only in the last closure_length samples: the frames before are those of a stretch closing later' do
+      out = {}
+      a = described_class.looped([saw], 1.285, closure_length: 12000, report: out)[0]
+      b = described_class.looped([saw], 1.285, closure_length: 24000)[0]
+      # (the first half window also holds the last frames, around the
+      # circle)
+      before = a.length - 24000 - 4096
+      expect(a[2048...before]).to eq(b[2048...before])
+      expect(a[0...2048]).not_to eq(b[0...2048])
+      expect(a[(a.length - 6000)..]).not_to eq(b[(b.length - 6000)..])
+      expect(out[:closure][1]).to be < 0.01
+    end
+
+    it 'takes the options through Sample#stretch, printing them, and checks them' do
+      s = MB::Sound::Sample[Numo::SFloat.cast(saw)].looped
+      t = s.stretch(1.25, mode: :spectral, lock: :shape)
+      expect(t.lineage[3]).to eq({ mode: :spectral, lock: :shape })
+      expect(t.data(0)).to eq(Numo::SFloat.cast(described_class.looped(s.to_a.map { |c| Numo::DFloat.cast(c) }, 1.25, lock: :shape, onsets: s.onsets(wrap: true))[0]))
+      expect(s.stretch(1.25, mode: :spectral, closure: :shift, closure_length: 0.25).lineage[3]).to eq({ mode: :spectral, closure: :shift, closure_length: 0.25 })
+      expect(s.stretch(1.25, mode: :spectral, wrap: false, lock: :shape).data(0)).not_to eq(s.stretch(1.25, mode: :spectral, wrap: false).data(0))
+
+      expect { s.stretch(1.25, mode: :spectral, lock: :tight) }.to raise_error(ArgumentError, /lock:/)
+      expect { s.stretch(1.25, mode: :spectral, closure: :fast) }.to raise_error(ArgumentError, /closure:/)
+      expect { s.stretch(1.25, mode: :spectral, closure_length: 0) }.to raise_error(ArgumentError, /closure_length:/)
+      expect { s.stretch(1.25, mode: :spectral, lock: :shape, closure: :shift) }.to raise_error(ArgumentError, /lock: :shape/)
+      expect { s.stretch(1.25, mode: :slice, lock: :shape) }.to raise_error(ArgumentError, /lock:/)
+      expect { s.stretch(1.25, closure: :shift) }.to raise_error(ArgumentError, /closure:/)
+    end
+  end
+
+  describe MB::Sound::Sample::Spectral::Stream do
+    let(:held) {
+      i = Numo::DFloat.new(48000).seq / 48000
+      (Numo::NMath.sin(i * (2 * Math::PI * 110)) * 0.3 + Numo::NMath.sin(i * (2 * Math::PI * 165) + 1) * 0.2 + Numo::NMath.sin(i * (2 * Math::PI * 331) + 2) * 0.1) *
+        (0.8 + 0.2 * Numo::NMath.cos(i * (2 * Math::PI * 2)))
+    }
+
+    # +seconds+ of a stream of +stream+ at +ratio+ in buffers of +size+,
+    # per channel
+    def run(stream, ratio, seconds, size)
+      total = (48000 * seconds).round
+      step = 1.0 / (48000 * ratio)
+      out = Array.new(stream.channels) { Numo::DFloat.zeros(total) }
+      pos = 0
+      while pos < total
+        count = [size, total - pos].min
+        phases = (Numo::DFloat.new(count).seq + pos) * step
+        phases -= phases.floor
+        stream.channels.times { |ch| out[ch][pos...(pos + count)] = stream.pull(ch, phases, step) }
+        pos += count
+      end
+      out
+    end
+
+    it 'stretches a loop as it plays: no wrap to hear, the level kept, the same at any buffer size' do
+      [0.77, 1.25].each do |r|
+        y = run(described_class.new([held]), r, 3.2, 800)[0]
+        expect(rms(y) / rms(held)).to be_within(0.02).of(1)
+        expect((y[1..] - y[0...-1]).abs.max).to be < 1.1 * (held[1..] - held[0...-1]).abs.max
+        expect(peak_hz(y)).to be_within(6).of(110)
+        expect(run(described_class.new([held]), r, 3.2, 367)[0]).to eq(y)
+      end
+    end
+
+    it 'turns the channels together and keeps a hit at the loop start' do
+      # (a quiet pad under the hit: a stream's held partials come round
+      # with other phases each pass, its attacks with the input's)
+      x = held * 0.02
+      x[0...2400] += Numo::NMath.sin(Numo::DFloat.new(2400).seq * 0.9) * Numo::NMath.exp(-Numo::DFloat.new(2400).seq / 300.0) * 0.6
+      l, r = run(described_class.new([x, x * 0.5], onsets: [0]), 1.25, 3, 800)
+      expect((r - l * 0.5).abs.max).to be < 1e-9
+      # (the second and third time round: the hit as it is in the input)
+      [60000, 120000].each { |q| expect((l[q...(q + 240)] - x[0...240]).abs.max).to be < 0.04 }
+    end
+
+    it 'follows tempo ramps and jumps without clicks' do
+      stream = described_class.new([held])
+      phase = 0.0
+      out = []
+      step = 0.0
+      150.times do |b|
+        phases = Numo::DFloat.zeros(800)
+        800.times do |k|
+          t = (b * 800 + k) / 48000.0
+          step = 1.0 / (48000 * (0.77 + 0.24 * [t, 2].min))
+          phases[k] = phase % 1.0
+          phase += step
+        end
+        phase += 0.37 if b == 120
+        out << stream.pull(0, phases, step).dup
+      end
+      y = SpecBuffers.join(out)
+      expect(y.isnan.any?).to be(false)
+      expect((y[1..] - y[0...-1]).abs.max).to be < 1.5 * (held[1..] - held[0...-1]).abs.max
+      [0...48000, 48000...96000, 100000...120000].each { |range| expect(rms(y[range]) / rms(held)).to be_within(0.1).of(1) }
+    end
+
+    it 'plays under follow with live: true' do
+      loop = MB::Sound::Sample[[Numo::SFloat.cast(held), Numo::SFloat.cast(held * 0.5)], bpm: 150, beats: 2.5]
+      node = loop.follow(stretch: { mode: :spectral, live: true })
+      expect(node[0].to_s).to include('spectral stretch, live')
+      l = node[0].sample(800).dup
+      r = node[1].sample(800).dup
+      want = run(loop.spectral_stream, 1.25, 800 / 48000.0, 800)
+      expect(l).to eq(Numo::SFloat.cast(want[0]))
+      expect(r).to eq(Numo::SFloat.cast(want[1]))
+      expect { loop.follow(stretch: { mode: :slice, live: true }) }.to raise_error(ArgumentError, /live: follows with the phase vocoder/)
+      expect { loop.follow(stretch: { mode: :spectral, live: true, randomize: 0.5 }) }.to raise_error(ArgumentError, /live: follows with the phase vocoder/)
+      expect { MB::Sound::GraphNode::LoopPlayer.new(loop, stretch: { mode: :spectral, live: true }) }.to raise_error(ArgumentError, /needs the stream/)
+    end
+  end
+
+  it 'takes an amount for transients: how much around each onset stays unstretched' do
+    # (four bursts over a quiet chord)
+    x = chord * 0.1
+    [3000, 9000, 15000, 21000].each { |h| x[h...(h + 1500)] += Numo::NMath.sin(Numo::DFloat.new(1500).seq * 0.9) * Numo::NMath.exp(-Numo::DFloat.new(1500).seq / 200.0) * 0.6 }
+    hits = MB::Sound::Sample[x]
+    on = hits.onsets
+    expect(on).to eq([3001, 9001, 15001, 21001])
+    half = hits.stretch(4, mode: :spectral, transients: 0.5)
+    expect(Numo::DFloat.cast(half.data(0))).to eq(Numo::DFloat.cast(Numo::SFloat.cast(described_class.vocoder([Numo::DFloat.cast(hits.data(0))], 4.0, onsets: on, span: 0.5, noise: 1)[0])))
+    expect(half.lineage[3]).to eq({ mode: :spectral, transients: 0.5 })
+    expect(hits.stretch(4, mode: :spectral, transients: 1)).to equal(hits.stretch(4, mode: :spectral))
+    expect(hits.stretch(4, mode: :spectral, transients: 0)).to equal(hits.stretch(4, mode: :spectral, transients: false))
+
+    # Half the span: every hit still lands on its stretched time, and
+    # more of the sound between hits shares the stretch (the map between
+    # the first two hits is nearer 4x)
+    full_map, = described_class.time_map(24000, 4.0, on, 4096, 1024)
+    half_map, = described_class.time_map(24000, 4.0, on, 4096, 1024, 0.5)
+    on.each { |o| expect(half_map.call(o * 4.0)).to be_within(1e-6).of(o) }
+    slope = ->(map) { (map.call(4 * 6000 + 1024) - map.call(4 * 6000)) / 1024.0 }
+    expect(1 / slope.call(full_map)).to be > 1 / slope.call(half_map)
+    expect(1 / slope.call(half_map)).to be_between(4, 7)
+    [2, -0.1, :some].each { |bad| expect { hits.stretch(4, mode: :spectral, transients: bad) }.to raise_error(ArgumentError, /transients: is true, false, or an amount/) }
+
+    # Random phases with transients: the hits stay hits in the
+    # vocoder's window (Paulstretch's wash alone has none; its quarter-
+    # second window keeps only hits that are further apart than these)
+    q = 4 * 9000
+    step = ->(d) { rms(d[q...(q + 480)]) / (rms(d[(q - 480)...q]) + 1e-9) }
+    expect(step.call(hits.stretch(4, mode: :spectral, randomize: 0.6).data(0))).to be > 4
+    expect(step.call(hits.stretch(4, mode: :spectral, randomize: 1).data(0))).to be > 4
+    expect(step.call(hits.stretch(4, mode: :paul).data(0))).to be < 2
+  end
+
+  describe 'noise:' do
+    # How alike the sound is to itself +lag+ samples later, tones taken
+    # out: the autocorrelation of 16384-sample frames whose spectra are
+    # divided by their own smoothed level, at +lag+ (re lag 0)
+    def self_similarity(d, lag)
+      d = Numo::DFloat.cast(d)
+      w = MB::Sound::Sample::Spectral.hann(16384)
+      power = Numo::DFloat.zeros(8193)
+      (0..(d.length - 16384)).step(8192) do |from|
+        p2 = Numo::Pocketfft.rfft(d[from...(from + 16384)] * w).abs**2
+        c = Numo::DFloat.zeros(8194)
+        c[1..] = p2.cumsum
+        idx = Numo::Int64.new(8193).seq
+        lo = (idx - 32).clip(0, 8193)
+        hi = (idx + 32).clip(0, 8193)
+        power += p2 / ((c[hi] - c[lo]) / Numo::DFloat.cast(hi - lo) + 1e-20)
+      end
+      acf = Numo::Pocketfft.irfft(Numo::DComplex.cast(power))
+      acf[(lag - 2)..(lag + 2)].max / acf[0]
+    end
+
+    let(:hiss) { Numo::NArray.srand(11); Numo::DFloat.new(96000).rand(-0.5, 0.5) }
+    let(:tones) {
+      i = Numo::DFloat.new(96000).seq / 48000
+      (Numo::NMath.sin(i * (2 * Math::PI * 220)) + Numo::NMath.sin(i * (2 * Math::PI * 277.2)) + Numo::NMath.sin(i * (2 * Math::PI * 329.6))) * 0.2
+    }
+
+    it 'keeps the vocoder\'s window from sounding in stretched noise, and the noise\'s level' do
+      smp = MB::Sound::Sample[Numo::SFloat.cast(hiss)]
+      expect(self_similarity(hiss, 4096)).to be < 0.03
+      # (every bin held as a partial on a grid of 48000 / 4096 Hz: the
+      # stretch repeats itself a window later, and the more the longer
+      # the stretch; more overlap or another window only moves it)
+      plain = smp.stretch(8, mode: :spectral, transients: false, noise: 0)
+      expect(self_similarity(plain.data(0), 4096)).to be > 0.12
+      expect(self_similarity(smp.stretch(8, mode: :spectral, transients: false, noise: 0, overlap: 8).data(0), 4096)).to be > 0.12
+      expect(self_similarity(smp.stretch(8, mode: :spectral, transients: false, noise: 0, window: 2048).data(0), 2048)).to be > 0.12
+      loose = smp.stretch(8, mode: :spectral, transients: false, noise: 1)
+      expect(self_similarity(loose.data(0), 4096)).to be < 0.03
+      expect(rms(loose.data(0)) / rms(hiss)).to be_within(0.05).of(1)
+      expect(rms(plain.data(0)) / rms(hiss)).to be < 0.9
+      expect(loose.lineage[3]).to eq({ mode: :spectral, transients: false, noise: 1 })
+      expect(smp.stretch(8, mode: :spectral, transients: false, noise: 1, seed: 3).data(0)).not_to eq(loose.data(0))
+      expect(smp.stretch(8, mode: :spectral, noise: true)).to equal(smp.stretch(8, mode: :spectral, noise: 1))
+      expect(smp.stretch(8, mode: :spectral, noise: false)).to equal(smp.stretch(8, mode: :spectral, noise: 0))
+    end
+
+    it 'is on by default at long ratios: none up to 1.5x, all of it from 2x' do
+      expect([1, 1.25, 1.5, 1.75, 2, 8, 0.5].map { |r| described_class.noise_for(r) }).to eq([0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 0.0])
+      smp = MB::Sound::Sample[Numo::SFloat.cast(hiss[0...48000])]
+      { 0.8 => 0, 1.25 => 0, 1.5 => 0, 1.75 => 0.5, 2 => 1, 4 => 1 }.each do |r, amount|
+        expect(smp.stretch(r, mode: :spectral).data(0)).to eq(smp.stretch(r, mode: :spectral, noise: amount).data(0))
+      end
+      # (the default is not written into the lineage; what is asked for is)
+      expect(smp.stretch(4, mode: :spectral).lineage[3]).to eq({ mode: :spectral })
+      expect(smp.stretch(4, mode: :spectral, noise: 0).lineage[3]).to eq({ mode: :spectral, noise: 0 })
+      expect(smp.stretch(4, mode: :spectral, noise: 0).data(0)).not_to eq(smp.stretch(4, mode: :spectral).data(0))
+      # A live stream follows the ratio it is playing at
+      run = ->(stream, ratio) {
+        step = 1.0 / (48000 * ratio)
+        phases = Numo::DFloat.new(24000).seq * step
+        stream.pull(0, phases - phases.floor, step).dup
+      }
+      loop = smp.looped
+      expect(run.call(loop.spectral_stream, 4)).to eq(run.call(loop.spectral_stream(noise: 1), 4))
+      expect(run.call(loop.spectral_stream, 1.25)).to eq(run.call(loop.spectral_stream(noise: 0), 1.25))
+      expect(run.call(loop.spectral_stream, 4)).not_to eq(run.call(loop.spectral_stream(noise: 0), 4))
+    end
+
+    it 'leaves partials and attacks alone' do
+      # (a chord with hiss 14 dB under it: the partial at 220 Hz stays
+      # a line, the hiss stops repeating)
+      mix = MB::Sound::Sample[Numo::SFloat.cast(tones + hiss * 0.2)]
+      line = ->(d) {
+        sp = Numo::Pocketfft.rfft(Numo::DFloat.cast(d)[0...65536] * described_class.hann(65536)).abs**2
+        sp[296..305].sum / sp[259..341].sum
+      }
+      plain = mix.stretch(8, mode: :spectral, transients: false, noise: 0).data(0)
+      loose = mix.stretch(8, mode: :spectral, transients: false, noise: 1).data(0)
+      expect(line.call(plain)).to be > 0.99
+      expect(line.call(loose)).to be > 0.99
+      expect(self_similarity(plain, 4096)).to be > 0.12
+      expect(self_similarity(loose, 4096)).to be < 0.04
+      # (a pure chord is not touched beyond rounding)
+      pure = MB::Sound::Sample[Numo::SFloat.cast(tones)]
+      expect((Numo::DFloat.cast(pure.stretch(8, mode: :spectral, transients: false, noise: 1).data(0)) - pure.stretch(8, mode: :spectral, transients: false, noise: 0).data(0))[8192...-8192].abs.max).to be < 0.01
+
+      # A burst in hiss: the frames that hold it are not randomized
+      x = hiss * 0.05
+      x[24000...26000] += Numo::NMath.sin(Numo::DFloat.new(2000).seq * 0.9) * Numo::NMath.exp(-Numo::DFloat.new(2000).seq / 250.0) * 0.6
+      hit = MB::Sound::Sample[Numo::SFloat.cast(x)]
+      q = 4 * hit.onsets.last
+      a = Numo::DFloat.cast(hit.stretch(4, mode: :spectral, noise: 0).data(0))[q...(q + 480)]
+      b = Numo::DFloat.cast(hit.stretch(4, mode: :spectral, noise: 1).data(0))[q...(q + 480)]
+      expect((a - b).abs.max).to be < 0.02
+      expect { hit.stretch(4, mode: :spectral, noise: 2) }.to raise_error(ArgumentError, /noise: is 0..1/)
+      expect { hit.stretch(4, noise: 1) }.to raise_error(ArgumentError, /noise: are for mode: :spectral/)
+    end
+
+    it 'runs in loops and live streams' do
+      smp = MB::Sound::Sample[Numo::SFloat.cast(hiss[0...48000])].looped
+      closed = smp.stretch(4, mode: :spectral, noise: 1)
+      expect(closed.length).to eq(192000)
+      expect(self_similarity(closed.data(0), 4096)).to be < 0.04
+      expect(self_similarity(smp.stretch(4, mode: :spectral, noise: 0).data(0), 4096)).to be > 0.05
+      stream = smp.spectral_stream(noise: 1)
+      step = 1.0 / 192000
+      out = Numo::DFloat.zeros(96000)
+      120.times { |b| phases = (Numo::DFloat.new(800).seq + b * 800) * step; out[(b * 800)...((b + 1) * 800)] = stream.pull(0, phases - phases.floor, step) }
+      expect(self_similarity(out, 4096)).to be < 0.04
+      expect(rms(out) / rms(hiss)).to be_within(0.08).of(1)
+    end
   end
 
   it 'raises on bad modes and mixed options' do

@@ -28,6 +28,12 @@ module AllocationBudget
     def report(n = 8)
       lines = [format('%.1f objects (%.0f bytes) per buffer over %d buffers; top allocators (objects, bytes per buffer):', objects_per_buffer, bytes_per_buffer, buffers)]
       top(n).each { |site, c, b| lines << format('  %7.2f %8d  %s', c, b, site) }
+      # (objects ObjectSpace.each_object never yields: imemos, from a
+      # return or break out of a block, each_with_index, loop do, a
+      # captured block's environment; ObjectSpace.dump_all lists them
+      # with their sites; ui-perf-2 round 3 found 77 a frame there)
+      unseen = objects - sites.sum { |_, (c, _)| c }
+      lines << format('  %7.2f          without a site (imemos and other internal objects: ObjectSpace.dump_all shows them)', unseen.to_f / buffers) if unseen > buffers / 2
       lines.join("\n")
     end
   end

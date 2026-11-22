@@ -114,7 +114,17 @@ module MB
           @turns_left = nil
           @draws = Hash.new { |h, k| h[k] = [] }
           @lock = Mutex.new
+          @perf = nil
+          @slack = 0.0
         end
+
+        # A UI::Perf noting each pane's draws (`ui.perf`), or nil.
+        attr_accessor :perf
+
+        # The share of a frame period a pane may be early and still be due
+        # (besides a millisecond): 0, or UI::Pacer::TIMING_WINDOW with
+        # frames timed to snapshots, which come up to that early.
+        attr_accessor :slack
 
         # The painter's target rate (live panes run at it).
         attr_accessor :fps
@@ -157,7 +167,7 @@ module MB
         # overdue first; see #pick.
         def due?(priority, own_rate, explicit, drawn_at, now)
           return true if drawn_at.nil?
-          now - drawn_at >= 1.0 / rate(priority, own_rate, explicit) - 0.001
+          now - drawn_at >= 1.0 / rate(priority, own_rate, explicit) - 0.001 - @slack / @fps
         end
 
         # From +candidates+ ([[key, priority, lateness], ...]: panes due this
@@ -171,10 +181,34 @@ module MB
           (meters + others).map(&:first)
         end
 
+        # #pick without new Arrays: appends to +out+ the keys of the
+        # candidates other than meters (+keys+ with their lateness in
+        # +lates+, parallel Arrays) that draw: all of them, or the most late
+        # first up to the level's turns.  +keys+ and +lates+ are used up.
+        def pick_into(out, keys, lates)
+          turns = @turns_left
+          if turns.nil? || keys.length <= turns
+            keys.each { |k| out << k }
+            return out
+          end
+          turns.times do
+            best = 0
+            i = 1
+            while i < lates.length
+              best = i if lates[i] > lates[best]
+              i += 1
+            end
+            out << keys[best]
+            lates[best] = -Float::INFINITY
+          end
+          out
+        end
+
         # Notes that pane +name+ drew at +now+ (for #measured).
         def drew(name, now)
           @lock.synchronize do
             q = @draws[name]
+            @perf&.pane_drew(name, now, q.last)
             q << now
             q.shift while q.length > 1 && q[0] < now - WINDOW
           end

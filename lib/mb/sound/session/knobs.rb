@@ -286,8 +286,17 @@ module MB
 
           fresh.each { |k| follow_rack_knob(k) if k.rack_knob&.follow }
           joined.each_value { |k| k.listen(knob_midi) if k.cc && !k.listening }
+          note_knob_readers(player, joined.keys) if player
           joined
         end
+
+        # The Session knobs each player's graph read when it last joined
+        # ({ player name => [knob names] }, frozen; replaced, never changed,
+        # so threads read it without a lock): what "this track's knobs"
+        # means beyond the knobs named under it (tracks-enter-1: the tracks
+        # pane's Enter shows them in the knobs pane).  Names of knobs gone
+        # since may stay; readers filter by the knobs that exist.
+        def knob_readers = @knob_readers
 
         # Drops the rack knobs of players that are gone (see
         # Racks#prune_knob_instances): forgotten players' instances leave
@@ -384,6 +393,13 @@ module MB
           check_turn_keywords(keys)
           point = LaunchPoint.of(binding) or return nil
           k = knob!(name)
+          if value.nil? && keys.empty? && follow.nil? && over.nil? && from.nil?
+            # (ux-friction-1 round 2: the maintainer's `turn :'a/envelope'`
+            # with no value, after `turn :'a/drive'` said only "got nil")
+            return MB::Sound.live_error(ArgumentError.new(
+              "turn #{k.name.inspect} takes a value: it is at #{knob_info[k.name]} now (turn #{k.name.inspect}, #{GraphNode::Knob.number(k.range.end)} sets it)"
+            ))
+          end
           if !build && @arrangement&.build_knob?(k.name) && !(rebuilds = @arrangement.build_knob_tracks(k.name)).empty?
             # (3000.hz for a build knob's cutoff: its number; see #knob_value)
             typed = value.is_a?(MB::Sound::Pitch) || !(value.nil? || value.is_a?(Numeric) || value.respond_to?(:sample))
@@ -402,7 +418,7 @@ module MB
             raise ArgumentError, "Turn #{k.name.inspect} with keyframes (0 => a, 1.n8 => b) or a value, not both" unless value.nil? && over.nil? && follow.nil? && from.nil?
             return turn_keys(k, keys, curve, point, start_time)
           end
-          return turn_keys(k, { 0 => value }, nil, point, start_time) if gesture_for?(k, value, over, follow, point)
+          return turn_keys(k, { 0 => value.to_f }, nil, point, start_time) if gesture_for?(k, value, over, follow, point)
           asked = !follow.nil?
           value = follow if asked
           given = value
@@ -416,7 +432,14 @@ module MB
           time = start_time ? start_time.to_r : launch_time(point, [], default: nil)
           data = turn_data(value, over, curve).merge(from ? { from: from } : {}).merge(smooth.nil? ? {} : { smooth: smooth })
           knob_change(k, time, data) { |kn, frame, t|
-            apply_turn(kn, value, frame, t, over: over, curve: curve, smooth: smooth, from: from)
+            # (a take replaying a level gesture's line, `level :drums,
+            # -10.0.db`: the raw steps it recorded; see #gesture_line)
+            raw = over.nil? && value.is_a?(Numeric) ? replayed_gesture(k.name, t) : nil
+            if raw
+              raw.each { |off, v| kn.set(v, frame: frame + off) }
+            else
+              apply_turn(kn, value, frame, t, over: over, curve: curve, smooth: smooth, from: from)
+            end
           }
         end
 
@@ -528,12 +551,18 @@ module MB
         end
         private :play_gesture
 
-        # True if a plain turn of +k+ to +value+ is a live one-step
-        # gesture's line (see #gesture_line).
+        # True if a plain turn of +k+ to +value+ is a live gesture's line
+        # (see #gesture_line): a one-step gesture's value, or the one value
+        # its line printed (a level gesture's `level :drums, -10.0.db`: the
+        # gain that dB text gives, equal to the line's value however the
+        # last step's gain rounds).
         def gesture_for?(k, value, over, follow, point)
           return false unless value.is_a?(Numeric) && over.nil? && follow.nil? && !point.given?
           g = @render_lock.synchronize { @knob_gestures[k.name] } or return false
-          g.steps == [[0, value.to_f]]
+          v = value.to_f
+          return true if g.steps == [[0, v]]
+          f = g.fitted
+          !f.nil? && f.curve.nil? && f.keys.length == 1 && f.keys[0][0] == 0 && f.keys[0][1] == v
         end
 
         # Remembers every knob's value (or where it is heading, while it
@@ -673,10 +702,24 @@ module MB
         # 1.n8 => 0.4, 1.n4 => 0.62`; stepped knobs (Knob#choose) keep their
         # steps (`curve: :step`).  The take keeps the raw steps (see
         # #turn_keys).  Nil without a gesture.
+        #
+        # A player's level knob (:"drums/level", Faders) prints its final
+        # value as a `level` line instead, in dB as #level gives it
+        # (`level :drums, -10.0.db`; knobs-pane-keys-1, the maintainer's
+        # 2026-11-21 "one `level` line on release"): that line, matching the
+        # gesture (#gesture_for?), is the gesture's journal entry, its one
+        # undo step, and its take line, whose replay plays the raw steps
+        # (the sweep heard), as for any knob.
         def gesture_line(name, tolerance: Gesture::TOLERANCE)
           k = knob!(name)
           g = @render_lock.synchronize { @knob_gestures[k.name] } or return nil
           steps = @render_lock.synchronize { g.steps.map(&:dup) }
+          nm = Name[k.name]
+          if nm.level? && !steps.empty?
+            db = level_db(steps.last[1])
+            @render_lock.synchronize { g.fitted = Gesture.new([[0, db.to_f]]) }
+            return "level #{nm.owner.inspect}, #{RubyValue.to_ruby(db)}"
+          end
           fitted = Gesture.fit(steps, k.spec, tolerance: tolerance, stepped: k.stepped?)
           @render_lock.synchronize { g.fitted = fitted }
           fitted.to_ruby(g.name, per_sample: g.per_sample, rate: clock_rate)
@@ -737,9 +780,19 @@ module MB
           @knob_frame = nil
           @knob_midi = nil
           @knob_gestures = {}
+          @knob_readers = {}.freeze
           @committing_gesture = nil
           @alias_noted = nil
           @clamp_warned = nil
+        end
+
+        # Keeps +names+ as the knobs player +name+'s graph reads
+        # (#knob_readers), a new frozen Hash when they changed.
+        def note_knob_readers(name, names)
+          @knob_lock.synchronize {
+            return if @knob_readers[name] == names
+            @knob_readers = @knob_readers.merge(name => names.freeze).freeze
+          }
         end
 
         def knob_suggestion(name, define: false)

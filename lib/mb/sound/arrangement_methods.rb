@@ -47,12 +47,24 @@ module MB
       # Resonator effects play as struck instruments (`track :bells,
       # L.fx.bell` is L.inst.bell); other effects raise with where they go.
       #
+      # A track named like a playing `bg` graph takes the name over: with a
+      # graph, or a patch and a clip, it plays in place of the graph at its
+      # launch point; a patch with no clip yet leaves the graph playing
+      # until `bg :name, clip` (gen-ux-1).
+      #
       # +fx:+ is the track's effect insert (Arrangement::Fx): `track :keys,
       # L.inst.tine_piano, fx: L.fx.reverb.hall`, a chain `fx: [:juno1,
       # :hall]`; it stays through new instruments until given again (#fx
       # swaps it on a playing track).
       def track(name, *values, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, to: nil, send: nil, pre_send: nil, pre_mute_send: nil, clock: nil, trigger: false, fx: Arrangement::KEEP_FX, &patch)
-        Session.current.arrangement.track(name, *values, q: q, fade: fade, lead: lead, nudge: nudge, lead_max: lead_max, to: to, send: send, pre_send: pre_send, pre_mute_send: pre_mute_send, clock: clock, trigger: trigger, fx: fx, &patch)
+        session = Session.current
+        result = session.arrangement.track(name, *values, q: q, fade: fade, lead: lead, nudge: nudge, lead_max: lead_max, to: to, send: send, pre_send: pre_send, pre_mute_send: pre_mute_send, clock: clock, trigger: trigger, fx: fx, &patch)
+        if result.is_a?(Symbol) && (patch || !values.empty?) && !Session.context&.time && MB::Sound.live? && !session.playing_after_queue?(name)
+          # (ux-friction-1 round 2: his third take redefined a stopped
+          # track's voice and saw only `=> :test`, like round 1's fx)
+          $stdout.puts "\e[2mtrack #{name.inspect}: #{name.inspect} isn't playing, so its new sound plays from its next launch (bg #{name.inspect}, clip, its scene, or launch)\e[0m"
+        end
+        result
       end
       alias define_track track
 
@@ -68,6 +80,25 @@ module MB
         Session.current.arrangement.untrack(name)
       end
 
+      # Clears the set (fixes-15): stops everything now and takes out the
+      # tracks, scenes, flow, knobs, buses, routes, mute groups, clocks,
+      # racks, and master chain, so a new set starts empty (a demo does
+      # this first).  The tempo, meter, key, tuning, and master gain stay.
+      # One undo step: undo puts the whole set back, its players at the
+      # next bar.  Refused while a track is armed or wired.  Prints what
+      # it cleared.
+      #
+      #     clear_set
+      #     undo               # the set is back
+      def clear_set
+        s = Session.current
+        what = s.set_summary
+        return nil if s.clear_set.nil?
+
+        puts "clear_set: #{what.empty? ? 'the set was empty' : "cleared #{what}"} (undo puts it back)"
+        true
+      end
+
       # Gives track +name+ the effect insert +effects+ (Arrangement::Fx): a
       # library effect (`L.fx.reverb.hall`, `:hall`, `{ reverb: :plate }`),
       # a Proc taking the signal, or a list of those, processing what its
@@ -81,14 +112,37 @@ module MB
       #     fx :keys, L.fx.reverb.hall
       #     fx :keys, [:juno1, :hall], on: :bar
       #     fx :keys, :off
-      def fx(name, effects = Arrangement::KEEP_FX, at: nil, on: nil, in: nil)
+      #
+      # A block is not an effect: Ruby would drop it silently (the
+      # maintainer's `fx(:sub) { it.pan(1) }` changed nothing), so a block
+      # warns once per line, naming the Proc spelling, and is ignored.
+      def fx(name, effects = Arrangement::KEEP_FX, *_more, at: nil, on: nil, in: nil)
+        unless _more.empty?
+          # (ux-friction-1: the maintainer's guesses at a chain)
+          list = [effects, *_more].map { |e| e.is_a?(Library::Entry) ? e.head_path : e.inspect }.join(', ')
+          return MB::Sound.live_error(ArgumentError.new("fx #{name.inspect} takes one effect or a list: fx #{name.inspect}, [#{list}] (a list chains them in order)"))
+        end
+        if block_given?
+          n = name.inspect
+          Internal.warn_once_per_site(:fx_block,
+            "fx #{n} takes its effect as an argument, not a block, so the block was ignored#{' and nothing changed' if effects.equal?(Arrangement::KEEP_FX)}; " \
+            "give a Proc taking the track's signal: fx #{n}, ->(s) { s.pan(1) }")
+        end
         arrangement = Session.current.arrangement
         if effects.equal?(Arrangement::KEEP_FX)
           tr = arrangement.tracks[name] or raise ArgumentError, "fx #{name.inspect}: no track #{name.inspect}#{GraphIO.suggest(name, arrangement.tracks.keys)}"
           return tr.fx || []
         end
         point = LaunchPoint.of(binding) or return nil
-        arrangement.fx(name, effects, point)
+        result = arrangement.fx(name, effects, point)
+        if result.is_a?(Symbol) && !Session.context&.time && MB::Sound.live?
+          # (ux-friction-1: fx on a stopped track returned :pluck and he
+          # couldn't tell anything had happened until his next `bg :pluck`)
+          tr = arrangement.tracks[name]
+          what = tr&.fx ? Arrangement::Fx.label(tr.fx) : 'no effect'
+          $stdout.puts "\e[2mfx #{name.inspect}: #{name.inspect} isn't playing, so #{what} plays from its next launch (bg #{name.inspect}, its scene, or launch)\e[0m" unless Session.current.playing_after_queue?(name)
+        end
+        result
       rescue Arrangement::Fx::Error => e
         MB::Sound.live_error(e)
       end
@@ -148,7 +202,15 @@ module MB
           entry = seek(section, at: point)
           others = pb.sections_for_scene(name) - [section]
           also = others.empty? ? '' : "; also #{others.map(&:inspect).join(', ')}: go #{name.inspect}, section: #{others.first.inspect}"
-          puts "\e[2mgo #{name.inspect}: the flow seeks to its section #{section.inspect} (#{entry.respond_to?(:lands) ? entry.lands : 'queued'}) and plays on from there#{also}\e[0m" if entry
+          if entry
+            # (fixes-15: "(101:1)" alone read as where the section is; it
+            # is where the seek lands, here before the section's place)
+            lands = entry.respond_to?(:lands) ? entry.lands : nil
+            to = pb.seek_target(section)
+            way = to && lands ? (to < lands.pos ? ' back' : to > lands.pos ? ' ahead' : '') : ''
+            place = to ? " (#{arr.session.stamp(to)})" : ''
+            puts "\e[2mgo #{name.inspect}: #{lands ? "at #{lands}" : 'when it lands'} the flow seeks#{way} to its section #{section.inspect}#{place} and plays on from there#{also}\e[0m"
+          end
           return entry
         end
 
@@ -274,9 +336,26 @@ module MB
       def level(name = nil, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, smooth: nil)
         session = Session.current
         return session.levels if name.nil?
+        if name.is_a?(Numeric) && !name.is_a?(Integer)
+          # (ux-friction-1 round 2: the maintainer's `level -30.db`)
+          return MB::Sound.live_error(ArgumentError.new(
+            "level takes a name first: level :drums, #{name.inspect} (a player's number: level 2, #{name.inspect}); the whole mix is master_gain #{name.inspect}"
+          ))
+        end
         name = player_name(name)
         return session.level(name) if value.nil?
         point = LaunchPoint.of(binding) or return nil
+        return nil unless strip_names_known?(:level, [name])
+        if name.is_a?(Symbol) && session.names.kind(name) == :bus
+          # (ux-friction-1: his `level :hall, -80.db` made a knob that
+          # nothing reads; buses have no fader, Faders#fader_levels is
+          # players' only)
+          sends = session.routes.select { |_, r| r[:send]&.key?(name) }.keys
+          return MB::Sound.live_error(ArgumentError.new(
+            "level #{name.inspect}: a bus has no level of its own (the knob would change nothing); mute #{name.inspect} silences it, " \
+            "feed :#{sends.first || 'track'}, #{name.inspect}, 0 closes one send#{sends.empty? ? '' : " (sending: #{sends.map(&:inspect).join(', ')})"}"
+          ))
+        end
         session_command(name, label: "level #{name.inspect}", kind: :turn) { |s, time|
           s.level(name, value, at: point, over: over, curve: curve, from: from, smooth: smooth, start_time: point.given? ? nil : time)
         }
@@ -404,6 +483,7 @@ module MB
       # scheduled block's time inside one, and is one undo step).
       def strip_command(kind, names, point, fade:)
         names = names.flatten.map { |n| player_name(n) }
+        return nil unless strip_names_known?(kind, names)
         label = "#{kind} #{names.map(&:inspect).join(', ')}".strip
         value = session_command(names, label: label) { |session, time|
           session.public_send(kind, *names, at: point, fade: fade, start_time: point.given? ? nil : time)
@@ -413,6 +493,39 @@ module MB
         session = Session.current
         entries = value.map { |c| session.journal[c.seq] }
         entries.length == 1 ? entries.first : entries
+      end
+
+      # False (after MB::Sound.live_error with a did-you-mean, so the
+      # command does nothing) if a name in +names+ is nothing a strip
+      # command (+command+: mute, solo, level, ...) can act on, a track,
+      # player, bus, rack, or mute group (or a monitor, cue, or wire of
+      # one), or a name already muted or soloed, while a known name is
+      # spelled close to it: a typo (ux-friction-1: the maintainer's
+      # `solo :plubk` silenced every track but a name that wasn't there;
+      # `level :plubk` made a knob).  A new name nothing is spelled like
+      # still works, applying when a player of that name starts (lesson
+      # :design sets `level :l_lead, -16.db` before `design :l_lead`);
+      # live, a dim line says so.  Scheduled blocks (a context with a
+      # time) skip the check.
+      def strip_names_known?(command, names)
+        ctx = Session.context
+        return true if ctx&.time || ctx&.batch || names.empty?
+        session = Session.current
+        info = session.strip_info
+        known = session.names.to_h.reject { |_, kind| kind == :knob || kind == :knob_group || kind == :clock }.keys |
+                session.players.keys | session.arrangement.tracks.keys | session.mute_groups.keys | info[:muted] | info[:soloed]
+        names.each do |n|
+          next if n.is_a?(Integer) || known.include?(n) || known.include?(Session::Name[n].strip_owner)
+
+          hint = GraphIO.suggest(n, known)
+          if hint.empty?
+            $stdout.puts "\e[2m#{command} #{n.inspect}: nothing is named #{n.inspect} yet; it applies when a player of that name starts\e[0m" if MB::Sound.live?
+            next
+          end
+          MB::Sound.live_error(ArgumentError.new("#{command} #{n.inspect}: no track, player, bus, or mute group #{n.inspect}#{hint} (tracks lists them)"))
+          return false
+        end
+        true
       end
 
       # Runs a hold or unhold command (see #hold) like #strip_command.

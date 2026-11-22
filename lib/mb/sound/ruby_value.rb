@@ -264,7 +264,11 @@ module MB
       # scales that don't repeat at the octave.
       def scale(s)
         return nil unless s.period == 12
+        # (scales made without a root follow the session key in
+        # generators, so they print without one; gen-ux-1)
+        return 'scale(:key)' if s.following == :key
         list = s.name && MB::Sound::Scale::OFFSETS[MB::Sound::Scale::ALIASES.fetch(s.name, s.name)] == s.offsets ? s.name.inspect : to_ruby(s.offsets)
+        return "scale(#{list})" if s.following == :root
         root = s.root.is_a?(Integer) ? pitch(MB::Sound::Note.new(s.root)) : number(s.root)
         "scale(#{list}, #{root})"
       end

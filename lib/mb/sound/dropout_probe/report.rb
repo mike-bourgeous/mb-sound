@@ -108,6 +108,8 @@ module MB
           end
           out << format("Probe's own thread: %.0f ms CPU over %d polls taking %s", t[:probe_cpu_ms], t[:polls], pct(h[:poll]))
 
+          out.concat(stack_lines)
+
           unless (m = matched_marks).empty?
             out << ''
             hits = m.count { |x| x[:cause] == x[:label].to_sym }
@@ -192,8 +194,28 @@ module MB
               poll_ms: hist_h(h[:poll]),
             },
             marks: matched_marks,
+            stacks: @probe.stacks,
             dropouts: @dropouts.map { |d| dropout_h(d) },
           }
+        end
+
+        # Ruby frames shown per stack in the text report.
+        STACK_FRAMES = 6
+
+        # The text report's lines for the stack samples (the probe's
+        # +stacks+ option): the most common places, each with its innermost
+        # Ruby frames and native frames.
+        def stack_lines
+          stacks = @probe.stacks
+          return [] if stacks.empty?
+
+          lines = ['', format('Where GVL holders were while the render thread waited (%d samples):', stacks.length)]
+          stacks.group_by { |s| [s[:holder], s[:ruby].first(STACK_FRAMES), s[:c].first(4)] }.sort_by { |_, v| -v.length }.first(8).each do |(holder, rb, c), xs|
+            lines << format('  %d x %s, at %s (waits to %.1f ms)', xs.length, holder || 'another thread', xs.map { |x| "+#{self.class.elapsed(x[:t_s] * 1e9)}" }.first(4).join(' '), xs.map { |x| x[:wait_ms] }.max)
+            rb.each { |f| lines << "      #{f}" }
+            lines << "      native: #{c.join(' < ')}" unless c.empty?
+          end
+          lines
         end
 
         def csv

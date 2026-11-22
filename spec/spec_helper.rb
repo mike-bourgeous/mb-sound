@@ -37,6 +37,14 @@ ENV['GLHTUI'] = '0' # FIXME: still can't run rspec when injecting plotter
 # turn them off; the slow-warning specs turn them back on.
 ENV['MB_SOUND_SPEED_WARNINGS'] ||= '0'
 
+# The UI paces frame writes for the detected terminal by default
+# (pace-default-1, 2026-11-21: Konsole before 26.04 from KONSOLE_VERSION),
+# so specs run from a Konsole would pace their screens differently: specs
+# (and scripts they run) see no terminal identity and the default pacing;
+# specs of the pacing set a UI::TerminalProfile themselves.
+ENV.delete('KONSOLE_VERSION')
+ENV.delete('MB_SOUND_UI_PACE')
+
 require 'mb/util'
 require 'mb/m/rspec_matchers'
 require 'mb/sound'
@@ -97,6 +105,7 @@ require_relative 'support/render_window_song'
 require_relative 'support/clip_node_reference'
 require_relative 'support/plan_helpers'
 require_relative 'support/kernel_helpers'
+require_relative 'support/env_restore' # (OUTPUT_TYPE and friends put back after every example)
 require_relative 'support/transport_guard'
 require_relative 'support/session_guard'
 require_relative 'support/spawn_guard' # (process starts while a Session plays)
@@ -113,6 +122,7 @@ require_relative 'support/carry_check'
 require_relative 'support/render_budget'
 require_relative 'support/multiple_exception_backtrace' # (RSpec's formatters and two after-hook errors)
 require_relative 'support/rss_report'
+require_relative 'support/ui_thread_guard' # (examples leaving UI threads running; before ui_screen_guard: its around hook is outside)
 require_relative 'support/ui_screen_guard'
 
 # Records the extension methods each memcheck spec calls (rake memcheck:map)

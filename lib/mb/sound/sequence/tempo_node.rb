@@ -46,6 +46,14 @@ module MB
 
         MODES = [:hz, :seconds].freeze
 
+        # Tempo-synced rates and delay times keep running while the
+        # transport is paused (maintainer, 2026-11-21: only the bar
+        # position stops); a resume with +resync: true+ re-places them on
+        # the grid (see TimelineNode#timeline_hold_mode).
+        def timeline_hold_mode
+          :runs
+        end
+
         # The smallest +count+ read (see the class description): a cycle
         # this many times the duration.
         MIN_COUNT = 1.0 / 256

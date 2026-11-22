@@ -229,6 +229,66 @@ module MB
           plan
         end
 
+        # The cycles ([output start, input start, length], as for
+        # #fixed_plan) of a stretch of +x+ (a 1D array) to +out_len+
+        # samples that is anchored at both ends: the first cycle starts on
+        # the input's first sample (so it follows on from whatever was
+        # played before +x+) and the last ends on the input's last
+        # sample, or up to two search radii before it.  Equal cycles of
+        # about +cycle+ samples, each starting where the input best
+        # matches what follows the cycle before (#best_match, as in
+        # #fit_plan: within FIT_SEARCH cycles, or 0.55 of the local
+        # period, of its even place between the ends), so no cycle is
+        # forced to a place far behind the others.  For the slice
+        # stretch's filled decays (SliceStretch.fill_slice).  +map+ (the
+        # input position of each output sample, +out_len+ + 1 values from
+        # 0 to the input's length) puts the cycles' places on an uneven
+        # stretch instead of an even one.  +x+ must be at least as long as
+        # the longest cycle.
+        def anchored_plan(x, out_len, cycle, sample_rate: 48000, map: nil)
+          x = Numo::DFloat.cast(x)
+          n = x.length
+          count = MB::M.max(2, (out_len.to_f / cycle).round)
+          starts = Array.new(count + 1) { |j| (j * out_len / count.to_r).round }
+          last_len = starts[count] - starts[count - 1]
+          longest = (1..count).map { |j| starts[j] - starts[j - 1] }.max
+          raise ArgumentError, "An anchored plan needs at least a cycle of input (#{n} samples for cycles of #{longest})" if n < longest
+
+          radius = MB::M.max(2, (cycle * FIT_SEARCH).round)
+          win = MB::M.max(8, cycle / 2)
+          min_lag = MB::M.max(2, (sample_rate / FIT_MAX_PITCH).round)
+          max_lag = MB::M.max(min_lag + 2, (cycle * (1 + FIT_SEARCH)).round)
+          pwin = MB::M.max(win, max_lag)
+          pad = Numo::DFloat.zeros(n + 3 * longest + 2 * radius + 2 * pwin + max_lag + 2)
+          pad[0...n] = x
+          energy = Numo::DFloat.zeros(pad.length + 1)
+          energy[1..] = (pad * pad).cumsum
+
+          plan = [[0, 0, starts[1]]]
+          period = nil
+          misses = 0
+          slope = out_len > last_len ? (n - last_len).to_f / (out_len - last_len) : 0.0
+          (1...count).each do |j|
+            o = starts[j]
+            len = starts[j + 1] - o
+            _, src, played = plan.last
+            found = src + max_lag + pwin <= n ? local_period(pad, energy, src, min_lag, max_lag, pwin, period) : period
+            misses = found ? 0 : misses + 1
+            period = found || (misses <= FIT_PERIOD_HOLD ? period : nil)
+
+            ideal = MB::M.clamp((map ? map[o] : o * slope).round, 0, n - len)
+            r = period ? MB::M.max(radius, (period * 0.55).ceil) : radius
+            lo, hi = j == count - 1 ? [n - len - 2 * r, n - len] : [ideal - r, MB::M.min(ideal + r, n - len)]
+            nxt = j == count - 1 ? n - len : ideal
+            if src + played < n && hi >= MB::M.max(lo, 0)
+              m, score = best_match(pad, energy, src + played, lo, hi, win)
+              nxt = m if score >= FIT_SPLICE_MIN
+            end
+            plan << [o, nxt, len]
+          end
+          plan
+        end
+
         # The highest pitch (Hz) Lofi.fit_plan looks for a period of.
         FIT_MAX_PITCH = 2000
 
@@ -332,8 +392,11 @@ module MB
         # The output of +plan+ ([output start, input start, length] cycles)
         # over +x+, +out_len+ samples long, each cycle running +crossfade+
         # samples past its length into the next one's start (see
-        # #crossfade_gains).
-        def play_plan(x, plan, out_len, crossfade)
+        # #crossfade_gains).  +gain+ (a Proc of a cycle's output start,
+        # input start, and length, as played) gives each cycle's samples
+        # their gains (an array of that length), for stretches that shape
+        # the level (SliceStretch.fill_slice).
+        def play_plan(x, plan, out_len, crossfade, gain: nil)
           n = x.length
           longest = plan.map { |c| c[2] }.max || 0
           out = Numo::DFloat.zeros(out_len + longest + crossfade)
@@ -349,6 +412,7 @@ module MB
             len = MB::M.min(cycle + f, n - src)
             if len > 0
               seg = x[src...(src + len)].dup
+              seg *= gain.call(o, src, len) if gain
               seg[0...fade_in.length] *= fade_in if fade_in
               if f > 0
                 g_out, fade_in = crossfade_gains(x[(src + cycle)...(src + cycle + f)], x[nxt[1]...(nxt[1] + f)])

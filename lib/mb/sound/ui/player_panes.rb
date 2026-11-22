@@ -53,7 +53,7 @@ module MB
             right = "  #{time}  "
             x = c.line(0, [g, role], ' ', [count, :dim])
             room = c.w - x - right.length - vol_text.length - 12
-            x = c.text(x, 0, c.fit(it.title, [room, 8].max), :name)
+            x = c.text_fit(x, 0, it.title, [room, 8].max, :name)
             x = c.text(x, 0, right, :key)
             meter_w = c.w - x - vol_text.length - 2
             x = c.meter(len && len > 0 ? pos / len : 0.0, width: meter_w, x: x, y: 0, role: :key) if meter_w >= 4
@@ -79,7 +79,7 @@ module MB
                            end
               len = it.length ? Player::Item.clock(it.length) : ''
               x = c.line(y, [mark, role], ' ')
-              c.text(x, y, c.fit(it.title, c.w - x - len.length - 1), i == cur ? :name : i < cur ? :dim : :text)
+              c.text_fit(x, y, it.title, c.w - x - len.length - 1, i == cur ? :name : i < cur ? :dim : :text)
               c.text(c.w - len.length, y, len, :dim) unless len.empty?
             end
           end

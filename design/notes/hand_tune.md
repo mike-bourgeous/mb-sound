@@ -180,7 +180,7 @@ tuner                     # step 1: the queue's references, tmp/refs/, loaded sa
 # a listens on its note, b A/B with the reference, e puts its tune line on the console, Enter tunes
 # step 3: the sound screen with the strip; turn knobs; b flips; R refines (R again: A/B the proposal), A applies
 # w: back to the synths (try another), W: the references; Esc in the lists goes a step back
-tuner 'tmp/samples-cc0'   # another folder (remembered)
+tuner '/app/workbench/data/samples/cc0'   # another folder (remembered)
 take.save :tmp, 'tuned with the tuner'
 puts take.turns           # the tune line's knobs, his turns
 tuner off                 # the screen before

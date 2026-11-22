@@ -64,8 +64,9 @@ module MB
 
         # +field+ is a Field or FieldTimeline; +around+ the note number the
         # motifs center on; +step+ a Rational; the rest as MB::Sound#motifs.
-        # +fields+ (for a steered +range:+) gives [field, around] for a
-        # range.  A steered +density+ (G3) builds motifs at +home+ (a
+        # +fields+ (for a steered +range:+ or a source following the key)
+        # gives [field, around] for a range and a resolved source (nil for
+        # what doesn't move).  A steered +density+ (G3) builds motifs at +home+ (a
         # library generator's default density; gen-knobs-1), else
         # CORE_DENSITY.
         def initialize(field, steps:, step:, form:, answer:, density:, vary:, mutate:, evolve:, leap:, around:, velocity:, legato:, seed:, fields: nil,
@@ -112,12 +113,13 @@ module MB
         # the cycle: +density+ thins or fills the motifs' rhythms around
         # CORE_DENSITY (the same draws every cycle, so a density brings the
         # same notes back and raising it only adds notes), +vary+ and
-        # +mutate+ replace the numbers, +range+ picks the register.
-        def events(cycle, dice, density: nil, vary: @vary, mutate: @mutate, range: nil)
+        # +mutate+ replace the numbers, +range+ picks the register, +key+
+        # is the source resolved for the session key (KeyFollow).
+        def events(cycle, dice, density: nil, vary: @vary, mutate: @mutate, range: nil, key: nil)
           letter, _pass, gen, pos = position(cycle)
           return [] unless letter
 
-          field, around = range ? field_for(range) : [@field, @around]
+          field, around = range || key ? field_for(range, key) : [@field, @around]
           source = @answer[letter]
           m = motif(source || letter, gen, mutate.to_f.clamp(0.0, 1.0))
           m = steer_density(source || letter, m, density.to_f.clamp(0.0, 1.0)) if density
@@ -317,13 +319,16 @@ module MB
           }
         end
 
-        # [field, around] for a steered +range+ (cached).
-        def field_for(range)
-          @mutex.synchronize { @by_range[range] } || begin
-            pair = @fields.call(range).freeze
+        # [field, around] for a steered +range+ and a source resolved for
+        # the session key (+key+; gen-ux-1), either nil when it doesn't
+        # move (cached).
+        def field_for(range, key = nil)
+          id = [range, key]
+          @mutex.synchronize { @by_range[id] } || begin
+            pair = @fields.call(range, key).freeze
             @mutex.synchronize {
               @by_range.shift while @by_range.length >= 16
-              @by_range[range] ||= pair
+              @by_range[id] ||= pair
             }
           end
         end

@@ -417,6 +417,39 @@ module MB
         @checkout_tmp_dir = main && File.join(main, 'tmp')
       end
 
+      # The folder +name+ of the handoff inbox: #checkout_tmp_dir/<name>
+      # (the main checkout's tmp/, or $MB_SOUND_CHECKOUT_TMP), else the
+      # user data directory's tmp/<name> for an installed gem.  Where
+      # DropoutProbe.default_path saves (console-offers-1).
+      def checkout_inbox(name)
+        base = checkout_tmp_dir
+        base ? File.join(base, name.to_s) : user_data_dir('tmp', name)
+      end
+
+      # Prints +text+ from a background thread (a probe, a device report)
+      # where console output goes without tearing a screen
+      # (console-offers-1): with the tiles up, above the REPL pane's prompt
+      # (MB::Term::Input::ReplHost#print_above, which redraws the line
+      # being typed); with another screen owning the terminal (the band),
+      # into UI.messages as notes; otherwise (or on the REPL's own thread,
+      # whose output is the REPL's) $stdout.  Returns nil.
+      def console_puts(text)
+        s = defined?(UI) && UI.respond_to?(:screen) ? UI.screen : nil
+        if s && !UI.repl_thread?
+          host = s.respond_to?(:host) ? s.host : nil
+          if host.respond_to?(:print_above)
+            host.print_above(text.to_s)
+            return nil
+          end
+          if UI.owns_terminal?
+            text.to_s.each_line { |l| UI.messages.add(l, severity: :note) }
+            return nil
+          end
+        end
+        $stdout.puts(text)
+        nil
+      end
+
       # $MB_SOUND_CHECKOUT_TMP as a full path, or nil (see
       # #checkout_tmp_dir).
       def checkout_tmp_override
@@ -459,6 +492,29 @@ module MB
             "or give #{name.inspect} a patch that reads it#{wire_hint(name)}"
           )
         end
+      end
+
+      # An ArgumentError for console +command+ (bg, swap) given track
+      # +name+ and a Symbol +ref+ naming a clip (a slot, a capture, or
+      # another track's named clip, as `launch` and `cue` find them),
+      # pointing at `launch`/`cue`, else nil (ux-friction-1: the
+      # maintainer's `bg :pluck, :pad` and `swap :pluck, :pad` said "No
+      # preset or genre :pad" and "Pass a Clip..."; `cue :pluck, :pad` then
+      # `launch` was what played pad's clip on the pluck).
+      def clip_name_for_track_error(command, name, ref)
+        return nil unless name.is_a?(Symbol) && ref.is_a?(Symbol)
+        arr = Session.current.arrangement
+        return nil unless arr.tracks[name]&.patch?
+        named = ->(list) { list.find { |c| c.respond_to?(:named?) && c.named? && c.name == ref } }
+        found = named.(arr.slots(name)) || arr.captures[ref] || arr.all_slots.each_value.lazy.map { |l| named.(l) }.find(&:itself)
+        return nil unless found
+
+        ArgumentError.new(
+          "#{command} #{name.inspect}, #{ref.inspect}: #{ref.inspect} is a clip's name; launch #{name.inspect}, #{ref.inspect} plays it on " \
+          "#{name.inspect}'s instrument at its launch point (cue #{name.inspect}, #{ref.inspect} auditions it first, then launch)"
+        )
+      rescue StandardError
+        nil
       end
 
       # Library Entry +entry+ given to +command+ (`bg`) for the existing

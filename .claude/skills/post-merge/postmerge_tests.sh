@@ -6,9 +6,15 @@
 # maintainer asks: full runs are manual since 2026-10-18).  Each merge of
 # the batch already passed `rake merge:gate`.  Output files go in $OUT
 # (default: a new temp dir), so results can be grepped instead of rerun.
-# Usage: .claude/skills/post-merge/postmerge_tests.sh [checkout dir]
+# Usage: .claude/skills/post-merge/postmerge_tests.sh <worktree dir>
+# (a worktree on local disk, never /app: the maintainer reserves /app for his
+# own native extension builds, 2026-11-17)
 set -uo pipefail
-cd "${1:-/app}"
+if [ -z "${1:-}" ] || [ "$(cd "$1" && pwd -P)" = "$(cd /app && pwd -P)" ]; then
+  echo "usage: $0 <worktree dir> (not /app: it is reserved for the maintainer's own builds)" >&2
+  exit 2
+fi
+cd "$1"
 OUT="${OUT:-$(mktemp -d -t postmerge.XXXXXX)}"
 export OUT
 echo "output in $OUT"

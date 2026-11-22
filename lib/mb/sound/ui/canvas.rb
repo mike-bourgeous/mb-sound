@@ -70,7 +70,7 @@ module MB
         # Levels for sparklines (lowest to highest).
         SPARKS = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'].freeze
 
-        attr_reader :x, :y, :w, :h, :grid
+        attr_reader :x, :y, :w, :h, :grid, :glyph_set
 
         # The row #puts writes next.
         attr_accessor :row
@@ -84,6 +84,8 @@ module MB
           @row = 0
           @glyph_set = glyphs
           @glyphs = MB::Term::Themes.glyphs(glyphs)
+          @blank = nil
+          @spark = nil
         end
 
         # A glyph by name (see GLYPHS).
@@ -113,8 +115,83 @@ module MB
             str = str[-x..] || ''
             x = 0
           end
-          @grid.text(@x + x, @y + y, Canvas.clip(str, @w - x), fg: Theme.rgb(role), bold: bold || MB::Term::Themes.bold?(role), max: @w - x)
+          room = @w - x
+          if str.length > room && str.match?(NONBLANK, room)
+            # (Canvas.clip without a new String: the first room - 1
+            # characters, then the ellipsis; ui-perf-2 round 3)
+            fg = Theme.rgb(role)
+            b = bold || MB::Term::Themes.bold?(role)
+            @grid.text(@x + x, @y + y, str, fg: fg, bold: b, max: room - 1)
+            @grid.text(@x + x + room - 1, @y + y, ELLIPSIS, fg: fg, bold: b)
+          else
+            # (fits, or only blanks cut: max: chops them)
+            @grid.text(@x + x, @y + y, str, fg: Theme.rgb(role), bold: bold || MB::Term::Themes.bold?(role), max: room)
+          end
           x + str.length
+        end
+
+        # Anything but the blanks String#strip removes (Canvas.clip keeps
+        # a cut that loses only those without an ellipsis).
+        NONBLANK = /[^\s\0]/
+
+        # The cut mark.
+        ELLIPSIS = '…'
+
+        # Blanks for #text_pad and #run_pad.
+        BLANKS = (' ' * 400).freeze
+
+        # #text of #fit(+str+, +n+), without new Strings where the result
+        # fits the pane (ui-perf-2 round 3: #fit and #pad made about a
+        # quarter of the sound screen's garbage).  Returns the column after
+        # it.
+        def text_fit(x, y, str, n, role = nil, bold: false)
+          str = str.to_s
+          len = str.length
+          return text(x, y, str, role, bold: bold) if len <= n
+          return text(x, y, fit(str, n), role, bold: bold) if x < 0 || n > @w - x || n < 2 || !@grid.respond_to?(:put_text)
+          return x + n if y < 0 || y >= @h
+
+          fg = Theme.rgb(role)
+          b = bold || MB::Term::Themes.bold?(role)
+          @grid.text(@x + x, @y + y, str, fg: fg, bold: b, max: n - 1)
+          @grid.text(@x + x + n - 1, @y + y, ELLIPSIS, fg: fg, bold: b)
+          x + n
+        end
+
+        # #text of #pad(+str+, +n+), without new Strings where it fits the
+        # pane.  Returns the column after it.
+        def text_pad(x, y, str, n, role = nil, bold: false)
+          str = str.to_s
+          m = str.length < n ? str.length : n
+          return text(x, y, pad(str, n), role, bold: bold) if x < 0 || n > @w - x || n - m > BLANKS.length || !@grid.respond_to?(:put_text)
+          return x + n if y < 0 || y >= @h
+
+          text_fit(x, y, str, n, role, bold: bold)
+          @grid.text(@x + x + m, @y + y, BLANKS, fg: Theme.rgb(role), bold: bold || MB::Term::Themes.bold?(role), max: n - m) if m < n
+          x + n
+        end
+
+        # #run of #pad(+str+, +n+) (no background), without new Strings
+        # where it fits the pane: a native grid's put_text writes what
+        # put_run would with no background.  Returns the column after it.
+        def run_pad(x, y, str, n, role = nil, reverse: false, bold: false)
+          str = str.to_s
+          m = str.length < n ? str.length : n
+          return run(x, y, pad(str, n), role, reverse: reverse, bold: bold) if x < 0 || n > @w - x || n - m > BLANKS.length || !@grid.respond_to?(:put_text) || n < 2
+          return x + n if y < 0 || y >= @h
+
+          attr = (reverse ? MB::Term::Cells::REVERSE : 0) | (bold || MB::Term::Themes.bold?(role) ? MB::Term::Cells::BOLD : 0)
+          fg = MB::Term::Cells.pack(Theme.rgb(role))
+          gx = @x + x
+          gy = @y + y
+          if str.length > n
+            @grid.put_text(gx, gy, str, fg, attr, n - 1)
+            @grid.put_text(gx + n - 1, gy, ELLIPSIS, fg, attr, nil)
+          else
+            @grid.put_text(gx, gy, str, fg, attr, nil)
+            @grid.put_text(gx + m, gy, BLANKS, fg, attr, n - m) if m < n
+          end
+          x + n
         end
 
         # +str+ cut to +room+ columns: with a final ellipsis when anything
@@ -198,8 +275,7 @@ module MB
         # role] pairs.  Returns the column after them.
         def line(y, *segments, x: 0)
           segments.each do |seg|
-            str, role = seg.is_a?(Array) ? seg : [seg, nil]
-            x = text(x, y, str, role)
+            x = seg.is_a?(Array) ? text(x, y, seg[0], seg[1]) : text(x, y, seg, nil)
           end
           x
         end
@@ -223,7 +299,10 @@ module MB
           hold_at = hold && hold > 0 ? (hold.to_f.clamp(0.0, 1.0) * width).floor : nil
           # Runs of one color become one write
           cx = x
-          run = +''
+          # (one buffer per thread, cleared per run: the grid copies what
+          # #text writes; ui-perf-1)
+          run = (Thread.current[:mb_sound_meter_run] ||= +'')
+          run.clear
           run_role = nil
           width.times do |i|
             e = (eighths - i * 8).clamp(0, 8)
@@ -235,7 +314,7 @@ module MB
             end
             if r != run_role && !run.empty?
               cx = text(cx, y, run, run_role)
-              run = +''
+              run.clear
             end
             run_role = r
             run << ch
@@ -247,12 +326,16 @@ module MB
         # A sparkline of +values+ from +lo+ to +hi+ (the last values that
         # fit +width+).  Returns the column after it.
         def sparkline(values, lo: 0.0, hi: 1.0, width: @w, x: 0, y: @row, role: :key)
-          vals = values.last(width)
           span = (hi - lo).to_f
-          str = vals.map { |v|
-            f = span > 0 ? ((v.to_f - lo) / span).clamp(0.0, 1.0) : 0.0
-            SPARKS[(f * (SPARKS.length - 1)).round]
-          }.join
+          # (one String per canvas, refilled: no Arrays per draw; ui-perf-1)
+          str = (@spark ||= +'')
+          str.clear
+          i = values.length > width ? values.length - width : 0
+          while i < values.length
+            f = span > 0 ? ((values[i].to_f - lo) / span).clamp(0.0, 1.0) : 0.0
+            str << SPARKS[(f * (SPARKS.length - 1)).round]
+            i += 1
+          end
           text(x, y, str, role)
         end
 
@@ -279,7 +362,15 @@ module MB
         private
 
         def zone_role(zones, at)
-          zones.each { |upto, role| return role if at <= upto }
+          # (a while loop: a return out of a block allocates an imemo, once
+          # per meter cell; 77 of the tiles' 104 objects a frame)
+          i = 0
+          n = zones.length
+          while i < n
+            z = zones[i]
+            return z[1] if at <= z[0]
+            i += 1
+          end
           zones.last[1]
         end
       end

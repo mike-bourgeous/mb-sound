@@ -183,12 +183,17 @@ module MB
       # it lands (techno's breakdown scene, YJIT off: 584-614 ms -> 93-102
       # ms; the rehearsal compiles code and nothing more, 2.2 s for no gain
       # without YJIT; kit-live-1, the maintainer's "Yes, always warm",
-      # 2026-11-02; before, :auto ran with YJIT only).  Returns the
-      # Form::Playback.
+      # 2026-11-02; before, :auto ran with YJIT only).  The first section's
+      # tracks land together once the last is built (Form::Playback#begin_first);
+      # in the console a realtime session that isn't playing yet says so
+      # first (#start_note).  Returns the Form::Playback.
       def play_form(form, at: nil, on: nil, in: nil, seed: nil, warm_up: :auto)
         point = LaunchPoint.of(binding) or return nil
         raise ArgumentError, "Expected a Form (got #{form.class})" unless form.is_a?(Form)
         @mutex.synchronize { @form_checks.dup }.each { |check| check.call(form) }
+        if MB::Sound.live? && @session.realtime? && @session.idle? && !Session.context&.replaying? && (note = start_note(form))
+          puts "\e[2m#{note}\e[0m"
+        end
 
         # Compile the tracks' builds before the first scene change needs them
         raise ArgumentError, "warm_up: must be :auto, true, or false (got #{warm_up.inspect})" unless [:auto, true, false].include?(warm_up)
@@ -206,6 +211,20 @@ module MB
         end
 
         launch_form(form, point, seed || MB::Sound.next_seed)
+      end
+
+      # What starting +form+ does first, for the console and NAV Space
+      # (form-start-1): "starting: building 8 tracks, landing together
+      # ..." for its first section's scene (Form::Playback#begin_first),
+      # or nil when that scene starts no track.
+      def start_note(form)
+        first = form.generative? ? nil : form.steps.first&.first
+        sec = first && form.sections[first]
+        return nil unless sec && sec.scene != false
+        sc = @mutex.synchronize { @scenes[sec.scene || first] } or return nil
+        n = tracks.count { |name, tr| v = sc.values.key?(name) ? sc.values[name] : unnamed_value(sc, tr); v != :off && v != :keep && !v.is_a?(Numeric) }
+        return nil if n == 0
+        "starting: building #{n} track#{'s' unless n == 1}, landing together ..."
       end
 
       # Sets the set-wide launch quantization (see the class comment).
@@ -411,10 +430,39 @@ module MB
         else
           # (not playing after all: the knobs take their values now)
           landings.each { |k, v| k.set(v, frame: k.next_frame) unless v == k.value }
+          take_over_player(tr) if old.nil? && @session.playing_after_queue?(name)
         end
         name
       ensure
         drop_checked_build unless ahead
+      end
+
+      # A new track +tr+ named like a playing player that isn't a track (a
+      # `bg :x, graph`) takes the name over (gen-ux-1 round 2; the
+      # maintainer's take, 2026-11-21: `track(:x) { }` over a playing bg
+      # graph returned :x while the graph played on): with something to
+      # play (its graph, or its patch with a clip) it starts at its launch
+      # point in place of the graph, as a scene's :on would; with nothing
+      # yet (a patch, no clip) the graph plays on and the console says how
+      # to go on.
+      def take_over_player(tr)
+        name = tr.name
+        unless tr.graph || (tr.patch? && tr.clip)
+          if MB::Sound.live?
+            $stdout.puts "track #{name.inspect}: the graph playing as #{name.inspect} plays on until the track gets a clip (bg #{name.inspect}, clip) or it stops (stop #{name.inspect})"
+          end
+          return nil
+        end
+
+        $stdout.puts "track #{name.inspect}: takes over the graph playing as #{name.inspect} at its launch point" if MB::Sound.live?
+        result = nil
+        @session.command("track #{name.inspect}") {
+          before = undo_state
+          time = Session.context&.time || resolve(tr.q || @quant, tr)
+          result = start_track(tr, tr.clocked_clip(tr.clip), time, tr.fade)
+          @session.note_undo_extra(self, before, undo_state)
+        }
+        result
       end
 
       # Runs the block with #track's check of a new instrument for track

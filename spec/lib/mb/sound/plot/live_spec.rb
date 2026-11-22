@@ -81,9 +81,61 @@ RSpec.describe(MB::Sound::Plot::Live, :aggregate_failures) do
     live.redraw(plot.waveform(Numo::DFloat[3, -3, 3]))
     expect(live.layouts).to eq(3)
 
+    # A title's text alone (no legend on its row) redraws only the header
+    # (ui-wave-perf-1: live previews put a moving cutoff in their titles)
     live.redraw(plot.waveform(Numo::DFloat[3, -3, 3], title: 'other'))
+    expect(live.layouts).to eq(3)
+    live.redraw(plot.waveform(Numo::DFloat[3, -3, 3], title: nil))
     expect(live.layouts).to eq(4)
     expect(live.inspect).to include('60x16', 'scope', '4 layouts')
+  end
+
+  it 'blits the same chart again without drawing it, and draws a new one' do
+    live = described_class.new(width: 40, height: 10, look: :scope)
+    a = plot.waveform(Numo::DFloat.linspace(-1, 1, 300), range: -1.0..1.0)
+    b = plot.waveform(Numo::DFloat.linspace(1, -1, 300), range: -1.0..1.0)
+    g = MB::Sound::Plot::Text::NativeCells.new(50, 12)
+    live.draw(a, g, x: 2, y: 1)
+    first = g.lines(:truecolor)
+    frame = live.instance_variable_get(:@frame)
+    expect(frame).not_to receive(:update)
+    g.clear
+    live.draw(a, g, x: 2, y: 1)
+    expect(g.lines(:truecolor)).to eq(first)
+    RSpec::Mocks.space.proxy_for(frame).reset
+    live.draw(b, g, x: 2, y: 1)
+    expect(g.lines(:truecolor)).not_to eq(first)
+    live.redraw(a) # (another path draws into the frame: the next #draw of b draws it again)
+    live.draw(b, g, x: 2, y: 1)
+    expect(g.lines(:truecolor)).to eq(MB::Sound::Plot::Text::NativeCells.new(50, 12).tap { |h| h.blit(MB::Sound::Plot::Live.new(width: 40, height: 10, look: :scope).instance_variable_get(:@frame).tap { |f| f.update(b) }.cells, 2, 1) }.lines(:truecolor))
+  end
+
+  it 'draws what a new layout draws when only titles change' do
+    t = Numo::DFloat.new(400).seq / 48000
+    titles = ['lp4 ~2580 Hz reso 0.25', 'lp4 ~312 Hz reso 0.25', 'a much longer title than the pane is wide, cut at its edge', 'x']
+    [[60, 16], [30, 5], [44, 4]].each do |w, h|
+      %i[scope blocks ascii].each do |look|
+        [true, false].each do |nat|
+          MB::Sound::Kernels.set(fast_ui: nat ? :c : :ruby)
+          live = described_class.new(width: w, height: h, look: look, color: :truecolor)
+          (titles * 2).each_with_index do |title, k|
+            chart = plot.chart(title: title) {
+              x :frequency, 20.0..24000.0
+              y :linear, -60..30, label: 'dB'
+              line Numo::NMath.sin(t * 2 * Math::PI * (110 + k)) * 30, x: Numo::DFloat.logspace(Math.log10(20), Math.log10(24000), 400)
+            }
+            expect(live.redraw(chart)).to eq(plot::Text.render(chart, width: w, height: h, look: look, color: :truecolor).join("\n")), "#{w}x#{h} #{look} #{title.inspect} native=#{nat}"
+          end
+          expect(live.layouts).to eq(1)
+        end
+      end
+    end
+    fig = ->(a, b) { plot.figure { chart(title: a) { line [1, 2, 3] }; chart(title: b) { line [3, 2, 1] } } }
+    live = described_class.new(width: 70, height: 12, look: :scope, color: :none)
+    [%w[a b], %w[a c], %w[dd c]].each do |a, b|
+      expect(live.redraw(fig.(a, b))).to eq(plot::Text.render(fig.(a, b), width: 70, height: 12, look: :scope, color: :none).join("\n"))
+    end
+    expect(live.layouts).to eq(1)
   end
 
   # Replays terminal bytes (cursor moves, SGR, synchronized output) onto a
@@ -156,6 +208,57 @@ RSpec.describe(MB::Sound::Plot::Live, :aggregate_failures) do
       r.close
       expect(n).to eq(bytes.bytesize)
       expect(bytes.force_encoding('UTF-8')).to eq(other.frame(chart, row: 4))
+    end
+  end
+
+  # (the :plot_trace and :plot_copy kernels, FastUI.trace and FastUI.copy, against their mirrors)
+  describe '#retrace (the live scope; ui-perf-2)' do
+    def scope_case(w, h, look, mode)
+      MB::Sound::Kernels.with(mode) do
+        a = MB::Sound::UI::Panes::Scope.new(look: look)
+        b = MB::Sound::UI::Panes::Scope.new(look: look)
+        ga = MB::Sound::Kernels.cell_grid.new(w + 4, h + 2)
+        gb = MB::Sound::Kernels.cell_grid.new(w + 4, h + 2)
+        ca = MB::Sound::UI::Canvas.new(ga, 2, 1, w, h)
+        cb = MB::Sound::UI::Canvas.new(gb, 2, 1, w, h)
+        state = {}
+        rng = Random.new(7)
+        [800, 800, 801, 800].each do |n|
+          4.times do |i|
+            data = [Numo::SFloat.cast(Array.new(n) { rng.rand(-1.2..1.2) }), Numo::SFloat.cast(Array.new(n) { rng.rand(-1.0..1.0) })]
+            data[0][5] = Float::NAN if i == 3
+            snap = Struct.new(:scope, :sample_rate).new(data, 48000)
+            a.draw(ca, snap, state) # (traced after its first frame of each length)
+            b.draw(cb, snap, {}) # (the chart path every time)
+            expect(ga.lines(:truecolor)).to eq(gb.lines(:truecolor)), "#{mode} #{w}x#{h} #{look} n=#{n} frame #{i}"
+          end
+        end
+      end
+    end
+
+    it 'draws the scope\'s cells exactly as its chart does, with the C kernels and their mirrors' do
+      [[80, 12], [140, 8], [30, 20]].each do |w, h|
+        %i[scope quad spark ascii blocks].each do |look|
+          %i[c ruby].each { |mode| scope_case(w, h, look, mode) }
+        end
+      end
+    end
+
+    it 'allocates nothing in a steady scope frame' do
+      pane = MB::Sound::UI::Panes::Scope.new
+      g = MB::Sound::Kernels.cell_grid.new(80, 12)
+      c = MB::Sound::UI::Canvas.new(g, 0, 0, 80, 12)
+      data = [Numo::SFloat.new(800).rand(-1, 1), Numo::SFloat.new(800).rand(-1, 1)]
+      snap = Struct.new(:scope, :sample_rate).new(data, 48000)
+      state = {}
+      3.times { pane.draw(c, snap, state) }
+      a = GC.stat(:total_allocated_objects)
+      i = 0
+      while i < 100
+        pane.draw(c, snap, state)
+        i += 1
+      end
+      expect(GC.stat(:total_allocated_objects) - a).to be <= 3
     end
   end
 end
