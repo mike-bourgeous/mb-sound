@@ -83,34 +83,24 @@ RSpec.describe(MB::Sound::GraphNode::ChannelDispatch) do
     end
   end
 
-  describe 'graph visualization' do
-    # Labels of the (non-edge) nodes in a GraphViz string.
-    def labels(dot)
-      dot.lines.reject { |l| l.include?('->') }.grep(/label=/).map { |l| l[/label="(.*?)"[,\]]/, 1] }
-    end
-
+  describe 'channel groups' do
     let(:graph) { 220.hz.saw.at(1).stereo.filter(:lowpass, cutoff: MB::Sound.channels(800, 1200), quality: 2).softclip }
 
-    it 'draws each per-channel call as one box listing per-channel arguments' do
-      dot = graph.graphviz
-      expect(labels(dot)).to include("filter ×2\\ncutoff: 800, 1200", 'softclip ×2')
-      expect(labels(dot).grep(/SampleWrapper/)).to be_empty
-      expect(dot.lines.grep(/-> .*channels.*-> /)).to be_empty
+    it 'records each per-channel call with the arguments that differ per channel' do
+      filters = graph.outputs.map { |o| MB::Sound::GraphNode.climb_tee_tree(o.sources.values.first) }
+      group = filters[0].channel_group
+      expect(group.method_name).to eq(:filter)
+      expect(group.members).to eq(filters)
+      expect(group.params).to eq(['cutoff: 800, 1200'])
+      expect(filters[1].channel_group).to equal(group)
+      expect(graph.outputs[0].channel_group.method_name).to eq(:softclip)
     end
 
-    it 'shows every node with expand_channels' do
-      expect(labels(graph.graphviz(expand_channels: true)).length).to be > labels(graph.graphviz).length
-      expect(labels(graph.graphviz(expand_channels: true)).grep(/×2/)).to be_empty
-    end
-
-    it 'keeps nodes passed as per-channel arguments visible' do
+    it 'keeps nodes passed as per-channel arguments, which drawings show' do
       lfos = MB::Sound.channels(0.5.hz.lfo.named('slow'), 0.7.hz.lfo.named('fast'))
-      dot = 220.hz.saw.at(1).stereo.filter(:lowpass, cutoff: lfos * 500 + 1000).graphviz
-      expect(labels(dot).join).to include('slow', 'fast')
-    end
-
-    it 'names channel inputs of a bundle' do
-      expect(labels(graph.graphviz).grep(/Channels/)).to eq(["Channels\\n2 channels"])
+      g = 220.hz.saw.at(1).stereo.filter(:lowpass, cutoff: lfos * 500 + 1000)
+      expect(g.outputs[0].channel_group.arg_nodes.length).to eq(2)
+      expect(g.draw.to_s(color: :none)).to include('slow', 'fast')
     end
   end
 

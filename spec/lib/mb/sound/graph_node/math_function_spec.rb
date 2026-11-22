@@ -31,7 +31,7 @@ RSpec.describe(MB::Sound::GraphNode::MathFunction, :aggregate_failures) do
 
   it 'describes its function' do
     expect(input.floor.to_s).to match(/floor\(/)
-    expect(input.log10.to_s_graphviz).to match(/log10\(/)
+    expect(input.log10.to_s).to match(/log10\(/)
     expect { described_class.new(input, function: :sqrt) }.to raise_error(ArgumentError, /sqrt/)
   end
 

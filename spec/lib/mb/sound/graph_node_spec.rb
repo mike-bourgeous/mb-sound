@@ -1229,10 +1229,8 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
       end
     end
 
-    describe '#graphviz' do
-      pending
-
-      it 'can include feedback edges' do
+    describe '#draw' do
+      it 'draws feedback edges as double lines into their slot' do
         a = Numo::SFloat.zeros(100)
 
         g1 = 100.hz.proc { |v| v + a }
@@ -1240,7 +1238,8 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
 
         g1.with_feedback({ feedback_spec: g2 })
 
-        expect(g2.graphviz).to match(/feedback_spec.*constraint/)
+        text = g2.draw.to_s(color: :none)
+        expect(text).to include('═▸feedback_spec', '╚═')
       end
     end
   end

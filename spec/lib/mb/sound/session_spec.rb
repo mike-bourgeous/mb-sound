@@ -792,21 +792,23 @@ RSpec.describe(MB::Sound::Session) do
     it 'draws each player feeding the output' do
       session.add(440.hz.sine.named('lead'), name: :lead)
       session.add(MB::Sound.stereo(1.constant, 2.constant), name: :pair)
-      dot = session.graph_view.graphviz
+      text = session.graph_view.draw.to_s(color: :none)
 
-      expect(dot).to include('label="session output"', 'label="players"', 'lead')
-      expect(dot).to include('label="lead"', 'label="pair[0]"', 'label="pair[1]"', 'label="mix"')
+      expect(text).to include('┌ session output ┐', '┌ players ┐', '┌ lead ')
+      expect(text).to include('▸lead', 'pair[0] 1', 'pair[1] 2', '▸mix')
     end
 
     it 'draws the players feeding the master chain' do
       session.add(440.hz.sine.named('lead'), name: :lead)
       session.master { |mix| mix.softclip }
-      dot = session.graph_view.graphviz
+      g = session.graph_view.draw
+      text = g.to_s(color: :none)
 
-      expect(dot).to include('label="players"', 'label="master input"', 'softclip ×2', 'label="master[1]"')
-      players = dot[/"(\d+)" \[label="players"\]/, 1]
-      input = dot[/"(\d+)" \[label="master input"\]/, 1]
-      expect(dot).to include("\"#{players}\" -> \"#{input}\" [label=\"mix\"]")
+      expect(text).to include('┌ players ┐', '┌ softclip ┐', '▸master[0]', '▸master[1]')
+      expect(text).not_to include('mix source') # (the players' mix stands where the chain reads its input)
+      players = g.boxes.index { |b| b.title == 'players' }
+      clips = g.boxes.each_index.select { |i| g.boxes[i].title == 'softclip' }
+      expect(g.wires.select { |w| w.from == players }.map(&:to)).to include(*clips)
     end
   end
 

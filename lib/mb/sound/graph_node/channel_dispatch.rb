@@ -57,21 +57,16 @@ module MB
         end
       end
 
-      # The nodes made by one per-channel DSL call (see ChannelDispatch), so
-      # graph visualizations can show them as one box (see
-      # Traversable#graphviz).  +inputs+ are the channels the method ran on,
-      # +members+ the resulting nodes, +params+ descriptions of the
-      # arguments that differed per channel, and +arg_nodes+ graph nodes
-      # passed as arguments (which stay visible outside the box), +bundle+
-      # the Channels the call returned (the one its recipe is recorded on:
-      # Arrangement::LiteralBinding.call_of reaches it from a member, so the
-      # inspector can bind `resonance:` of an lp4 run per channel).
-      ChannelGroup = Struct.new(:method_name, :inputs, :members, :params, :arg_nodes, :bundle) do
-        # A label like "filter ×2\ncutoff: 800, 1200".
-        def label
-          ["#{method_name} ×#{members.length}", *params].join("\n")
-        end
-      end
+      # The nodes made by one per-channel DSL call (see ChannelDispatch):
+      # +inputs+ are the channels the method ran on, +members+ the
+      # resulting nodes, +params+ descriptions of the arguments that
+      # differed per channel, +arg_nodes+ graph nodes passed as arguments,
+      # +bundle+ the Channels the call returned (the one its recipe is
+      # recorded on: Arrangement::LiteralBinding.call_of reaches it from a
+      # member, so the inspector can bind `resonance:` of an lp4 run per
+      # channel).  GraphViz drew a call as one box from these until
+      # racks-v-2; Plot.graph draws each channel (drawing.md, known gaps).
+      ChannelGroup = Struct.new(:method_name, :inputs, :members, :params, :arg_nodes, :bundle)
 
       # Runs DSL methods once per channel when they are called on a
       # multichannel node (e.g. a stereo bundle) or given per-channel
@@ -159,8 +154,7 @@ module MB
         end
 
         # Describes the arguments that differ per channel, e.g.
-        # "cutoff: 800, 1200", for graph visualizations (| would split the
-        # record-shaped GraphViz nodes).
+        # "cutoff: 800, 1200" (ChannelGroup#params).
         def self.per_channel_params(args, kwargs, picked)
           described = args.each_with_index.filter_map { |a, idx|
             next unless per_channel?(a)

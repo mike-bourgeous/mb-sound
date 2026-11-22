@@ -579,7 +579,7 @@ There are some base packages you'll need first:
 
 ```bash
 # Debian-/Ubuntu-based Linux (macOS/Arch/CentOS will differ)
-sudo apt-get install ffmpeg libsamplerate0-dev libasound2-dev libjack-jackd2-dev jackd2 graphviz
+sudo apt-get install ffmpeg libsamplerate0-dev libasound2-dev libjack-jackd2-dev jackd2
 
 # macOS (with Homebrew)
 brew install ffmpeg libsamplerate
@@ -595,8 +595,7 @@ run time.  Run `bin/audio_check.rb --list` to see devices, and
 ffmpeg output instead (e.g. `audiotoolbox` on macOS, `pulse` on Linux).
 
 (`libasound2-dev` builds RtMidi's ALSA MIDI backend and `libjack-jackd2-dev`
-its JACK one; `jackd2` runs the dummy JACK server some tests use, and
-`graphviz` draws node graphs with `-g`.)
+its JACK one; `jackd2` runs the dummy JACK server some tests use.)
 
 Then you'll want to install Ruby 4.0 or newer.
 
@@ -626,7 +625,7 @@ cd sound_code_series
 rvm install 4.0
 
 # Install OS dependencies (Ubuntu/Debian; see above for macOS)
-sudo apt install ffmpeg libsamplerate0-dev libasound2-dev libjack-jackd2-dev jackd2 graphviz
+sudo apt install ffmpeg libsamplerate0-dev libasound2-dev libjack-jackd2-dev jackd2
 
 # Clone the repo
 git clone git@github.com:mike-bourgeous/mb-sound.git

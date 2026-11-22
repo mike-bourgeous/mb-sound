@@ -80,7 +80,7 @@ Run affected specs while working (plus `spec:quick`, Bench renders, measurements
 
 The bin/ script smoke tests (`spec/bin/script_smoke_spec.rb`, tagged `:smoke`, about 1.5 minutes; plain `rspec` skips them, CI runs them as a separate job) run every script with `--help` (in forks for scripts that also render) and a short render (real processes), with shared-buffer checks raising (`MB_SOUND_CHECK_SHARED`, `design/notes/graph_nodes.md`).  Run them with `bundle exec rspec --tag smoke` before merging changes to bin/ scripts, the script runner, or nodes that touch input buffers, and add new scripts to their tables.
 
-System dependencies (apt): `ffmpeg libsamplerate0-dev libasound2-dev libjack-jackd2-dev jackd2 graphviz` (ALSA headers build RtMidi's ALSA sequencer backend; the shared JACK client loads libjack at run time, so `libjack-jackd2-dev` only builds RtMidi's JACK API, which specs use as an outside JACK client; `jackd2` runs a dummy JACK server for the JACK specs, which skip without it).  In the container, the Dockerfile sets `OUTPUT_TYPE=null` so playback uses `NullOutput`.
+System dependencies (apt): `ffmpeg libsamplerate0-dev libasound2-dev libjack-jackd2-dev jackd2` (ALSA headers build RtMidi's ALSA sequencer backend; the shared JACK client loads libjack at run time, so `libjack-jackd2-dev` only builds RtMidi's JACK API, which specs use as an outside JACK client; `jackd2` runs a dummy JACK server for the JACK specs, which skip without it).  In the container, the Dockerfile sets `OUTPUT_TYPE=null` so playback uses `NullOutput`.
 
 ## Architecture
 

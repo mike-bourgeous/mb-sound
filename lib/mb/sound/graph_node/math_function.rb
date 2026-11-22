@@ -6,7 +6,7 @@ module MB
       # +:log10+).  Made by GraphNode#floor, #ceil, #round, #log, #log2, and
       # #log10 (ArithmeticMethods); a node type of its own (instead of a
       # ProcNode block), so graphs using these print back as Ruby and show
-      # their function in graphviz.  A thin subclass of UnaryFunction; the
+      # their function in #to_s.  A thin subclass of UnaryFunction; the
       # plan layer fuses it (Plan::Op::Unary) on real signals.
       #
       # Example (a stepped ramp: 4 steps per second, 0, 1/3, 2/3, 1):

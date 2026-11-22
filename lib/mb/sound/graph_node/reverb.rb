@@ -140,7 +140,7 @@ module MB
         # and +input+ (all nil by default, meaning the preset's value).
         OPTIONS = %i[
           extra_time channels stages diffusion_range feedback_range feedback_gain feedback_enabled
-          predelay wet dry mix level seed show_internals loop_extra tuned_loop_extra decay room_size damping damping_design lowpass highpass drive drive_mode
+          predelay wet dry mix level seed loop_extra tuned_loop_extra decay room_size damping damping_design lowpass highpass drive drive_mode
           crush shimmer shimmer_pitch shimmer_window freeze stretch max_stretch modulation diffusion_modulation duck gate threshold
           diffusion_delays feedback_delays
         ].freeze
@@ -651,14 +651,6 @@ module MB
         # +:seed+ - Random seed Integer for reproducibility of random delays
         #           and modulation.  Try different seeds if you get unwanted
         #           ringing or echo.
-        # +:show_internals+ - If true, graphviz drawings (GraphNode#graphviz,
-        #                     --graphviz) show the network's layout inside
-        #                     the reverb: its input gains, diffusion stages
-        #                     (delays, polarities, Hadamard mixing, shuffle),
-        #                     and feedback lines (delays, loop gains, taps,
-        #                     Householder feedback), drawn from
-        #                     Reverb::Network's Layout (see
-        #                     #graphviz_internals).  The sound is unchanged.
         #
         # Modulation (feedback stage +:modulation:+ / alias +:mod:+ in
         # #reverb; diffusion stages +:diffusion_modulation:+): nil/false
@@ -711,13 +703,12 @@ module MB
         # +:stretch:+ - scales the feedback delays live (1 = as built; the
         #               lines are sized for +:max_stretch:+, default 2 for a
         #               node, else the number).
-        def initialize(upstream:, channels:, output_channels:, stages:, sample_rate:, diffusion_range: nil, feedback_range: nil, feedback_gain: nil, feedback_enabled: true, predelay: 0, wet: 1, dry: 1, level: 1, seed: 0, show_internals: false,
+        def initialize(upstream:, channels:, output_channels:, stages:, sample_rate:, diffusion_range: nil, feedback_range: nil, feedback_gain: nil, feedback_enabled: true, predelay: 0, wet: 1, dry: 1, level: 1, seed: 0,
                        diffusion_delays: nil, feedback_delays: nil, loop_extra: 0, tuned_loop_extra: nil, decay: nil, mix: nil, damping: nil, damping_design: :exact, lowpass: nil, highpass: nil, drive: nil, drive_mode: :soft, crush: nil,
                        shimmer: nil, shimmer_pitch: 12, shimmer_window: 0.05, freeze: nil, stretch: nil, max_stretch: nil, modulation: nil, diffusion_modulation: nil,
                        duck: nil, gate: nil, threshold: -30.db)
           @random = Random.new(seed)
           @seed = seed
-          @show_internals = !!show_internals
 
           # Set in only some configurations, or later (here so every Reverb
           # has one instance variable layout; see GraphNode::IvarPreset)
@@ -1290,67 +1281,6 @@ module MB
             wet = @pipeline_output.sum * wet_gain(0)
             (wet.inplace + @dry_output.sum).not_inplace!
           end
-        end
-
-        # The network's layout as a GraphViz cluster (DOT lines) for
-        # Traversable#graphviz when +:show_internals:+ is true (else nil):
-        # the inputs feeding each line and their gains, each diffusion stage
-        # (delays in ms, polarities, the normalized Hadamard mix and the
-        # shuffle), the feedback lines (loop delays in ms, loop gains, the
-        # Householder reflection feeding them back, damping if any), and the
-        # lines each output sums, drawn from the Layout the network runs
-        # (Reverb::Network::Layout), with a dashed edge from this reverb's
-        # box (+id+, its DOT node id).  Until omnibus18 (2026-10-30) the
-        # option built a third copy of the network out of delay and matrix
-        # nodes so graphviz could show them (without modulation or loop
-        # processing); the maintainer: "Draw from the network."
-        def graphviz_internals(id)
-          return nil unless @show_internals
-
-          ms = ->(t) { format('%.1f', t * 1000) }
-          num = ->(v) { MB::M.sigfigs(v.to_f, 3).to_s }
-          row = ->(label, items) { "#{label}: #{items.join(' ')}" }
-          node = ->(name, title, rows, color = '#2266ee') {
-            text = [title, *rows].map { |t| t.to_s.gsub(/[{}|<>"]/, '') }.join('|')
-            "    #{"#{id}/#{name}".inspect} [label=#{text.inspect}, color=#{color.inspect}];\n" # (fields stack top to bottom: rankdir LR)
-          }
-          name = ->(n) { "#{id}/#{n}".inspect }
-
-          lines = @layout.lines
-          inputs = partition_outputs((0...@upstreams.length).to_a, lines)
-          dot = +"  subgraph #{"cluster_#{id}".inspect} {\n"
-          dot << "    label=#{"Reverb network: #{lines} lines".inspect}; fontcolor=\"#ffffff\"; color=\"#888888\"; style=\"dashed\";\n"
-          dot << node.('inputs', 'inputs to lines', inputs.each_with_index.map { |g, i| "line #{i + 1}: in #{g.map { |x| x + 1 }.join('+')} x #{num.(@input_gains[i])}" })
-
-          chain = ['inputs']
-          @layout.diffusion.each_with_index do |st, k|
-            dot << node.("diffusion_#{k + 1}", "diffusion #{k + 1}", [
-              row.('delays ms', st[:delays].map(&ms)),
-              row.('polarity', st[:polarity].map { |v| v < 0 ? '-' : '+' }),
-              'Hadamard mix / sqrt(lines)',
-              row.('shuffle', st[:order].map { |o| o + 1 }),
-            ], '#2288aa')
-            chain << "diffusion_#{k + 1}"
-          end
-
-          if @layout.taps
-            loops = @layout.taps.map { |t| t + @layout.loop_extra }
-            rows = loops.each_with_index.map { |t, i| "line #{i + 1}: #{ms.(t)} ms, gain #{num.(@layout.gains[i])}" }
-            rows << row.('damping', @layout.damping.map(&num)) if @layout.damping
-            dot << node.('feedback', 'feedback lines (loop delay, loop gain)', rows, '#aa4422')
-            dot << node.('householder', 'Householder reflection', [row.('order', @layout.order.map { |o| o + 1 })], '#aa4422')
-            chain << 'feedback'
-            dot << "    #{name.('feedback')} -> #{name.('householder')} [color=red, constraint=false];\n"
-            dot << "    #{name.('householder')} -> #{name.('feedback')} [color=red, label=\"feedback\", constraint=false];\n"
-          end
-
-          outs = partition_outputs((0...lines).to_a, @output_channels)
-          dot << node.('outputs', 'outputs (lines summed)', outs.each_with_index.map { |g, i| "out #{i + 1}: lines #{g.map { |x| x + 1 }.join(' ')} x #{num.(@output_scales[i])}" })
-          chain << 'outputs'
-          chain.each_cons(2) { |a, b| dot << "    #{name.(a)} -> #{name.(b)};\n" }
-          dot << "  }\n"
-          dot << "  #{id.inspect} -> #{name.('inputs')} [style=dashed, label=\"inside\", constraint=false];\n"
-          dot
         end
 
         private

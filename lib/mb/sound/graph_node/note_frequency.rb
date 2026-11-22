@@ -7,7 +7,7 @@ module MB
       # MB::Sound.precision :fast, libm at :exact).  Made by Tuning#freq (so
       # GraphNode#freq, Notes pitch nodes); a node type of its own since
       # omnibus18 (2026-10-30; a ProcNode block before), so it shows as
-      # itself in graphviz and the inspector.  The plan layer fuses it
+      # itself in drawings and the inspector.  The plan layer fuses it
       # (Plan::Op::NoteFreq).
       class NoteFrequency < UnaryFunction
         include SampleRateHelper

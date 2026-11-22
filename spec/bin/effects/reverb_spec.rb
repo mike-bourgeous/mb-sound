@@ -43,7 +43,8 @@ RSpec.describe('bin/effects/reverb.rb') do
   end
 
   it 'takes a preset with modulation off and draws its graph' do
-    reverb(*%w[--quiet -p plate --mod off --diffusion-mod 0.05 spec/test_data/arp_a7.flac], outfile, '--graphviz', env: { 'DISPLAY' => '' })
+    text = reverb(*%w[--quiet -p plate --mod off --diffusion-mod 0.05 spec/test_data/arp_a7.flac], outfile, '--graph')
     expect(File.size(outfile)).to be > 1000
+    expect(text).to include('┌ reverb')
   end
 end

@@ -21,8 +21,7 @@ bundle exec rspec --tag smoke     # every bin/ script with --help and a short re
 ```
 
 `libasound2-dev` builds RtMidi's ALSA MIDI backend and `libjack-jackd2-dev`
-its JACK one; `jackd2` runs the dummy JACK server some tests use, and
-`graphviz` draws node graphs with `-g`.
+its JACK one; `jackd2` runs the dummy JACK server some tests use.
 
 The user guide's examples run as part of the suite
 (`spec/lib/mb/sound/help/guide_spec.rb`), as do the console help's

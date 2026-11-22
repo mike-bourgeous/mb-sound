@@ -10,7 +10,7 @@ RSpec.describe('README and DOCKER.md') do
   dockerfile = File.read(File.join(root, 'Dockerfile'))
 
   it 'lists the Dockerfile\'s library packages in every apt install line' do
-    wanted = %w[ffmpeg libsamplerate0-dev libasound2-dev libjack-jackd2-dev jackd2 graphviz]
+    wanted = %w[ffmpeg libsamplerate0-dev libasound2-dev libjack-jackd2-dev jackd2]
     expect(dockerfile.split).to include(*wanted)
     lines = readme.lines.grep(/apt(-get)? install/)
     expect(lines.length).to be >= 2

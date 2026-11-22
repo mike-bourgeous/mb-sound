@@ -10,17 +10,11 @@ RSpec.describe('bin/effects/tape_delay.rb') do
     expect(info[:streams][0][:duration_ts]).to be > 48000
   end
 
-  it 'can generate a graphviz image' do
+  it 'prints a drawing of its graph with --graph' do
     # In a fork (see ForkScript); the example above is the real run
-    output, status = fork_script('bin/effects/tape_delay.rb', '--quiet', 'spec/test_data/arp_a7.flac', outfile, '--graphviz', env: { 'DISPLAY' => '' })
+    output, status = fork_script('bin/effects/tape_delay.rb', '--quiet', 'spec/test_data/arp_a7.flac', outfile, '--graph')
     expect(status).to be_success, output
-
-    png_line = output.lines.find { |l| l.include?('.png') && l.include?(' image to ') }
-    png_file = png_line.strip.rpartition(' image to ').last
-
-    info = MB::Sound::FFMPEGInput.parse_info(png_file)
-    expect(info[:format][:format_name]).to include('png')
-    expect(info[:format][:size]).to be > 0
+    expect(output).to include('┌ file_input ', '┌ tape sim ', '═')
   end
 
   # (delays-2, the maintainer's "Widen range": the header's runaway

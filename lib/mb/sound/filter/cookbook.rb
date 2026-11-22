@@ -62,19 +62,6 @@ module MB
           s
         end
 
-        # See GraphNode#to_s_graphviz
-        def to_s_graphviz
-          s = <<~EOF
-          type: #{self.filter_type}
-          EOF
-
-          s << "quality: #{self.quality}\n" if self.quality
-          s << "gain: #{self.db_gain}dB\n" if self.db_gain
-          s << "slope: #{self.shelf_slope}\n" if self.shelf_slope
-
-          s
-        end
-
         # Sets the center/cutoff frequency of the filter.
         def center_frequency=(freq)
           if freq <= 0 || freq > @sample_rate * 0.5

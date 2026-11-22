@@ -317,11 +317,6 @@ module MB
           q.text(inspect)
         end
 
-        # A short label for graph visualizations (see Traversable#graphviz).
-        def to_s_graphviz
-          "#{graph_node_name || 'Channels'}\n#{channel_count} channels"
-        end
-
         private
 
         # A bundle of a mixer's outputs.

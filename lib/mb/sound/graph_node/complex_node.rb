@@ -125,7 +125,7 @@ module MB
           end
         end
 
-        # The mode's name for #to_s and graphviz (e.g. "Real").
+        # The mode's name for #to_s (e.g. "Real").
         def function_description
           @mode_name
         end
