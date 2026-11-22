@@ -20,11 +20,18 @@ module MB
         # The keys the list takes while it shows (Reline keystrokes).
         KEYS = {
           up: "\e[A".bytes, down: "\e[B".bytes, up_app: "\eOA".bytes, down_app: "\eOB".bytes,
-          tab: [9], enter: [13], escape: [27],
+          tab: [9], enter: [13], escape: [27], page_up: "\e[5~".bytes, page_down: "\e[6~".bytes,
         }.freeze
 
-        # The most entries listed.
+        # The rows the list shows at once.
         LIMIT = 10
+
+        # The most entries listed: the list scrolls through them (Up, Down,
+        # PageUp, PageDown, with a scrollbar), so a head's every entry can
+        # be found without knowing its name (followups-1; the maintainer,
+        # 2026-11-21: "Can the autocomplete scroll beyond the few items
+        # listed?"; L.gen. has 17, L.inst.a 62, L. 198).
+        MAX = 250
 
         # The dialog's state (Reline gives the proc this context): the word
         # it lists for, the picked row, the word Esc closed it for.
@@ -51,6 +58,8 @@ module MB
             case key_of(key)
             when :up, :up_app then st.pointer = (st.pointer - 1) % st.list.length
             when :down, :down_app then st.pointer = (st.pointer + 1) % st.list.length
+            when :page_up then st.pointer = [st.pointer - LIMIT, 0].max
+            when :page_down then st.pointer = [st.pointer + LIMIT, st.list.length - 1].min
             when :tab, :enter
               pick(scope, pre, st.list[st.pointer].chain, post)
               st.closed = st.list[st.pointer].chain
@@ -69,7 +78,7 @@ module MB
             # through history landed me inside a tab completion menu")
             return close(st) if st.list.nil? && !typed?(key)
             st.closed = nil
-            list = LibraryPopup.live { st.finder.candidates(word, limit: LIMIT) }
+            list = LibraryPopup.live { st.finder.candidates(word, limit: MAX) }
             return close(st) unless list
             st.pointer = 0 unless st.word == word && st.list && st.pointer < list.length
             st.word = word
@@ -82,7 +91,7 @@ module MB
           x = [scope.cursor_pos.x - word.to_s.length, 0].max
           ::Reline::DialogRenderInfo.new(
             pos: ::Reline::CursorPos.new(x, 0), contents: st.list.map(&:label),
-            scrollbar: false, height: [st.list.length, LIMIT].min, face: :completion_dialog
+            scrollbar: st.list.length > LIMIT, height: [st.list.length, LIMIT].min, face: :completion_dialog
           )
         rescue StandardError
           nil

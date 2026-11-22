@@ -118,6 +118,32 @@ RSpec.describe(MB::Sound::UI::LibraryPopup, :aggregate_failures) do
       expect(@term.wait_for(/barberpole +phaser/)).to eq(true), @term.text
     end
 
+    # followups-1 (the maintainer, 2026-11-21: "Can the autocomplete scroll
+    # beyond the few items listed?"): the list holds every match and
+    # scrolls ten rows at a time
+    it 'scrolls past the first ten matches with Down and PageDown, and picks one there' do
+      @tiles, @term = ui_tiles(:tiles, rows: 30, cols: 100)
+      expect(@term.wait_for('t> ')).to eq(true), @term.text
+      @term.type('L.inst.a')
+      expect(wait_until { listed?('L.inst.a') }).to eq(true), @term.text
+      st = ::Reline.dialog_proc(:mb_library).context
+      expect(st.list.length).to be > 20
+      eleventh = st.list[10].entry.name.to_s
+      expect(@term.text).not_to match(/^\s*#{Regexp.escape(eleventh)}\s/) # (below the ten rows shown)
+      @term.write("\e[6~") # PageDown
+      expect(wait_until { st.pointer == 10 }).to eq(true)
+      expect(@term.wait_for(/#{Regexp.escape(eleventh)} +\w/)).to eq(true), @term.text
+      @term.write("\e[B")
+      expect(wait_until { st.pointer == 11 }).to eq(true)
+      @term.write("\e[5~") # PageUp
+      expect(wait_until { st.pointer == 1 }).to eq(true)
+      @term.write("\e[6~")
+      expect(wait_until { st.pointer == 11 }).to eq(true)
+      want = st.list[11].chain
+      @term.write("\t")
+      expect(wait_until { prompt_line == "t> #{want}" }).to eq(true), "#{prompt_line.inspect} (want #{want})"
+    end
+
     # followups-1 (the gvl-main-1 report: each key in a head chain listed
     # the shelves' documents anew, about 200 stats, ~40 ms of typing lag
     # over sshfs): in steady state the keys make no file calls on the
