@@ -48,7 +48,7 @@ module MB
           ride_bell: :ride, ride_shank: :ride, ride2: :ride,
           crash2: :crash, crash3: :crash2, china: :crash2, splash: :crash,
           electric_snare: :snare, clap: :snare, rimshot: :snare,
-          tambourine: :shaker, cabasa: :shaker,
+          tambourine: :shaker, cabasa: :shaker, shaker: :closed_hat,
         }.freeze
 
         # Kit layouts other than GM by name: +match+ (a Regexp for a font
@@ -134,15 +134,16 @@ module MB
         end
 
         # +gm_map+ ({ voice => [GM keys] }, a drum machine's routing,
-        # TR808::GM_MAP) with the keys of the EXTENDED_DRUMS roles added to
-        # the voice their fallback reaches, so a machine plays every role
-        # it can.
+        # TR808::GM_MAP) with the keys of the roles it lacks added to the
+        # voice their fallback reaches (the 909's closed hat for a
+        # tambourine, its open hat for a half-open hat), so a machine plays
+        # every role it can.
         def extend_gm_map(gm_map)
           keys = gm_map.values.flatten
           m = map(keys: keys)
           voice_of = gm_map.flat_map { |v, ns| ns.map { |n| [n, v] } }.to_h
           extra = Hash.new { |h, k| h[k] = [] }
-          Sequence::Grid::EXTENDED_DRUMS.each_value do |n|
+          NAMES.each_key do |n|
             next if keys.include?(n)
             to = m.remap[n] or next
             v = voice_of[to] or next
