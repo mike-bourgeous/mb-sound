@@ -126,7 +126,7 @@ module MB
         # #notice).  Returns the message printed, or nil.
         def tune_notice(kind, machine)
           return nil unless enabled && MB::Sound.live?
-          key = :"#{kind}/tune"
+          key = [kind.to_sym, :tune]
           first = LOCK.synchronize { (@noticed ||= {}).key?(key) ? false : (@noticed[key] = true) }
           return nil unless first
           msg = "kit(#{kind.to_sym.inspect}): tune pitches SoundFont kits; the #{machine} playing instead keeps its pitch " \
