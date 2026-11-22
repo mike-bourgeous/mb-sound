@@ -383,6 +383,34 @@ Guards: each document plays bit for bit like its patch, with its tags and params
 
 Not built (questions for the maintainer): the older FM scripts (`bin/synths/fm_bass.rb`, `fm_epiano.rb`, `fm_bell.rb`, `vocal_lead.rb`, ...) are not library entries, and fm_ep/fm_bass/breath_vowel overlap them; tags through the script runner's `--save` (a small ScriptRunner change would let synth scripts give tags); stereo spread for bowed_glass (`resonate(spread:)`); a knob for nylon_pluck (pluck_voice's settings are build-time numbers).
 
+## Halftime sounds and the variant knob (n109-1, 2026-11-22)
+
+The maintainer, 2026-11-22: "Yeah, add N109 with an option to switch v1/v2, but don't add it to tests other than a basic \"it doesn't crash\" test.  Add the instruments from the song to the library (I think this was discussed somewhere before, with a knob to fade from v1 to v2 variants on the instruments, so check that first)".  N109 is Kez Volta's half-time B-side from the persona panel's third round (2026-11-09/10), in two versions (the second after the producer's listen).  `bin/synths/halftime.rb` holds its sounds as one method each plus a table (`HALFTIME_PATCHES`: about, tags, knobs as `[default, range, description]`, build), saved in process by bin/save_presets.rb (`LIBRARY_PRESET_HALFTIME`, tags in the header, every knob a param); `bin/songs/n109.rb --version 1|2` (default 2) plays the song from those methods.  Every entry is tagged `halftime dnb n109`.
+
+| sound in the song | became |
+|---|---|
+| the ghost voice (one phrase, bounced, played back as a sample) | `ghost_voice` (new; variant) |
+| rain, and the breakdown's downpour | `window_rain` (new; variant; the downpour is its options: density 260, 2-8 kHz, no bed, seed 7) |
+| vinyl specks | `vinyl_specks` (new) |
+| the sub and its breakdown swell | `talking_sub` (new; `attack: 1.2` is the swell) |
+| the pad, and its breakdown octave | `tape_pad`, `tape_pad_high` (new; one wow helper) |
+| drop 2b's Reese | `notch_reese` (new: dnb_reese's unison and filter order differ) |
+| kick, clack, clap, rim, hats, shaker, ride | `clack_kit` (new; variant; `clack_machine` for the song's five kit tracks) |
+| v2's stop bell | the struck `rin` (existing: `struck(clip, :rin, voices: 4, level: 1)`, the same samples) |
+| Kez's master | `dnb_master`'s new options (`mono_below:`, `air: nil`, `glue: false`, `clip:`, `release: nil`; defaults unchanged) |
+| hall, plate, dub buses; the voice's grain cloud and paulstretch smear | the song's own chains of library nodes (reverb presets, ping_pong, grains, stretch) |
+
+**The variant knob** (the maintainer's thought of 2026-11-11 on preset variations, "switch between the first and second variations", recommended then as "expose v1->v2 differences as params so variants are snapshots"): an entry whose sound differs between versions has one param `variant`, `(0.0..1.0).at(0.0)`, 0 the first version and 1 the second (`MB::Sound.variant_fade(a, b, variant)`, `.variant_layer`, `.variant_builds?` in halftime.rb).  Levels and times fade geometrically (evenly in dB and in log time); a layer only one version has fades by amplitude, sqrt(variant) in and sqrt(1 - variant) out (equal power for uncorrelated noise).  A number 0 or 1 builds exactly that version's graph (the missing layer isn't built, so the song's noise seeds are the original's); a node (the preset's param, a track knob) builds both layers and turns live (`track :voice, clip, :ghost_voice; turn :"voice/variant", 1, over: 8.bars`).  Measured (seed 0, 120 buffers): the knob at 0 plays the number 0 bit for bit for all three; at 1 window_rain and clack_kit are bit for bit, ghost_voice differs by its breath noise's draw only (-4.9 dB residual: the same filters and levels, another random realization, since the knob draws the first version's noise seed first).
+- ghost_voice: saws 1 -> 0.45, highpassed air 0.05 out, breath (narrow bands at 1, 2, 3 times the note plus hiss) 2 in, attack 40 -> 70 ms, release 250 -> 300 ms, output 0 -> +2 dB (the song raised every use of the voice by 2 dB in v2).  RMS on c_major.mid: -18.7 / -21.1 / -23.2 dB at 0 / 0.5 / 1.
+- window_rain: level 0 -> -3 dB; the preset (`space: true`) adds a highpassed hall (-18 -> -5 dB) and a dub echo (in at -12 dB); the song calls it dry and fades its bus sends by the same laws (`n109_weather_send`).
+- clack_kit: the clap's `weight` knob 0.45 -> 0.6.
+
+Fidelity (the song against Kez's own scripts at today's master-ai, stems per track): version 1 bit for bit, mix and every stem; version 2 -137.7 dB (the rain, downpour, and voice parts -118 to -125 dB: gains moved into the instruments round differently).  Kez's scripts no longer render as on 2026-11-09: master-ai of that night (2e9cdd24) reproduces his flac bit for bit, but fix-clip-overshoot (b776f662) changed softclip's high band, so today's drums stem differs by -31 dB, the Reese by -45.5, the ride (ducked by the drums) by -68.5, and the mix (the master clips) by -22.4 dB; -10.6 LUFS today against his -11.0.  The script runner renders a tail after bar 146 (the rain never ends): 206.5 s (v1) and 207.7 s (v2) against his 201.4 s.
+
+Tests, as he asked: the song has smoke rows only (half a bar of each version); the presets have the library's own guards (save_presets_spec's per-preset round trip, the shipped-name and head guards, the inspector sweeps).  The inspector learned ping_pong (`GraphNode::DelayNetwork` an effect, its taps and the bundle it reads multi-output wiring), which window_rain's dub echo needed; the tape pads' chorus LFOs are listed gaps like pwm_strings'.  `L.inst.reese` now lists three Reeses.
+
+Left for the larger preset-variations idea (his 2026-11-11 "D and C": knob snapshots stored with the preset, the shelf's git history as versions): variants are positions of one param, so a stored snapshot is `{ variant: 1 }`; nothing stores, names, or links snapshots yet, and entries without a variant param have nothing to snapshot beyond their knobs.
+
 ## Not built (phase 3 and later)
 
 - Instrument params as block keywords (`instrument :reese do |midi, cutoff: 2400.hz|`, the draft's long form): rack blocks take ports as keywords, so params would need a value port type, and saving such a rack as a rack document a new `inputs` entry (a format change): library racks use `knob` lines inside for now.

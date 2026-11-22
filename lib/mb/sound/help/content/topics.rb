@@ -1293,7 +1293,9 @@ module MB
         `demo` loads a whole set into the session, paused at bar 1: Night
         Bus (bin/songs/night_bus_flow.rb), tech house at 126 BPM with 12
         tracks, 12 scenes, 5 knobs, a master chain, and its song form;
-        `demo :tunnel_vision` loads the other set (the list is below).
+        `demo :tunnel_vision` and `demo :n109` load the others (the
+        list is below; in N109, `turn :variant, 0, over: 8.bars` moves the
+        whole song from Kez Volta's second version to his first).
         Nothing plays until you do something: `go :groove` launches a
         scene, `turn :cut, 3000, over: 2` opens the hook's filter, `play_form
         demo.form` plays the whole song (steer it with `loop!`, `onward`,
@@ -1957,7 +1959,7 @@ module MB
         drum machines, graph documents, clips) is an entry in one library.
         `find 'dark bass'` lists the best matches with why each matched;
         `L.fx.reverb.hall` reaches one by words, each narrowing the last
-        (`L.inst.reese` lists both Reeses, Tab shows what is left), and
+        (`L.inst.reese` lists the Reeses, Tab shows what is left), and
         `.(sig)` uses it: `sig.then(&L.fx.hall)`.  Heads: `L.inst`,
         `L.fx`, `L.kit`, `L.seq`, `L.gen` (clip generators), `L.flow`
         (section chains), `L.master`, `L.set`, `L.env`, `L.edit`, `L.mfx`

@@ -10,7 +10,8 @@
 # (bin/synths/sq80_voice.rb, sq80-lib-1), then rack documents (racks R2:
 # named racks from bin/songs/rack_demo.rb, saved with their knobs), then
 # the wave voices (bin/synths/wave_voices.rb, protos-1: the research-sq80
-# prototype patches, grit a param); each
+# prototype patches, grit a param), the library voices, and Kez Volta's
+# "N109" sounds (bin/synths/halftime.rb); each
 # document's description says where it came from (the scripts'
 # <script>_description).
 # Saves are deterministic (the library's default random seed), so saving
@@ -35,6 +36,7 @@ require_relative 'synths/ambient'
 require_relative 'synths/electric_pianos'
 require_relative 'synths/init_voice'
 require_relative 'synths/library_voices'
+require_relative 'synths/halftime'
 
 module MB::Sound
   # Command-line options giving a patch's curated knobs (a Hash: name =>
@@ -131,7 +133,8 @@ module MB::Sound
   # the set (tracks, scenes, knobs, master) in a sandbox Session and its
   # form method the flow, then the Arrangement is saved as a set document.
   # (tunnel_vision since genre-fixes, 2026-10-18, when set documents
-  # learned buses, sends, and routes.)
+  # learned buses, sends, and routes; n109 since n109-1, 2026-11-22, a
+  # bundle holding its bounced voices.)
   LIBRARY_PRESET_SETS = {
     night_bus: ['bin/songs/night_bus_flow.rb', :last_stop, :last_stop_form, {},
                 'Set :night_bus from bin/songs/night_bus_flow.rb ("Night Bus: Last Stop", tech house at 126 BPM in A minor): ' \
@@ -142,6 +145,11 @@ module MB::Sound
                     'the buses demo): drums, Reese, sub, neuro, boom, riser, pad, pluck; a :hall bus (ducked by the kick) and an :echo bus with sends, ' \
                     'the basses ducked by the drums\' kick voice; scenes intro..tail; knobs :cut, :grit, :space, :air, :lift; ' \
                     'its flow (play_form doc.form).  `demo :tunnel_vision` loads it.'],
+    n109: ['bin/songs/n109.rb', :n109, :n109_form, { play: false },
+           'Set :n109 from bin/songs/n109.rb ("N109", Kez Volta\'s half-time drum & bass at 174 BPM in F Phrygian, its second version): ' \
+           'rain, vinyl, the bounced ghost voice and its answer, five clack kit tracks, the talking sub, tape pads, the smear, the grain cloud, ' \
+           'the downpour, the stop bell, the notch Reese; hall, plate, and dub buses; scenes weather..last_word; the knob :variant ' \
+           '(0 the first version, 1 the second) and the tracks\' preset knobs; its flow (play_form doc.form).  `demo :n109` loads it.'],
   }.freeze
 
   # The MIDI file script patches are saved from.
@@ -180,9 +188,14 @@ module MB::Sound
   # header with the description; every knob is a param.
   LIBRARY_PRESET_VOICES = LIBRARY_VOICES.keys.freeze
 
+  # Kez Volta's "N109" sounds (bin/synths/halftime.rb, n109-1, 2026-11-22),
+  # saved in this process like the library voices (tags in the header);
+  # every knob is a param (`variant` on the ones with two versions).
+  LIBRARY_PRESET_HALFTIME = HALFTIME_PATCHES.keys.freeze
+
   def self.library_preset_names
-    LIBRARY_PRESET_PATCHES.keys + LIBRARY_PRESET_VOICES + LIBRARY_PRESET_EFFECTS.keys + LIBRARY_PRESET_RACKS.keys + LIBRARY_PRESET_SETS.keys +
-      LIBRARY_PRESET_FITS.keys
+    LIBRARY_PRESET_PATCHES.keys + LIBRARY_PRESET_VOICES + LIBRARY_PRESET_HALFTIME + LIBRARY_PRESET_EFFECTS.keys + LIBRARY_PRESET_RACKS.keys +
+      LIBRARY_PRESET_SETS.keys + LIBRARY_PRESET_FITS.keys
   end
 
   # Saves library preset +name+ into +dir+ (presets/ by default), returning
@@ -205,6 +218,19 @@ module MB::Sound
             File.join(dir, "#{name}#{GraphIO::EXTENSION}"), library_voice(midi, name),
             inputs: { midi: midi }, params: params, options: { patch: name }, from: 'bin/synths/library_voices.rb', kind: :synth,
             meta: { description: library_voices_description(name), tags: s[:tags] }
+          )
+        end
+      end
+    elsif LIBRARY_PRESET_HALFTIME.include?(name)
+      s = HALFTIME_PATCHES.fetch(name)
+      MB::Sound.with_seed(0) do
+        Dir.chdir(root) do
+          midi = Notes.new(LIBRARY_PRESET_MIDI)
+          params = s[:knobs].to_h { |k, (value, range, description)| [k, { value: value, range: range, description: description }] }
+          GraphIO.save(
+            File.join(dir, "#{name}#{GraphIO::EXTENSION}"), halftime_patch(midi, name),
+            inputs: { midi: midi }, params: params, options: { patch: name }, from: 'bin/synths/halftime.rb', kind: :synth,
+            meta: { description: halftime_description(name), tags: s[:tags] }
           )
         end
       end
@@ -296,6 +322,7 @@ module MB::Sound
         names.each do |n|
           src = LIBRARY_PRESET_PATCHES[n]&.then { |s, w, *| "#{s} -p #{w}" } ||
                 (LIBRARY_PRESET_VOICES.include?(n) ? "bin/synths/library_voices.rb -p #{n}" : nil) ||
+                (LIBRARY_PRESET_HALFTIME.include?(n) ? "bin/synths/halftime.rb #{n}" : nil) ||
                 LIBRARY_PRESET_RACKS[n]&.then { |s, m, *| "#{s} #{m} (rack)" } ||
                 LIBRARY_PRESET_SETS[n]&.then { |s, m, *| "#{s} #{m} (set)" } ||
                 LIBRARY_PRESET_FITS[n]&.then { 'reverb_match fit (effect)' } ||
