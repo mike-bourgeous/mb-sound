@@ -10,9 +10,12 @@
 #            notes back)
 #   :wander  how far the motifs have mutated from their first form
 #            (motifs mutate:)
-# Each generator reads its knobs once per cycle, a beat before the cycle
-# starts (its decision point), so a turn steers the next bar and a take
-# replays exactly what was decided.  The intro opens with a recorded
+# The drums and bass (beats, rhythm) read :energy for the start of every
+# beat, so a turn lands on the next beat; the lead reads its knobs once a
+# bar, a beat before it starts, for the bar's start; a take replays
+# exactly what was decided (generative.md, "When steered values are
+# read").  `turn :energy, 2.bars.lfo.square.at(0.2..0.9)` alternates busy
+# and sparse bars from bar 1.  The intro opens with a recorded
 # gesture, `turn :density, 0 => 0.2, 8.bars => 0.9`: the lead fills in
 # bar by bar.  The sections turn the rest (build: energy up over 8 bars,
 # the motifs wandering; breakdown: energy down; drop: everything up;
@@ -30,7 +33,7 @@
 # Or in bin/sound.rb, steering by hand:
 #     load 'bin/songs/generative_steer.rb'
 #     generative_steer(form: false)       # tracks, knobs, and the groove scene; no form
-#     turn :energy, 0.9, over: 4          # a build, a bar at a time
+#     turn :energy, 0.9, over: 4          # a build, a beat at a time
 #     turn :density, 0.15                 # the lead thins out from the next phrase
 #     turn :wander, 0.8, over: 8          # the motifs drift from home...
 #     turn :wander, 0                     # ...and come straight back
