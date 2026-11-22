@@ -1374,9 +1374,10 @@ module MB
                 # track before the music, 1.8 s for a demo's 8; the painter
                 # draws this while `start` runs; ui-phase1-1, the plan's
                 # Phase 1 item 2.  A flow's first section says what it
-                # builds, in the words `start` prints: form-start-1)
-                if line == 'start'
-                  flash(TransportMethods.start_note(s) || 'starting... (warming the tracks first)', :key)
+                # builds, in the words `start` prints: form-start-1; a resume
+                # says "resuming", a pause nothing: followups-1)
+                if (note = TransportMethods.toggle_flash(s, line))
+                  flash(note, :key)
                   @full = true
                 end
                 st = UI.run_line(line, s)

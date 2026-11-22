@@ -154,6 +154,20 @@ module MB
         session.arrangement.start_note(f)
       end
 
+      # NAV Space's instant flash for +line+ (from #toggle_line), drawn
+      # while the line still runs (ui-phase1-1): a resume says so, a start
+      # of the loaded flow what it builds (#start_note's words) or that it
+      # warms the tracks first, a pause nothing (the Status after the line
+      # says what happened).  Reads only flags the render thread sets and
+      # the Arrangement's own lock, never the render lock (the screen's
+      # input thread asks; followups-1).
+      def self.toggle_flash(session, line)
+        return nil unless line == 'start'
+        return 'resuming ...' if session.transport_paused? || (session.realtime? && session.paused?)
+        f = loaded_flow(session.arrangement) or return nil
+        session.arrangement.start_note(f) || 'starting... (warming the tracks first)'
+      end
+
       # The console line NAV Space runs in +session+ (recorded in the take):
       # `start` when it starts something, else `pause`.
       def self.toggle_line(session)

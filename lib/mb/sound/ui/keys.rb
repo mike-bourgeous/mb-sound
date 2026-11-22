@@ -190,7 +190,7 @@ module MB
           ['Alt-PgUp Alt-PgDn', 'the terminal\'s own (scrollback: Shift-PgUp)', 'the terminal\'s own'],
           ['Ctrl-BkSp Ctrl-Del', 'delete the word before, after', 'delete the word before, after'],
           ['Ctrl-S-Del', 'delete to the end of the line', 'delete to the end of the line'],
-          ['Alt-Up Alt-Down', 'step the number at the cursor, run the line again (Esc then Up/Down too)', 'step the number at the cursor, run the line again (Esc then Up/Down too)'],
+          ['Alt-Up Alt-Down', 'step the number at the cursor, run the line again (Esc then Up/Down within 0.5 s too)', 'step the number at the cursor, run the line again (Esc then Up/Down within 0.5 s too)'],
           ['Alt-S-Left/Right', 'the cursor to the previous, next number', 'the cursor to the previous, next number'],
           ['Ctrl-C', 'interrupt', 'interrupt'],
           ['Ctrl-Z', 'nothing (the band stays; ui off)', 'nothing (Reline ignores it)'],

@@ -89,4 +89,31 @@ RSpec.describe('UI::Tiles REPL number nudge', :aggregate_failures) do
     render_bars
     expect(wait_until { cutoffs == [1202] }).to eq(true), cutoffs.inspect
   end
+
+  # followups-1: Esc typed by hand, then the arrow, at gaps up to 300 ms
+  # (the fallback's documented reach: Reline joins the two keys within its
+  # keyseq timeout, 500 ms; the screen's Decoder emits the lone Esc after
+  # 30 ms and passes it through unchanged).  Each gap is one step and one
+  # run.  (The merge round's "misses" were the first press with the cursor
+  # off the number: that press moves to the number by design.)
+  it 'steps once for Esc then Up at gaps up to 300 ms' do
+    MB::Sound::UI::NudgeKeys.install!
+    runs = []
+    ctx = Object.new
+    ctx.define_singleton_method(:hit) { |n| runs << n }
+    @tiles, @term = ui_tiles(:tiles, rows: 30, cols: 100, context: ctx.instance_eval { binding })
+    expect(@term.wait_for('> ')).to eq(true), @term.text
+    @term.type('hit 100')
+    @term.write("\e[D") # (the cursor on the number's last digit)
+    expect(wait_until { prompt_text[1] == '0' }).to eq(true), prompt_text.inspect
+
+    [10, 40, 80, 150, 300].each_with_index do |gap, i|
+      @term.write("\e")
+      sleep gap / 1000.0
+      @term.write("\e[A")
+      expect(wait_until { runs.length == i + 1 }).to eq(true), "#{gap} ms: #{runs.inspect} #{prompt_text.inspect}"
+      expect(runs.last).to eq(101 + i), "#{gap} ms"
+      expect(wait_until { prompt_text[0]&.end_with?("hit #{101 + i}") }).to eq(true), "#{gap} ms: #{prompt_text.inspect}"
+    end
+  end
 end

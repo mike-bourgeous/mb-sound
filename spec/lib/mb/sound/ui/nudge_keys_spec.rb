@@ -125,5 +125,36 @@ RSpec.describe(MB::Sound::UI::NudgeKeys, :aggregate_failures) do
     ensure
       MB::Sound::UI::NudgeHistory.pending = nil
     end
+
+    # followups-1 (the maintainer: "up-arrow, page-up, and ^r search order
+    # not returning recent commands first"): consoles append to one file as
+    # lines are typed, interleaved; a line typed again, and every exit,
+    # stood in many places
+    it 'keeps each line at its newest place, from the file of interleaved sessions and when typed again' do
+      MB::Sound::UI::NudgeKeys.install!
+      path = tmp_path('pry_history')
+      # (three consoles' lines as typed, a1 rerun in between, each ending with exit)
+      File.write(path, ['a1 = 1', 'b1 = 1', 'track(:t) { 1 }', 'a2 = 2', 'exit', 'b2 = 2', 'a1 = 1', 'track(:t) { 1 }', 'exit', 'b3 = 3', 'exit'].join("\n") + "\n")
+      h = Pry::History.new(history: [], file_path: path)
+      h.load
+      expect(h.to_a).to eq(['b1 = 1', 'a2 = 2', 'b2 = 2', 'a1 = 1', 'track(:t) { 1 }', 'b3 = 3', 'exit'])
+
+      # Typed again: moved to the end, and appended to the file as typed
+      h.push('a2 = 2')
+      expect(h.to_a.last(2)).to eq(['exit', 'a2 = 2'])
+      expect(h.to_a.count('a2 = 2')).to eq(1)
+      expect(File.readlines(path, chomp: true).last).to eq('a2 = 2')
+      h.push('a2 = 2') # (a repeat of the last: as before, nothing more)
+      expect(h.to_a.count('a2 = 2')).to eq(1)
+
+      # A nudged line equal to an older entry: one copy, at the end
+      MB::Sound::UI::NudgeKeys.submitting('b2 = 2')
+      h.push('b2 = 2')
+      expect(h.to_a.last).to eq('b2 = 2')
+      expect(h.to_a.count('b2 = 2')).to eq(1)
+    ensure
+      MB::Sound::UI::NudgeHistory.flush
+      MB::Sound::UI::NudgeHistory.pending = nil
+    end
   end
 end

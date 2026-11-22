@@ -37,6 +37,15 @@ RSpec.describe(MB::Sound::Plot::Geometry) do
       expect(ix.to_a.sort).to eq([0, 1, 2, 5, 7, 8])
     end
 
+    # (the 4M-dot limit, at a small one: fast_ui_spec's line of 5e6 dots
+    # through the Ruby path built ~250 MB of temporary arrays; followups-1)
+    it 'subsamples each segment to the dot limit, keeping the end points' do
+      ix, iy = described_class.line_points(Numo::DFloat[0, 5000, 4990], Numo::DFloat[0, 0, 9], limit: 1000)
+      expect(ix.length).to be_between(1000, 1010)
+      expect([ix.min, ix.max]).to eq([0, 5000])
+      expect(ix.to_a.zip(iy.to_a)).to include([0, 0], [5000, 0], [4990, 9])
+    end
+
     it 'draws one segment' do
       ix, iy = described_class.line_points(Numo::DFloat[0, 3], Numo::DFloat[0, 0])
       expect(ix.to_a).to eq([0, 1, 2, 3])
