@@ -521,6 +521,10 @@ static VALUE jack_port_names(struct mb_jack_unit *unit)
 // serves every unit).
 #define JACK_CHUNK 1024
 static float jack_scratch[JACK_CHUNK * MB_JACK_MAX_PORTS];
+#define PB_RUNS 16 // pulls recorded per cycle (periods up to 16384 frames)
+
+// Numbers playbacks for the timed MIDI records queued for their rings
+static _Atomic uint32_t playback_serials;
 
 
 /* Playback ----------------------------------------------------------------- */
@@ -593,6 +597,20 @@ struct playback {
 	int jack_cycled;
 	uint32_t cycle_frame;
 	size_t cycle_read_pos;
+
+	// JACK only, for timed MIDI that follows this output (see
+	// midi_ring_frame; process thread only): where the latest real cycle's
+	// ring frames went in its port buffers, as runs of frames (one per
+	// JACK_CHUNK pull that took any: offset in the cycle, ring position,
+	// count), and whether the ring's queued frames could still wait after
+	// that cycle (concealment landing on them after a gap).  serial names
+	// this playback to the MIDI records queued for its ring.
+	uint32_t serial;
+	int cycle_runs;
+	uint32_t run_offset[PB_RUNS];
+	size_t run_pos[PB_RUNS];
+	size_t run_count[PB_RUNS];
+	int cycle_holding;
 
 	// Optional record of the first capture_frames frames played (for specs)
 	float *capture;
@@ -943,8 +961,10 @@ static void playback_copy(struct playback *p, float *out, size_t pos, size_t cou
 
 // Takes +frames+ interleaved frames from the ring into +out+ (silence where
 // it runs out), for miniaudio's device thread or JACK's.  Realtime safe: no
-// Ruby, no allocation, no blocking locks.
-static void playback_pull(struct playback *p, float *out, size_t frames)
+// Ruby, no allocation, no blocking locks.  Returns the ring frames taken;
+// with +lead+, sets it to where in +out+ they start (after the end of a
+// concealment landing, else 0).
+static size_t playback_pull(struct playback *p, float *out, size_t frames, size_t *lead)
 {
 	size_t ch = p->out_channels;
 
@@ -955,6 +975,11 @@ static void playback_pull(struct playback *p, float *out, size_t frames)
 	// (while concealing, frames wait in the ring until the grains have
 	// landed on them; see mb_conceal_take)
 	size_t count = mb_conceal_take(&p->conceal, available, frames);
+	if (lead != NULL) {
+		// (mb_conceal_process plays the rest of a landing first)
+		int landing = p->conceal.mode == MB_CONCEAL_REPEAT && p->conceal.active && p->conceal.landing;
+		*lead = landing ? (p->conceal.land_left < frames ? p->conceal.land_left : frames) : 0;
+	}
 
 	playback_copy(p, out, rp, count, frames);
 
@@ -1009,13 +1034,15 @@ static void playback_pull(struct playback *p, float *out, size_t frames)
 		pthread_cond_signal(&p->space);
 		pthread_mutex_unlock(&p->lock);
 	}
+
+	return count;
 }
 
 // miniaudio's device thread
 static void playback_callback(ma_device *device, void *output, const void *input, ma_uint32 frames)
 {
 	(void)input;
-	playback_pull(device->pUserData, output, frames);
+	playback_pull(device->pUserData, output, frames, NULL);
 }
 
 // JACK's thread: the ring's interleaved frames to one buffer per port
@@ -1072,6 +1099,7 @@ static void playback_jack_process(struct mb_jack_unit *unit, uint32_t nframes)
 		p->cycle_read_pos = atomic_load_explicit(&p->read_pos, memory_order_relaxed);
 		p->jack_cycled = 1;
 		p->conceal_touched = 0;
+		p->cycle_runs = 0;
 	}
 
 	for (size_t done = 0; done < nframes; done += JACK_CHUNK) {
@@ -1080,7 +1108,15 @@ static void playback_jack_process(struct mb_jack_unit *unit, uint32_t nframes)
 			size_t have = count > done ? count - done : 0;
 			playback_copy(p, jack_scratch, start + done, have < n ? have : n, n);
 		} else {
-			playback_pull(p, jack_scratch, n);
+			size_t pos = atomic_load_explicit(&p->read_pos, memory_order_relaxed);
+			size_t lead;
+			size_t took = playback_pull(p, jack_scratch, n, &lead);
+			if (took > 0 && p->cycle_runs < PB_RUNS) {
+				p->run_offset[p->cycle_runs] = (uint32_t)(done + lead);
+				p->run_pos[p->cycle_runs] = pos;
+				p->run_count[p->cycle_runs] = took;
+				p->cycle_runs++;
+			}
 		}
 		for (size_t i = 0; i < n; i++) {
 			for (size_t c = 0; c < ch; c++) {
@@ -1090,6 +1126,8 @@ static void playback_jack_process(struct mb_jack_unit *unit, uint32_t nframes)
 	}
 
 	if (!repeat) {
+		p->cycle_holding = p->conceal.mode == MB_CONCEAL_REPEAT && p->conceal.active;
+
 		// Publish where the next cycle starts (see #jack_clock); the
 		// reader retries while the sequence is odd or changed
 		unsigned seq = atomic_load_explicit(&p->jack_seq, memory_order_relaxed);
@@ -1330,6 +1368,8 @@ static VALUE playback_open_body(VALUE arg)
 		p->unit.process = playback_jack_process;
 		p->unit.shutdown = playback_jack_shutdown;
 		p->unit.user = p;
+		p->unit.early = 1; // (before timed MIDI outputs: see midi_ring_frame)
+		p->serial = atomic_fetch_add(&playback_serials, 1) + 1;
 		jack_register_ports(&p->unit, a->client_name, a->jack_ports, 0, 1);
 		dev_info_from_jack(&p->info);
 		playback_setup_queue(p, a);
@@ -3265,6 +3305,13 @@ struct jack_midi {
 	uint32_t out_frame;
 	int out_cycled;
 
+	// Output only: the playback whose ring frames #write_after's records
+	// name (its JACK unit; read on JACK's thread only while that unit is
+	// in the cycle's unit list, see midi_ring_frame), and its serial (the
+	// writer's, to notice a new playback)
+	_Atomic(struct mb_jack_unit *) follow;
+	uint32_t follow_serial;
+
 	// The last input cycle that had messages (JACK's thread only; see
 	// midi_in_process)
 	uint32_t last_frame;
@@ -3400,6 +3447,61 @@ static void midi_in_process(struct mb_jack_unit *unit, uint32_t nframes)
 	}
 }
 
+// JACK's thread: the JACK frame time a timed record's ring frame leaves on
+// (mb_midi_timed_convert_fn), from the ring of the playback the output
+// follows.  Playbacks run before MIDI outputs in each cycle
+// (mb_jack_unit.early), so this cycle's pull is done, and a frame it took
+// left where it went in the port buffer (after a concealment landing, or
+// in a later chunk of a long period, as recorded).  A record with a zero
+// or positive offset waits for that pull, so it is exact whatever happens
+// before it: a cycle running short (the first audio not written yet, or
+// an underrun; midi-out-first-note-2: notes queued with a JACK frame
+// before the first audio was written sounded a period early whenever the
+// first write came after the next cycle), a concealment landing, or a
+// cycle the server skipped.  A negative offset must leave before its
+// frame is pulled: once the frame is queued it leaves at the next cycle's
+// start plus its distance from the read position (the frames before it
+// are queued too, so no cycle can run short before it; not while
+// concealment is active, since a landing can hold queued frames back).  A
+// record whose playback closed, or that names another one, leaves now.
+static int midi_ring_frame(void *ctx, const struct mb_midi_timed_record *r, uint32_t now, uint32_t nframes, uint32_t *frame)
+{
+	struct jack_midi *m = ctx;
+	struct mb_jack_unit *unit = atomic_load_explicit(&m->follow, memory_order_acquire);
+	struct playback *p = unit != NULL && mb_jack_unit_running(unit) ? unit->user : NULL;
+	if (p == NULL || p->serial != r->source || !p->jack_cycled) {
+		*frame = now;
+		return -1;
+	}
+
+	uint32_t f = r->frame;
+	int ran = p->cycle_frame == now;
+	if (ran) {
+		for (int i = 0; i < p->cycle_runs; i++) {
+			uint32_t k = f - (uint32_t)p->run_pos[i];
+			if (k < p->run_count[i]) {
+				*frame = now + p->run_offset[i] + k;
+				return 1;
+			}
+		}
+	}
+
+	size_t rp = atomic_load_explicit(&p->read_pos, memory_order_relaxed);
+	int32_t ahead = (int32_t)(f - (uint32_t)rp);
+	if (ahead < 0) {
+		// Played already (late): where it went if the ring kept up
+		*frame = now + (uint32_t)(int32_t)(f - (uint32_t)(ran ? p->cycle_read_pos : rp));
+		return 1;
+	}
+
+	size_t wp = atomic_load_explicit(&p->write_pos, memory_order_acquire);
+	if (r->offset >= 0 || (int32_t)(f - (uint32_t)wp) >= 0 || p->cycle_holding) {
+		return 0;
+	}
+	*frame = (ran ? now + nframes : now) + (uint32_t)ahead;
+	return 1;
+}
+
 // JACK's thread: queued messages out of the ring into the output port (all
 // at the start of the cycle; what doesn't fit waits for the next cycle),
 // then the timed messages due in this cycle at their frames (see
@@ -3471,6 +3573,7 @@ static void midi_out_process(struct mb_jack_unit *unit, uint32_t nframes)
 
 	if (m->timed != NULL) {
 		mb_midi_timed_stage(m->timed, now);
+		mb_midi_timed_convert(m->timed, now, nframes, midi_ring_frame, m);
 		mb_midi_timed_emit(m->timed, buffer, now, nframes, mb_jack_midi_write);
 	}
 }
@@ -3822,6 +3925,7 @@ static VALUE jack_midi_stats(VALUE self)
 		rb_hash_aset(h, ID2SYM(rb_intern("timed_max_late")), INT2NUM(atomic_load(&t->max_late)));
 		rb_hash_aset(h, ID2SYM(rb_intern("timed_dropped")), SIZET2NUM(atomic_load(&t->dropped)));
 		rb_hash_aset(h, ID2SYM(rb_intern("timed_pending")), SIZET2NUM(mb_midi_timed_pending(t)));
+		rb_hash_aset(h, ID2SYM(rb_intern("timed_waiting")), SIZET2NUM(mb_midi_timed_waiting(t)));
 	}
 	return h;
 }
@@ -3860,6 +3964,49 @@ static VALUE jack_midi_write_at(VALUE self, VALUE frame, VALUE status, VALUE dat
 		rb_raise(rb_eArgError, "write_at takes channel and one-byte system messages (status 0x%02x); use write for SysEx", bytes[0]);
 	}
 	return mb_midi_timed_put(m->timed, (uint32_t)NUM2ULL(frame), bytes, size) == 0 ? Qtrue : Qfalse;
+}
+
+/*
+ * call-seq:
+ *   output.write_after(playback, ahead, offset, status, data1, data2) -> true, false, or nil
+ *
+ * Queues one short message (see #write_at) to leave +offset+ frames (at the
+ * device's rate; negative for early) after the audio of the frame +ahead+
+ * frames past +playback+'s write position (the next frame Playback#write
+ * queues is 0) leaves for the ports.  JACK's thread places it from where
+ * the ring's frames actually go: in the cycle that plays the frame (for a
+ * negative offset, once the frame is queued), so it stays with its audio
+ * at any start, through underruns and their concealment (until then it
+ * waits; stats[:timed_waiting]).  The
+ * port then follows +playback+ (its unit, checked each cycle): messages
+ * still waiting for a playback the port no longer follows, or one that
+ * closed, leave at once, counted late.  Allocates nothing; for the render
+ * thread (the one writing +playback+).  False if the queue was full (the
+ * message is dropped and counted); nil if +playback+ isn't on JACK (use
+ * #write_at).
+ */
+static VALUE jack_midi_write_after(VALUE self, VALUE playback, VALUE ahead, VALUE offset, VALUE status, VALUE data1, VALUE data2)
+{
+	struct jack_midi *m = get_jack_midi_output(self);
+	struct playback *p = get_playback(playback);
+	uint8_t bytes[3] = { NUM2UINT(status) & 0xff, NUM2UINT(data1) & 0x7f, NUM2UINT(data2) & 0x7f };
+	int size = mb_midi_timed_size(bytes[0]);
+	if (size == 0) {
+		rb_raise(rb_eArgError, "write_after takes channel and one-byte system messages (status 0x%02x); use write for SysEx", bytes[0]);
+	}
+	long long a = NUM2LL(ahead);
+	int32_t o = NUM2INT(offset);
+	if (!p->jack || !p->info.ready || !atomic_load(&p->open)) {
+		return Qnil;
+	}
+
+	if (m->follow_serial != p->serial) {
+		atomic_store_explicit(&m->follow, &p->unit, memory_order_release);
+		m->follow_serial = p->serial;
+	}
+	size_t wp = atomic_load_explicit(&p->write_pos, memory_order_acquire);
+	uint32_t f = (uint32_t)wp + (uint32_t)a;
+	return mb_midi_timed_put_ring(m->timed, f, o, p->serial, bytes, size) == 0 ? Qtrue : Qfalse;
 }
 
 /*
@@ -3952,6 +4099,7 @@ static void init_jack_midi(VALUE fast_audio)
 	rb_define_method(output, "port_name", jack_midi_port_name, 0);
 	rb_define_method(output, "stats", jack_midi_stats, 0);
 	rb_define_method(output, "write_at", jack_midi_write_at, 4);
+	rb_define_method(output, "write_after", jack_midi_write_after, 6);
 	rb_define_method(output, "discard_timed", jack_midi_discard_timed, 0);
 	rb_define_method(output, "max_message", jack_midi_max_message, 0);
 	rb_define_method(output, "cap_message", jack_midi_cap_message, 1);

@@ -5,8 +5,10 @@
 # exactly, at any buffer size, tempo, and start phase, and the note's
 # session frame must be the clip position's sample (the same at every
 # buffer size).  The harness, and how it finds where the audio left:
-# spec/support/jack_midi_out_timing.rb; the slow tier's statistical start
-# sweep: destination_jack_slow_spec.rb.
+# spec/support/jack_midi_out_timing.rb; late writes forced as a busy
+# machine makes them (the first write after a cycle, an underrun):
+# destination_jack_late_spec.rb; the slow tier's statistical start sweep:
+# destination_jack_slow_spec.rb.
 require_relative '../../../../support/jack_midi_out_timing'
 
 RSpec.describe('MIDI out on JACK (timing)', :aggregate_failures) do

@@ -14,12 +14,14 @@ module MB
       # audio for the same frame reaches the speakers.  On JACK (the
       # Session's audio output on JACK and the port a JACK port) each
       # message goes on the exact JACK frame its session frame's audio
-      # leaves on (DeviceOutput#jack_frame_of), plus +offset+ (the synth's
-      # own response, a monitoring path; negative for early), through the
-      # port's timed queue (FastAudio::JackMIDIOutput#write_at): sample
-      # exact, and notes already queued keep their frames when the output
-      # queue changes depth.  Other paths (RtMidi) send when the render
-      # thread makes the note (not aligned; see design/notes/midi.md).
+      # leaves on, plus +offset+ (the synth's own response, a monitoring
+      # path; negative for early), through the port's timed queue
+      # (FastAudio::JackMIDIOutput#write_after): JACK's thread places each
+      # message from where the output's queue actually goes (in the cycle
+      # that plays its frame), so it is sample exact at any start, through
+      # underruns, and when the output queue changes depth.  Other paths
+      # (RtMidi) send when the render thread makes the note (not aligned;
+      # see design/notes/midi.md).
       # Offline renders send nothing to devices.  Live input (an armed
       # track's keyboard) is sent at once (#send_now).
       #
@@ -325,15 +327,15 @@ module MB
           return unless session.realtime? || o.respond_to?(:jack_frame_of)
 
           if out.timed?
-            ahead = frame + @offset_frames - session.write_frame
-            j = o.respond_to?(:jack_frame_of) ? o.jack_frame_of(scale_ahead(o, ahead)) : nil
-            if j.nil?
+            pb = o.respond_to?(:jack_playback) ? o.jack_playback : nil
+            sent = pb && out.write_after(pb, scale_ahead(o, frame - session.write_frame), scale_ahead(o, @offset_frames), status, data1, data2)
+            if sent.nil?
               # (audio not on JACK: from JACK's clock plus the output's latency)
+              ahead = frame + @offset_frames - session.write_frame
               now = FastAudio.jack_frame_time or return
               lat = o.respond_to?(:latency) ? (o.latency * rate).round : 0
-              j = now + lat + ahead
+              out.write_at((now + lat + ahead) & 0xffff_ffff, status, data1, data2)
             end
-            out.write_at(j & 0xffff_ffff, status, data1, data2)
           else
             out.write(message_bytes(status, data1, data2))
           end

@@ -81,6 +81,7 @@ static _Atomic int client_lost; // the server shut down or dropped us
 // one FastMIDI port listing)
 static _Atomic int server_dropped;
 static _Atomic(struct unit_list *) active;
+static struct unit_list *cycle_units; // the list this cycle runs (process thread only)
 static _Atomic size_t cycles_started;
 static _Atomic size_t cycles_done;
 
@@ -342,11 +343,13 @@ static int process(jack_nframes_t nframes, void *arg)
 	have_prev_frame = 1;
 
 	struct unit_list *list = atomic_load(&active);
+	cycle_units = list;
 	if (list != NULL) {
 		for (int i = 0; i < list->count; i++) {
 			list->units[i]->process(list->units[i], nframes);
 		}
 	}
+	cycle_units = NULL;
 
 	if (atomic_load_explicit(&frame_log_on, memory_order_relaxed)) {
 		size_t n = atomic_load_explicit(&frame_log_len, memory_order_relaxed);
@@ -509,7 +512,17 @@ static void change_units(struct mb_jack_unit *add, struct mb_jack_unit *remove)
 		}
 	}
 	if (add != NULL && list->count < MB_JACK_MAX_UNITS) {
-		list->units[list->count++] = add;
+		// (early units before the others, each group in attach order)
+		int at = list->count;
+		if (add->early) {
+			at = 0;
+			while (at < list->count && list->units[at]->early) {
+				at++;
+			}
+			memmove(&list->units[at + 1], &list->units[at], (list->count - at) * sizeof(list->units[0]));
+		}
+		list->units[at] = add;
+		list->count++;
 	}
 
 	atomic_store(&active, list);
@@ -694,6 +707,20 @@ void mb_jack_detach(struct mb_jack_unit *unit)
 	unit->attached = 0;
 	unit->port_count = 0;
 	pthread_mutex_unlock(&change_lock);
+}
+
+int mb_jack_unit_running(const struct mb_jack_unit *unit)
+{
+	struct unit_list *list = cycle_units;
+	if (list == NULL || unit == NULL) {
+		return 0;
+	}
+	for (int i = 0; i < list->count; i++) {
+		if (list->units[i] == unit) {
+			return 1;
+		}
+	}
+	return 0;
 }
 
 void *mb_jack_port_buffer(void *port, uint32_t nframes)

@@ -53,6 +53,11 @@ struct mb_jack_unit {
 	uint8_t port_kinds[MB_JACK_MAX_PORTS]; // MB_JACK_KIND_* bits, set by mb_jack_register
 	int port_count;
 	int attached;
+
+	// Set before attaching: the unit runs before the units without it in
+	// every cycle (playbacks, so timed MIDI output sees the cycle's pull;
+	// see mb_jack_unit_running)
+	int early;
 };
 
 // Loads libjack; returns 0 on success.
@@ -108,6 +113,13 @@ void mb_jack_attach(struct mb_jack_unit *unit);
 void mb_jack_detach(struct mb_jack_unit *unit);
 
 // For process functions
+//
+// mb_jack_unit_running: true if +unit+ is in this cycle's list of attached
+// units, so it stays valid until the cycle ends (mb_jack_detach waits for
+// it).  A process function may then read another unit's state, e.g. a
+// playback that a MIDI output follows, without that unit being freed under
+// it.  Compares addresses only, so +unit+ may point at freed memory.
+int mb_jack_unit_running(const struct mb_jack_unit *unit);
 void *mb_jack_port_buffer(void *port, uint32_t nframes);
 uint32_t mb_jack_last_frame_time(void);
 uint32_t mb_jack_midi_count(void *buffer);
