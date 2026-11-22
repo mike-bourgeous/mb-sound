@@ -21,6 +21,7 @@ require_relative 'ui/knob_turns'
 require_relative 'ui/panes'
 require_relative 'ui/tree_text'
 require_relative 'ui/session_panes'
+require_relative 'ui/midi_ports_pane'
 require_relative 'ui/set_panes'
 require_relative 'ui/rack_pane'
 require_relative 'ui/player_panes'
@@ -122,7 +123,7 @@ module MB
         @panes ||= [
           Panes::Transport.new, Panes::Form.new, Panes::Tracks.new, Panes::Queue.new,
           Panes::Knobs.new, Panes::Meters.new, Panes::CPU.new, Panes::Scope.new, Panes::Spectrum.new, Panes::Messages.new, Panes::MessageDetail.new, Panes::Page.new, Panes::PlotView.new, Panes::Keyboard.new,
-          Panes::Buses.new, Panes::Log.new, Panes::Lane.new, Panes::Clips.new, Panes::ClipDetail.new, Panes::Racks.new, Panes::RackDetail.new, Panes::Midi.new,
+          Panes::Buses.new, Panes::Log.new, Panes::Lane.new, Panes::Clips.new, Panes::ClipDetail.new, Panes::Racks.new, Panes::RackDetail.new, Panes::Midi.new, Panes::MidiPorts.new,
           Panes::Inspector.new, Panes::Preview.new, Panes::Code.new, Panes::Picker.new, Panes::Audition.new, Panes::SoundKeys.new, Panes::Render.new,
           Panes::Tuner.new, Panes::TuneStrip.new,
         ].to_h { |p| [p.name, p] }

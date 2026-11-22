@@ -86,6 +86,7 @@ require_relative 'sound/window_methods'
 require_relative 'sound/analysis_methods'
 require_relative 'sound/generation_methods'
 require_relative 'sound/midi_methods'
+require_relative 'sound/midi_out_methods'
 require_relative 'sound/scripting_methods'
 require_relative 'sound/sequence_methods'
 require_relative 'sound/generative_methods'
@@ -143,6 +144,7 @@ module MB
     extend AnalysisMethods
     extend GenerationMethods
     extend MidiMethods
+    extend MidiOutMethods
     extend ScriptingMethods
     extend SequenceMethods
     extend GenerativeMethods
@@ -252,6 +254,8 @@ require_relative 'sound/midi/streams'
 require_relative 'sound/generative/key_follow' # (a MIDI::Param; gen-ux-1)
 require_relative 'sound/notes'
 require_relative 'sound/synth'
+require_relative 'sound/midi/out_node'
+require_relative 'sound/midi/destination'
 require_relative 'sound/drums'
 require_relative 'sound/sampler'
 require_relative 'sound/granular'

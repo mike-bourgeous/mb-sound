@@ -125,6 +125,11 @@ module MB
         # instruments and SoundFonts given to `track` are patch tracks, so
         # they take inserts: InstrumentPatch.voice?; the maintainer's take,
         # 2026-11-21: "Why can I not put effects on a soundfont track?")
+        def midi_track_message(command, name)
+          "#{command}: #{name.inspect} plays a MIDI destination: its sound is the synth's, so there is no audio to put effects on.  " \
+            "MIDI transforms go on the clip or stream instead (bg #{name.inspect}, riff.echo(1.n8, 3)); effects on the synth's audio need it recorded in"
+        end
+
         def graph_track_message(command, name, _graph)
           "#{command}: effect inserts go on tracks with an instrument or a patch block, and #{name.inspect} plays a graph: " \
             "its effects go in its graph (track #{name.inspect}, graph.reverb(...)), or give it a patch block that builds the graph from its clip"
@@ -140,6 +145,9 @@ module MB
       def fx(name, value, point = LaunchPoint::NONE)
         tr = tracks[name] or raise ArgumentError, "fx #{name.inspect}: no track #{name.inspect}#{GraphIO.suggest(name, tracks.keys)}"
         raise Fx::Error, Fx.graph_track_message("fx #{name.inspect}", name, tr.graph) unless tr.patch?
+        if InstrumentPatch.voice_of(tr.patch).is_a?(MIDI::Destination) && !(value.nil? || value == :off)
+          raise Fx::Error, Fx.midi_track_message("fx #{name.inspect}", name)
+        end
         chain = Fx.chain(value, track: name)
         chain = nil if chain.empty?
         playing = tr.clip && @session.playing_after_queue?(name)
