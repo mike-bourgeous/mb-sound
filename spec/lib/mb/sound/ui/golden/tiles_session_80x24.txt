@@ -8,12 +8,12 @@ bass/dub  effect  …│                                        │L ███�
   in sig:audio sid…│                                        │R █████████▌   -8.4
   space    █▊  0.6 │                                        │S -14.2 LUFS  TP -…
   tone     █▎  180…│                                        │RMS -18.0 -18.2
-                   │                                        │
-                   │                                        │
-                   ├─ CLIP MATRIX ───── 7 ─┬─ CLIP DE… ─ 8 ─┼─ BUSES ─────── 9 ─
-                   │        int… ▶drop     │beat_a  1 bar  …│● verb    → master
-                   │▶drums  ■    ▶bea…     │kick  !███·████·│ ← pad    -12.0 dB
-─ LANDED ───── 10 ─┤▶bass  ▷bas… ▶bas…     │snare ·██···██··├─ MIDI ─────── 11 ─
+─ RACK ──────── 7 ─┤                                        │
+bass/dub  effect  a│                                        │
+in sig:audio side:…├─ CLIP MATRIX ───── 8 ─┬─ CLIP DE… ─ 9 ─┼─ BUSES ────── 10 ─
+knobs  space 0.6 (…│        int… ▶drop     │beat_a  1 bar  …│● verb    → master
+┌ sig ┐           …│▶drums  ■    ▶bea…     │kick  !███·████·│ ← pad    -12.0 dB
+─ LANDED ───── 11 ─┤▶bass  ▷bas… ▶bas…     │snare ·██···██··├─ MIDI ─────── 12 ─
 nothing landed yet │ lead   ■     hook     │hat   ···██···██│no MIDI yet
                    │ pad   ▷cho… ▶cho…     │                │
                    │                       │                │

@@ -150,10 +150,6 @@ module MB
           "#<Rider #{channel_count} channels to #{format('%.1f', @target)} LUFS, gain #{format('%+.1f', @gain)} dB>"
         end
 
-        def to_s_graphviz
-          "#{graph_node_name || 'Rider'}\n#{format('%.1f', @target)} LUFS"
-        end
-
         # Called by the outputs: processes every input when output +index+
         # starts a new frame and returns that channel's ridden buffer (nil
         # once every input has ended).

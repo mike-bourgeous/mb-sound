@@ -101,7 +101,7 @@ Maintainer on genre :dnb (2026-10-13): "Mix needs a bit of rebalancing especiall
 
 ## Demo
 
-`bin/songs/genre_demo.rb --genre dnb` (`-G`; `-g` is the script runner's graphviz flag) (generated forms: `-E song|endless -S seed`) builds and plays (or renders) a template's short form, nothing else: `genre(p.genre).short(p.seconds).play`.  `--full` plays the whole form, `-s` sets the length, `--show` prints the template, `--bpm` scales the tempo; `--help` lists the genres.  Renders: `/app/workbench/data/bench/sets/genre-1/`.
+`bin/songs/genre_demo.rb --genre dnb` (`-G`; `-g` is the script runner's graph drawing flag) (generated forms: `-E song|endless -S seed`) builds and plays (or renders) a template's short form, nothing else: `genre(p.genre).short(p.seconds).play`.  `--full` plays the whole form, `-s` sets the length, `--show` prints the template, `--bpm` scales the tempo; `--help` lists the genres.  Renders: `/app/workbench/data/bench/sets/genre-1/`.
 
 Measured (2026-10-13, short forms, `Mix#report` on the render; LUFS integrated, target in parentheses): dnb -7.5 (-8..-6), its drop -6.6 and drop2 -6.3 (Tunnel Vision's drop -6.8); jungle -11.5 (-12..-9; Memory Card -11.5); ambient -16.6 (-19..-16; no rain or river, so the chain drives 4 dB into its safety limiter); funk -13.8 (-14..-10); house -9.5 (-10..-8), techno about -9 (-9..-7) after 11 dB of drive (stubs).  Stem levels were set against the songs' stems (the dnb bass and sub within 1 dB of Tunnel Vision's).  A render takes 6-12 s of CPU for a minute.
 

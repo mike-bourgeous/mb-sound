@@ -346,14 +346,6 @@ module MB
           "#{super} -- value=#{value_string}"
         end
 
-        # See GraphNode#to_s_graphviz
-        def to_s_graphviz
-          <<~EOF
-          #{super}---------------
-          value: #{value_string}
-          EOF
-        end
-
         # Returns a String display of the constant value, with unit and SI
         # prefixes if specified.
         def value_string

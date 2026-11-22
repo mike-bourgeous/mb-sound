@@ -103,7 +103,11 @@ module MB
       #   rack not playing: its knob names)
       # - knob_specs: frozen { knob name => Knob::Spec }
       # - slots: frozen Array (slots come in phase R3)
-      RackInfo = Data.define(:name, :path, :kind, :signature, :ports, :latency, :knobs, :knob_specs, :slots) do
+      # - graph: a frozen Plot::Graph of the rack's inside (its stand-in
+      #   build, the same for every instance; see Rack#graph), or nil
+      RackInfo = Data.define(:name, :path, :kind, :signature, :ports, :latency, :knobs, :knob_specs, :slots, :graph) do
+        def initialize(graph: nil, **fields) = super
+
         def to_s
           "#{path || name || 'rack'} #{kind} #{signature}#{latency.to_i > 0 ? ", latency #{latency} samples" : ''}#{knobs.empty? ? '' : ", knobs #{knobs.join(', ')}"}"
         end
@@ -142,6 +146,9 @@ module MB
 
       # Latencies of racks by Rack (identity; see #latency).
       LATENCIES = ObjectSpace::WeakMap.new
+
+      # Drawings of racks' insides by Rack (identity; see #graph).
+      GRAPHS = ObjectSpace::WeakMap.new
 
       # One application of a rack (Rack#call) while its block builds: the
       # knobs made so far by name.  Rack.application is the innermost one
@@ -550,15 +557,58 @@ module MB
       # The samples this rack delays its main input by, from a stand-in
       # build (see RackInfo#latency); remembered per Rack value.
       def latency
-        return LATENCIES[self] if LATENCIES.key?(self)
-        value = begin
-          result, = build_on_stand_ins
-          Rack.latency_of(result)
+        inspect_build unless LATENCIES.key?(self)
+        LATENCIES[self]
+      end
+
+      # A drawing of the rack's inside (a frozen Plot::Graph of its
+      # stand-in build: its ports at the left, `out` at the right), or nil
+      # if the build fails; built once per Rack value, with its latency,
+      # for rack panes (RackInfo#graph).  See #draw for the console.
+      def graph
+        inspect_build unless GRAPHS.key?(self)
+        GRAPHS[self]
+      end
+
+      # Draws the rack's inside by rank (a Plot::Graph shown when the
+      # console prints it): its ports as boxes at the left edge, its
+      # knobs, and the nodes its block builds on stand-ins for the ports,
+      # into `out` at the right.  +max_boxes+ as Plot.graph.  See
+      # design/notes/drawing.md.
+      #
+      #     rack(:dub).draw
+      def draw(max_boxes: MB::Sound::Plot::GraphView::MAX_BOXES)
+        result, stand, = build_on_stand_ins
+        MB::Sound::Plot.graph(result, ports: stand, port_types: port_types, out: true, title: "#{label}: #{signature}", max_boxes: max_boxes)
+      end
+
+      # One stand-in build for #latency and #graph (each nil when it
+      # fails), remembered per Rack value.
+      def inspect_build
+        result, stand = begin
+          build_on_stand_ins
         rescue StandardError
           nil
         end
-        LATENCIES[self] = value
+        LATENCIES[self] = begin
+          result && Rack.latency_of(result)
+        rescue StandardError
+          nil
+        end
+        GRAPHS[self] = begin
+          result && MB::Sound::Plot.graph(result, ports: stand, port_types: port_types, out: true)
+        rescue StandardError
+          nil
+        end
+        nil
       end
+      private :inspect_build
+
+      # { port name => type } of the main input and the extra ports.
+      def port_types
+        { @input.name => @input.type }.merge(@ports.transform_values(&:type))
+      end
+      private :port_types
 
       # A frozen RackInfo for this rack (+path+ and +knobs+ for one
       # instance; see Session::Racks#rack_info).
@@ -568,7 +618,7 @@ module MB
         @ports.each_value { |p| ports << { name: p.name, type: p.type, role: :side, required: p.required }.freeze }
         RackInfo.new(
           name: @name, path: path, kind: kind(@out || out), signature: signature(@out || out).freeze, ports: ports.freeze, latency: latency,
-          knobs: (knobs || specs.keys).map(&:to_sym).freeze, knob_specs: specs.dup.freeze, slots: [].freeze
+          knobs: (knobs || specs.keys).map(&:to_sym).freeze, knob_specs: specs.dup.freeze, slots: [].freeze, graph: graph
         )
       end
 

@@ -173,8 +173,7 @@ RSpec.describe(MB::Sound::MIDI::Stream) do
       graph = stream.graph
       expect(graph.grep(MB::Sound::Sequence::TimelineNode).length).to eq(1)
       expect(graph.grep(MB::Sound::MIDI::Stream).length).to eq(3)
-      expect(stream.graphviz).to include('MIDI transpose(12)')
-      expect(stream.graphviz).to include('MIDI Clip')
+      expect(stream.draw.to_s(color: :none)).to include('┌ transpose(12) ┐', '┌ channel(0) ┐', '┌ midi clip ┐')
     end
 
     it 'has no sample rate, so sample rate changes pass it by' do

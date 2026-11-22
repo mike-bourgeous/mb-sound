@@ -1014,7 +1014,6 @@ crush:
 shimmer:
 freeze:
 stretch:
-show_internals: true
 ## Dynamics
 design/notes/dynamics.md
 GraphNode::Dynamics

@@ -14,7 +14,7 @@
 # Usage:
 #     bin/songs/swap_song.rb             # plays live in the background session
 #     bin/songs/swap_song.rb song.flac   # renders to a file instead (-f to overwrite)
-#     bin/songs/swap_song.rb --graphviz  # draws the graph at the start of the song
+#     bin/songs/swap_song.rb --graph     # prints a drawing of the graph at the start of the song
 #     bin/songs/swap_song.rb --help      # all options
 #
 # Or in bin/sound.rb:

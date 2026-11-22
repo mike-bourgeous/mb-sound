@@ -15,8 +15,8 @@ module MB
     # `git rev-parse` up to 19 ms (audio-safety-2).  bin/sound.rb launches
     # a small starter process before anything plays (.start; plain Ruby
     # without gems, Starter::Server, about 13 MB), and every later process
-    # (ffmpeg readers and writers, ffprobe, git, the refine worker,
-    # graphviz) starts through it: the console sends the command, its
+    # (ffmpeg readers and writers, ffprobe, git, the refine worker)
+    # starts through it: the console sends the command, its
     # environment and directory, and the child's stdin/stdout/stderr (pipe
     # ends or files the console opened) over a UNIX socket (SCM_RIGHTS),
     # and gets back the pid and, later, the exit status.  Nothing forks in

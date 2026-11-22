@@ -446,6 +446,13 @@ module MB
           # snapshot catches up.
           PENDING = KnobTurns::PENDING
 
+          class << self
+            # The path (or name) of the instance whose knob is picked while
+            # the pane's mode is on: the rack pane (`:rack`) shows it.  Kept
+            # per process: one screen at a time.
+            attr_accessor :selected
+          end
+
           mode_keys do
             group 'Racks'
             on [:up, 'k'], :pick, -1, help: 'previous knob', label: 'Up Down j k'
@@ -492,6 +499,7 @@ module MB
             list = Racks.knobs(racks, s.knobs)
             pick = list.empty? ? nil : (state[:pick] = state[:pick].to_i.clamp(0, list.length - 1))
             picked = pick && list[pick][0]
+            Racks.selected = list[pick][2].path || list[pick][2].name if state[:mode] && pick
             y = 0
             racks.each do |r|
               break if y >= c.h

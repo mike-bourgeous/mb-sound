@@ -366,17 +366,6 @@ module MB
           "#{super} -- #{source_names.join(', ')} -- #{@base_filter}"
         end
 
-        # See GraphNode#to_s_graphviz
-        def to_s_graphviz
-          info = @base_filter.respond_to?(:to_s_graphviz) ? @base_filter.to_s_graphviz : @base_filter.to_s
-          <<~EOF
-          #{super}---------------
-          #{source_names.join("\n")}
-          ---------------
-          #{info}
-          EOF
-        end
-
         # Claim to support methods the base filter supports as well as our own.
         def respond_to?(m, include_all = false)
           super || @base_filter.respond_to?(m, include_all)

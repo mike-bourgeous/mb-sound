@@ -62,7 +62,7 @@ module MB
           "#{function_name}(#{make_source_name(climb_tee_tree(@input))})"
         end
 
-        # The description shown by #to_s and graphviz (the
+        # The description shown by #to_s (the
         # #arithmetic_string unless a subclass says otherwise).
         def function_description
           arithmetic_string
@@ -70,13 +70,6 @@ module MB
 
         def to_s
           "#{super} -- #{function_description}"
-        end
-
-        def to_s_graphviz
-          <<~EOF
-          #{super}---------------
-          #{function_description}
-          EOF
         end
 
         # Plan layer (see MB::Sound::Plan): one Op::Unary on the input's

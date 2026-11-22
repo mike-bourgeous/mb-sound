@@ -15,7 +15,7 @@ module MB
     #     -h, --help               the script's header comment plus the options
     #     -o, --output FILE        write to an audio file instead of playing
     #     -f, --force              overwrite the output file (alias --overwrite)
-    #     -g, --graphviz           open a visualization of the node graph
+    #     -g, --graph              print a drawing of the node graph (node.draw)
     #     -P, --plot               plot the output while playing live
     #     -q, --quiet              don't print the parameters (or MIDI controls)
     #     --ui [LAYOUT]            play live in a terminal screen (see #live_ui)
@@ -334,7 +334,7 @@ module MB
       # Positional arguments for a general script (kind :script).
       attr_reader :args
 
-      # Parsed common options (:input, :output, :force, :graphviz, :plot,
+      # Parsed common options (:input, :output, :force, :graph, :plot,
       # :quiet, plus :channels for effects and :bars for songs).
       attr_reader :options
 
@@ -449,8 +449,8 @@ module MB
       # PlaybackMethods#wait), or renders +bars+ bars plus the master tail to
       # the output file.  --bars N plays or renders N bars plus the tail
       # (without --bars, live songs play until they end, and renders stop
-      # after +bars+ or when the song ends).  --graphviz draws the graph as
-      # it is at the start (players started later by #at_bar are missing).
+      # after +bars+ or when the song ends).  --graph prints a drawing of the
+      # graph as it is at the start (players started later by #at_bar are missing).
       def run_song(bars: nil, &block)
         raise InputError, 'Pass --to or --bars, not both' if @options[:to] && @options[:bars]
         raise InputError, '--seek goes with --from' if @options[:seek] && !@options[:from]
@@ -461,7 +461,7 @@ module MB
         raise InputError, '--report needs a render (-o FILE or an output file name)' if @options[:report] && !@options[:output]
 
         print_params
-        open_song_graphviz(&block) if @options[:graphviz]
+        draw_song_graph(&block) if @options[:graph]
 
         if @options[:output]
           window = {}
@@ -728,7 +728,7 @@ module MB
 
       # Parses +argv+ into @options and @params.
       def parse(argv)
-        @options = { input: nil, output: nil, force: false, graphviz: false, plot: false, quiet: false, channels: @input_channels, repeat: nil }
+        @options = { input: nil, output: nil, force: false, graph: false, plot: false, quiet: false, channels: @input_channels, repeat: nil }
         values = @declared.to_h { |p| [p.name, p.default] }
 
         @parser = parser = OptionParser.new { |o|
@@ -736,7 +736,7 @@ module MB
           unless @kind == :script
             o.on('-o', '--output FILE', 'Write to an audio file instead of playing') { |v| @options[:output] = v }
             o.on('-f', '--force', '--overwrite', 'Overwrite the output file') { @options[:force] = true }
-            o.on('-g', '--graphviz', 'Open a visualization of the node graph') { @options[:graphviz] = true }
+            o.on('-g', '--graph', 'Print a drawing of the node graph') { @options[:graph] = true }
             o.on('-P', '--plot', 'Plot the output while playing live') { @options[:plot] = true }
             o.on('--ui [LAYOUT]', 'Play live in a terminal screen (songs: :show, synths/effects: :play with the keyboard; q quits)') { |v| @options[:ui] = v ? v.delete_prefix(':').to_sym : :default }
             o.on('-q', '--quiet', "Don't print the parameters or MIDI controls") { @options[:quiet] = true }
@@ -1054,27 +1054,23 @@ module MB
         @options[:force] ? true : :prompt
       end
 
-      # Prints the parameters (unless --quiet) and opens the graph
-      # visualization (with --graphviz).
+      # Prints the parameters (unless --quiet) and a drawing of the graph
+      # (with --graph; Traversable#draw).
       def announce(graph)
         print_params
         show_controls(graph)
-        if @options[:graphviz]
-          png = graph.open_graphviz
-          puts "Wrote GraphViz image to #{png}"
-        end
+        graph.draw.show(color: $stdout.tty? ? nil : :none) if @options[:graph]
       end
 
       # Arranges the song with +block+ on a silent session that never plays,
-      # and opens a drawing of the graph as it is at the start (see
+      # and prints a drawing of the graph as it is at the start (see
       # Session#graph_view).
-      def open_song_graphviz(&block)
+      def draw_song_graph(&block)
         output = NullOutput.new(channels: 2, sleep: false)
         transport = Sequence::Transport.new(bpm: Sequence.transport.bpm, bar_length: Sequence.transport.bar_length)
         session = Session.new(output: output, transport: transport, realtime: false)
         Session.with_context(session: session) { arrange_song(&block) }
-        png = session.graph_view.open_graphviz
-        puts "Wrote GraphViz image to #{png}"
+        session.graph_view.draw.show(color: $stdout.tty? ? nil : :none)
       ensure
         session&.close
       end

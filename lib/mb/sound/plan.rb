@@ -15,7 +15,7 @@ module MB
     #
     # It is an as-if transformation: the same samples (every op is
     # bit-exact with its node; see Op), the user's graph untouched (plans
-    # reference nodes and never rewire them; names, graphviz, #sources, and
+    # reference nodes and never rewire them; names, drawings, #sources, and
     # find_by_name see the original graph), and node state in the nodes
     # (Tone::State's Arrays are the registers' state), so a plan can be
     # dropped at any block boundary and the graph continues unfused.

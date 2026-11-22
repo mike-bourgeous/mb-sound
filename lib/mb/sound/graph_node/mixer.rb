@@ -400,15 +400,6 @@ module MB
           "#{super} -- #{arithmetic_string}"
         end
 
-        # Appends the arithmetic form of the mixer after
-        # GraphNode#to_s_graphviz.
-        def to_s_graphviz
-          <<~EOF
-          #{super}---------------
-          #{arithmetic_string("\n")}
-          EOF
-        end
-
         # Returns a String showing the math under the hood of this Mixer.
         #
         # Named nodes will show up as their names, so you can name an
@@ -419,7 +410,7 @@ module MB
         end
 
         # Returns an Array of terms that can be joined with pluses to produce a
-        # mathematical statement, for #to_s and #to_s_graphviz.
+        # mathematical statement, for #to_s.
         #
         # See #arithmetic_string.
         def arithmetic_terms(separator)

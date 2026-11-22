@@ -23,6 +23,7 @@ module PaneRowKeysGuard
   LEFT_RIGHT_OTHER = {
     clips: 'a grid: Left/Right move the cursor across scenes; cells hold clips, not values',
     picker: 'Left/Right change the library head; entries are actions, not values',
+    rack: 'a drawing: the arrows pan the rack\'s graph; knobs are read-only here (turned in the racks pane)',
   }.freeze
 end
 

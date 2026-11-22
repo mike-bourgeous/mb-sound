@@ -240,8 +240,8 @@ RSpec.describe(MB::Sound::ScriptRunner) do
     end
 
     it 'takes a synth MIDI input and an audio output' do
-      r = runner(:synth, ['song.mid', 'out.flac', '--graphviz'])
-      expect(r.options).to include(input: 'song.mid', output: 'out.flac', graphviz: true)
+      r = runner(:synth, ['song.mid', 'out.flac', '--graph'])
+      expect(r.options).to include(input: 'song.mid', output: 'out.flac', graph: true)
     end
 
     it 'takes effect input channels and --repeat' do
@@ -440,18 +440,14 @@ RSpec.describe(MB::Sound::ScriptRunner) do
   describe '#run_song' do
     let(:outfile) { tmp_path('script_runner_song.flac') }
 
-    it 'draws the graph at the start of the song with --graphviz, then renders' do
-      dot = nil
-      allow_any_instance_of(MB::Sound::Session::GraphView::Box).to receive(:open_graphviz) { |box| dot = box.graphviz; 'song.png' }
-
-      r = runner(:song, [outfile, '-q', '--graphviz'])
+    it 'prints a drawing of the graph at the start of the song with --graph, then renders' do
+      r = runner(:song, [outfile, '-q', '--graph'])
       song = -> {
         MB::Sound.bg(:tone, 220.hz.sine.at(0.5).named('song tone'))
         MB::Sound.master { |mix| mix.softclip }
       }
-      expect { r.run_song(bars: 1) { song.call } }.to output(/Wrote GraphViz image to song.png.*Rendered/m).to_stdout
+      expect { r.run_song(bars: 1) { song.call } }.to output(/┌ song tone .*┌ softclip ┐.*┌ session output ┐.*▸tone.*Rendered/m).to_stdout
 
-      expect(dot).to include('song tone', 'softclip ×2', 'label="tone"', 'label="master input"')
       expect(MB::Sound.read(outfile)[0].abs.max).to be > 0.1
     end
 

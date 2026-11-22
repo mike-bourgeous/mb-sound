@@ -101,7 +101,7 @@ module MB
       include TremoloMethods
 
       # The per-channel DSL call that made this node, if any (see
-      # ChannelDispatch and ChannelGroup).  Used by #graphviz.
+      # ChannelDispatch and ChannelGroup).
       attr_accessor :channel_group
 
       # Set lazily by GraphNode's modules and the plan layer (see IvarPreset).
@@ -138,18 +138,6 @@ module MB
       def to_s
         @graph_node_name ||= nil
         "#{node_type_name}/#{@graph_node_name || "id=#{__id__}"}"
-      end
-
-      # Returns a multiline description of a node suitable for display in a
-      # GraphViz visualization (see #graphviz).
-      def to_s_graphviz
-        to_s # populate @node_type_name
-
-        <<~EOF
-        #{@node_type_name}
-        #{@graph_node_name || "id=#{__id__}"}
-        #{MB::M.sigformat(sample_rate)}Hz
-        EOF
       end
 
       # Finds the lowest numeric value greater than zero for any graph nodes

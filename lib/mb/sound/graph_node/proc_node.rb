@@ -39,10 +39,10 @@ module MB
         # searching methods still work.  Pass a Hash from source name to
         # source node.
         #
-        # +:type_name+ is stored in @node_type_name for display in e.g.
-        # GraphViz graphs.  See GraphNode#graphviz.
+        # +:type_name+ is stored in @node_type_name for display in #to_s and
+        # #inspect.
         def initialize(source, extra_sources: {}, sample_rate: nil, type_name: nil, &block)
-          # Where the block was written, for graphviz and debugging; not the
+          # Where the block was written, for debugging; not the
           # node's name (ux-fix-2: names are shown as values, so `play C4`
           # printed freq=/.../lib/mb/sound/tuning.rb:87)
           @source_location = ProcNode.short_location(block.source_location)
@@ -71,11 +71,6 @@ module MB
           # for the graph's life)
           @callers = Internal.creation_trace(skip: [__FILE__])
           @cb = block
-        end
-
-        # See GraphNode#to_s_graphviz (adds where the block was written).
-        def to_s_graphviz
-          @source_location ? "#{super}#{@source_location}\n" : super
         end
 
         # Calls the block given to the constructor with the input data and

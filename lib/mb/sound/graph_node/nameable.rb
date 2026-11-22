@@ -8,7 +8,7 @@ module MB
         attr_reader :graph_node_name
 
         # Gives a name to this graph node to make it easier to retrieve later and
-        # identify it in visualizations of the node graph (see #graphviz).
+        # identify it in drawings of the node graph (see #draw).
         def named(n)
           @graph_node_name = n&.to_s
           @named = !!@graph_node_name
