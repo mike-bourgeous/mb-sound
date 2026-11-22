@@ -42,6 +42,13 @@
 #   there, what an offline render plays from bar 1, within -80 dB
 #   (form-start-1: a form kept time while its first scene's tracks were
 #   built one by one, so late tracks lost their first notes)
+# - :rehearse: the song's definitions with a flow through its scenes and a
+#   scene and section setting track hash levels, one of them for a track
+#   the warm-up leaves out (it reaches a node made outside its patch),
+#   warmed up with its rehearsal as the console does (live, with YJIT),
+#   print nothing, rehearse a section, and play the same, bit for bit, as
+#   without the warm-up (fixes-17: scenes fading a left-out track's level
+#   failed every rehearsed section)
 #
 # Renders use exact_lanes: true (synth lanes freed on the 800-frame grid,
 # so voice allocation is the same at any buffer size; see Synth).
@@ -56,7 +63,7 @@ require_relative 'recipe_helpers'
 require_relative 'carry_check'
 
 module SessionFuzz
-  RELATIONS = %i[runs buffer_size plan timeline warm carry meta form_start].freeze
+  RELATIONS = %i[runs buffer_size plan timeline warm carry meta form_start rehearse].freeze
 
   # Relations known to fail for a reason recorded elsewhere, as
   # { relation => [[Regexp on the script, 'reason'], ...] }: skipped, counted.
@@ -1128,6 +1135,79 @@ module SessionFuzz
     MB::Sound.rewind
   end
 
+  # :rehearse's extra track: one that reaches a node made outside its patch,
+  # so the warm-up only builds it and leaves it out of the rehearsal.
+  REHEARSE_EXTRA = [
+    'fuzz_shared = 0.5.hz.lfo.at(0.5..1)',
+    'track(:outside) { |clip| clip.synth(voices: 1) { |v| v.hz.sine * v.amp_env(0.002, 0.05, 0.6, 0.02) } * fuzz_shared * 0.2 }',
+  ].freeze
+
+  # :rehearse (fixes-17; see the file comment): nil if it holds, :skip if
+  # the song has no tracks or scenes, else a failure message.
+  def rehearse_problem(song)
+    # (the song's own scenes, :s1 and :s2: the others name players its
+    # scheduled lines start, a sidechain's trigger track)
+    defs = song.lines.grep(/\A(knob |track[( ]|scene :s\d+,|bus\()/)
+    scenes = defs.filter_map { |l| l[/\Ascene :(\w+)/, 1] }.uniq
+    track = defs.find { |l| l.start_with?('track') }&.[](/\Atrack[( ]:(\w+)/, 1)
+    return :skip if track.nil? || scenes.empty?
+
+    extra = REHEARSE_EXTRA + ["scene :rh, outside: { clip: seq(C4, E4).n8.loop, level: [0, over: 1] }, #{track}: { level: [0.5, over: 1/2r] }, others: :keep"]
+    flow = "flow(play: false) { #{scenes.map { |n| "#{n} 1" }.join('; ')}; rh 1, outside: { level: 0.5 }, #{track}: { level: 0.8 } }"
+    code = (song.header + defs + extra + [flow]).join("\n")
+    plain = render_rehearsed(code, false)
+    return plain if plain.is_a?(String)
+
+    got = render_rehearsed(code, true)
+    return got if got.is_a?(String) || got == :skip
+
+    compare(plain, got, tolerance: 0, label: "the flow after the warm-up and its rehearsal vs without\n#{code}")
+  end
+
+  # Builds +code+ (definitions and a flow) in a non-realtime Session, warms
+  # it up with its rehearsal if +warm+ (Arrangement#warm_up(form:,
+  # rehearse: true), as the console does while YJIT compiles), then plays
+  # the flow for 2 bars.  Returns the mix (one DFloat per channel), a
+  # message when the warm-up printed anything, or :skip when it had no
+  # track to rehearse.
+  def render_rehearsed(code, warm)
+    MB::Sound.rewind
+    MB::Sound.seed(1)
+    s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false, buffer_size: 800), transport: MB::Sound::Sequence::Transport.new(bpm: 120),
+                               master_gain: 1, channels: 2, buffer_size: 800, realtime: false, raise_errors: true)
+    s.exact_lanes = true
+    err = StringIO.new
+    old_err = $stderr
+    $stderr = err
+    rehearsal = nil
+    begin
+      MB::Sound::Session.with_context(session: s) do
+        RecipeHelpers.eval_recipe(code)
+        arr = s.arrangement
+        form = MB::Sound::TransportMethods.loaded_flow(arr)
+        if warm
+          arr.warm_up(form: form, rehearse: true)
+          rehearsal = arr.rehearsal
+        end
+        arr.play_form(form, warm_up: false)
+      end
+    ensure
+      $stderr = old_err
+    end
+    printed = err.string.lines.reject { |l| EXPECTED_WARNINGS.any? { |re| l.match?(re) } }
+    return "the warm-up printed: #{printed.first(3).join}\n#{code}" if warm && !printed.empty?
+    # (no track the warm-up played on its own, e.g. scenes of generated
+    # clips it doesn't warm: nothing rehearsed, nothing to check)
+    return :skip if warm && rehearsal.nil?
+
+    frames = (2 * s.transport.bar_length * 240r / s.transport.bpm * s.sample_rate).ceil
+    bufs = Array.new((frames / 800.0).ceil) { s.process_buffer.map(&:dup) }
+    bufs.transpose.map { |c| Numo::DFloat.cast(SpecBuffers.join(c)) }
+  ensure
+    s&.close
+    MB::Sound.rewind
+  end
+
   # Warnings a generated song may cause on purpose (commands for players
   # a scene or a one-shot clip has already ended); anything else printed
   # during a render fails :runs.
@@ -1336,6 +1416,8 @@ module SessionFuzz
       compare(plain, got, tolerance: 1e-20, label: "#{plans.length} carried rebuild#{'s' unless plans.length == 1} vs none#{" (up to frame #{fresh}, where a sleeping track's rebuild started fresh)" if fresh}")
     when :form_start
       form_start_problem(song)
+    when :rehearse
+      rehearse_problem(song)
     when :timeline
       parts = timeline_parts(song)
       return :skip if parts.empty?
