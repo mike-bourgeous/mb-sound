@@ -6,6 +6,10 @@ RSpec.describe('bin/sound.rb', :aggregate_failures) do
     expect(result).to be_success
 
     expect(output).to include('Welcome to mb-sound'), 'shows the welcome text'
+    # Each start step prints its own line and nothing else (followups-1:
+    # the UI warm-up's tracks printed three "isn't playing" notices)
+    start = output.split('Welcome to mb-sound').first.lines.map(&:strip).reject(&:empty?)
+    expect(start).to all(match(/\A(Loading .*|Warming up .*|Started in .*)\z/)), start.join("\n")
     expect(output).to include('play it: help('), 'shows a runnable tip'
     expect(output).to match(/sound\.rb \[\d+\] MB::Sound/), 'displays the right prompt'
     expect(output).to include('123'), 'shows the frequency being plotted'

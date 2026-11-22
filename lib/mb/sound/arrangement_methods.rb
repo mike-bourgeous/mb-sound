@@ -59,7 +59,8 @@ module MB
       def track(name, *values, q: nil, fade: nil, lead: nil, nudge: nil, lead_max: nil, to: nil, send: nil, pre_send: nil, pre_mute_send: nil, clock: nil, trigger: false, fx: Arrangement::KEEP_FX, &patch)
         session = Session.current
         result = session.arrangement.track(name, *values, q: q, fade: fade, lead: lead, nudge: nudge, lead_max: lead_max, to: to, send: send, pre_send: pre_send, pre_mute_send: pre_mute_send, clock: clock, trigger: trigger, fx: fx, &patch)
-        if result.is_a?(Symbol) && (patch || !values.empty?) && !Session.context&.time && MB::Sound.live? && !session.playing_after_queue?(name)
+        if result.is_a?(Symbol) && (patch || !values.empty?) && !Session.context&.time && MB::Sound.live? &&
+           Internal.user_call?(caller_locations(1, 1).first) && !session.playing_after_queue?(name)
           # (ux-friction-1 round 2: his third take redefined a stopped
           # track's voice and saw only `=> :test`, like round 1's fx)
           $stdout.puts "\e[2mtrack #{name.inspect}: #{name.inspect} isn't playing, so its new sound plays from its next launch (bg #{name.inspect}, clip, its scene, or launch)\e[0m"
@@ -135,7 +136,7 @@ module MB
         end
         point = LaunchPoint.of(binding) or return nil
         result = arrangement.fx(name, effects, point)
-        if result.is_a?(Symbol) && !Session.context&.time && MB::Sound.live?
+        if result.is_a?(Symbol) && !Session.context&.time && MB::Sound.live? && Internal.user_call?(caller_locations(1, 1).first)
           # (ux-friction-1: fx on a stopped track returned :pluck and he
           # couldn't tell anything had happened until his next `bg :pluck`)
           tr = arrangement.tracks[name]
