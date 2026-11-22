@@ -22,11 +22,6 @@ RSpec.describe('MB::Sound::FastAudio JACK client', :aggregate_failures) do
     ).tap { |p| @opened << p }
   end
 
-  def wait_until(seconds = 2)
-    deadline = MB::U.clock_now + seconds
-    sleep 0.01 until yield || MB::U.clock_now > deadline
-  end
-
   it 'reports a JACK server' do
     expect(fa.jack_server?).to eq(true)
   end
@@ -39,7 +34,7 @@ RSpec.describe('MB::Sound::FastAudio JACK client', :aggregate_failures) do
     expect(info[:sample_rate]).to eq(48000)
     expect(info[:buffer_size]).to eq(256)
 
-    wait_until { fa.jack_info[:cycles] > 2 }
+    wait_until! { fa.jack_info[:cycles] > 2 }
     expect(fa.jack_info[:cycles]).to be > 2
   end
 
@@ -56,7 +51,7 @@ RSpec.describe('MB::Sound::FastAudio JACK client', :aggregate_failures) do
     left = Numo::SFloat.linspace(0, 1, 2048)
     right = -left
     p.write([left, right])
-    wait_until { p.stats[:frames_played] >= 4096 }
+    wait_until! { p.stats[:frames_played] >= 4096 }
 
     played = Numo::SFloat.from_binary(p.captured).reshape(nil, 2)
     start = (0...played.shape[0]).find { |i| played[i, 0] != 0 } || 0
@@ -71,11 +66,11 @@ RSpec.describe('MB::Sound::FastAudio JACK client', :aggregate_failures) do
     a = Numo::SFloat.cast(Numo::NMath.sin(t * 0.031) * 0.5 + Numo::NMath.sin(t * 0.117) * 0.2)
     b = Numo::SFloat.cast(Numo::NMath.sin(t * 0.05) * 0.4)[0...4800]
     p.write([a[0...4800]])
-    wait_until { p.stats[:concealed] >= 2400 }
+    wait_until! { p.stats[:concealed] >= 2400 }
     p.write([b])
-    wait_until { p.stats[:queued] == 0 && p.stats[:concealed_gaps] >= 2 }
+    wait_until! { p.stats[:queued] == 0 && p.stats[:concealed_gaps] >= 2 }
     p.end_stream
-    wait_until { p.captured.bytesize >= 24000 * 4 }
+    wait_until! { p.captured.bytesize >= 24000 * 4 }
 
     x = Numo::SFloat.from_binary(p.captured)
     start = (0...x.length).find { |i| x[i] != 0 }
@@ -89,14 +84,14 @@ RSpec.describe('MB::Sound::FastAudio JACK client', :aggregate_failures) do
 
   it 'reports where each cycle starts, mapping queued frames to JACK frame times' do
     p = jack_playback(['out_1'], capture: 8192)
-    wait_until { p.jack_clock }
+    wait_until! { p.jack_clock }
     first = p.jack_clock
     expect(first.keys).to eq([:frame_time, :read_pos, :frames_played, :write_pos])
     expect(first[:read_pos]).to eq(0)
     expect(first[:write_pos]).to eq(0)
 
     # The device clock and JACK's frame counter advance together
-    wait_until { p.jack_clock[:frame_time] != first[:frame_time] }
+    wait_until! { p.jack_clock[:frame_time] != first[:frame_time] }
     later = p.jack_clock
     expect((later[:frame_time] - first[:frame_time]) % 256).to eq(0)
     expect(later[:frames_played] - first[:frames_played]).to eq((later[:frame_time] - first[:frame_time]) & 0xffff_ffff)
@@ -106,11 +101,11 @@ RSpec.describe('MB::Sound::FastAudio JACK client', :aggregate_failures) do
     ramp = Numo::SFloat.linspace(0, 1, 4096)
     p.write([ramp])
     clock = nil
-    wait_until(2) { (c = p.jack_clock) && c[:read_pos] > 0 && (clock = c) }
+    wait_until! { (c = p.jack_clock) && c[:read_pos] > 0 && (clock = c) }
     expect(clock[:write_pos]).to eq(4096)
     expect(clock[:read_pos]).to be < 4096
 
-    wait_until { p.stats[:frames_played] >= clock[:frames_played] + 4096 }
+    wait_until! { p.stats[:frames_played] >= clock[:frames_played] + 4096 }
     played = Numo::SFloat.from_binary(p.captured)
     start = (0...played.length).find { |i| played[i] != 0 }
     expect(start).to eq(1 - clock[:read_pos] + clock[:frames_played])

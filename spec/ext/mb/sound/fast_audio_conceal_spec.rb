@@ -442,11 +442,6 @@ RSpec.describe('MB::Sound::FastAudio::Concealer', :aggregate_failures) do
       ).tap { |p| @playbacks << p; remember_capture(p, capture) }
     end
 
-    def wait_until(timeout: 3)
-      deadline = MB::U.clock_now + timeout
-      sleep 0.005 until yield || MB::U.clock_now > deadline
-    end
-
     before { @playbacks = [] }
     after { @playbacks.each(&:close) }
 
@@ -463,9 +458,9 @@ RSpec.describe('MB::Sound::FastAudio::Concealer', :aggregate_failures) do
       a = signal(0, 4800, 1)[0]
       b = signal(4800, 4800, 1)[0]
       pb.write([a])
-      wait_until { pb.stats[:concealed] >= 4800 }
+      wait_until!(poll: 0.005) { pb.stats[:concealed] >= 4800 }
       pb.write([b])
-      wait_until { pb.stats[:queued] == 0 && pb.stats[:concealed_gaps] >= 2 }
+      wait_until!(poll: 0.005) { pb.stats[:queued] == 0 && pb.stats[:concealed_gaps] >= 2 }
       pb.end_stream
       wait_for_capture(pb)
 
@@ -486,7 +481,7 @@ RSpec.describe('MB::Sound::FastAudio::Concealer', :aggregate_failures) do
         pb = playback(settings, capture: DeviceCapture.size(24000))
         pb.write([a])
         pb.end_stream if mark
-        wait_until { pb.stats[:queued] == 0 }
+        wait_until!(poll: 0.005) { pb.stats[:queued] == 0 }
         wait_for_played(pb, 24000)
         x = captured(pb)
         expect(x[2400..].abs.max).to eq(0)

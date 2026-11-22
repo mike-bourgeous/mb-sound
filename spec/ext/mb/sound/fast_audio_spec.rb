@@ -38,11 +38,6 @@ RSpec.describe('MB::Sound::FastAudio', :aggregate_failures) do
     pb.device_channels.times.map { |c| frames[start..., c].dup }
   end
 
-  def wait_until(timeout: 2)
-    deadline = MB::U.clock_now + timeout
-    sleep 0.005 until yield || MB::U.clock_now > deadline
-  end
-
   before { @playbacks = [] }
   after { @playbacks.each(&:close) }
 
@@ -142,7 +137,7 @@ RSpec.describe('MB::Sound::FastAudio', :aggregate_failures) do
         expect(pb.resampling?).to eq(true)
 
         write_all(pb, data, 777) # odd sizes cross libsamplerate's chunks
-        wait_until { pb.stats[:queued] == 0 }
+        wait_until!(poll: 0.005) { pb.stats[:queued] == 0 }
         wait_for_played(pb, 42000)
 
         # One second at 48k is one second at 44.1k (less the converter's delay)
@@ -197,7 +192,7 @@ RSpec.describe('MB::Sound::FastAudio', :aggregate_failures) do
         expect(pb.write([l[range], r[range]])).to eq(range.size)
       end
 
-      wait_until { pb.stats[:queued] == 0 }
+      wait_until!(poll: 0.005) { pb.stats[:queued] == 0 }
       wait_for_played(pb, 9000)
       cl, cr = captured(pb)
       expect(cl[0...9000]).to eq(l)
@@ -306,7 +301,7 @@ RSpec.describe('MB::Sound::FastAudio', :aggregate_failures) do
         Thread.current.report_on_exception = false
         pb.write([big, big])
       }
-      wait_until { pb.stats[:queued] > 0 }
+      wait_until!(poll: 0.005) { pb.stats[:queued] > 0 }
       sleep 0.02
 
       pb.close
@@ -322,7 +317,7 @@ RSpec.describe('MB::Sound::FastAudio', :aggregate_failures) do
       rescue Interrupt => e
         e
       end
-      wait_until { pb.stats[:queued] > 0 }
+      wait_until!(poll: 0.005) { pb.stats[:queued] > 0 }
       sleep 0.02
 
       t.raise(Interrupt)

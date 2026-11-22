@@ -18,11 +18,6 @@ RSpec.describe('MB::Sound::FastLatency', :aggregate_failures) do
   end
 
   # Waits up to +timeout+ seconds for the block to be truthy.
-  def wait_until(timeout: 5)
-    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
-    sleep 0.005 until yield || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
-    yield
-  end
 
   it 'loads when the GC runs at every allocation' do
     so = File.expand_path('../../../../lib/mb/sound/fast_latency.so', __dir__)
@@ -94,7 +89,7 @@ RSpec.describe('MB::Sound::FastLatency', :aggregate_failures) do
       expect(p.running?).to eq(true)
       expect { p.start }.to raise_error(RuntimeError, /already started/)
 
-      wait_until(timeout: 10) { p.stats[:calibrated] }
+      wait_until!(timeout: 10, poll: 0.005) { p.stats[:calibrated] }
       p.stop
       expect(p.running?).to eq(false)
 
@@ -119,7 +114,7 @@ RSpec.describe('MB::Sound::FastLatency', :aggregate_failures) do
     it 'makes events and episodes for ticks over the threshold' do
       p = probe(threshold_ns: 0, events_per_second: 5, gap_ns: 1_000_000_000)
       p.start
-      wait_until(timeout: 10) { p.stats[:ticks] >= 20 }
+      wait_until!(timeout: 10, poll: 0.005) { p.stats[:ticks] >= 20 }
       p.stop
 
       s = p.stats
@@ -138,9 +133,9 @@ RSpec.describe('MB::Sound::FastLatency', :aggregate_failures) do
     it 'never blocks on a full ring: overflow is counted and ticks go on' do
       p = probe(threshold_ns: 0, events_per_second: 1_000_000, ring: 4)
       p.start
-      wait_until(timeout: 10) { p.stats[:overflow] > 50 }
+      wait_until!(timeout: 10, poll: 0.005) { p.stats[:overflow] > 50 }
       before = p.stats[:ticks]
-      wait_until(timeout: 10) { p.stats[:ticks] >= before + 50 }
+      wait_until!(timeout: 10, poll: 0.005) { p.stats[:ticks] >= before + 50 }
       p.stop
 
       s = p.stats
@@ -156,7 +151,7 @@ RSpec.describe('MB::Sound::FastLatency', :aggregate_failures) do
     it 'keeps waking on time while a Ruby thread holds the GVL', memcheck_skip: 'Valgrind serializes threads; the other Probe examples run the probe loop' do
       p = probe
       p.start
-      wait_until(timeout: 10) { p.stats[:ticks] > 10 }
+      wait_until!(timeout: 10, poll: 0.005) { p.stats[:ticks] > 10 }
       t0 = fast.mono_ns
       fast.spin(0.3)
       held = fast.mono_ns - t0
@@ -185,7 +180,7 @@ RSpec.describe('MB::Sound::FastLatency', :aggregate_failures) do
       p.start
       p.drain
       th = Thread.new { p.wait(30) }
-      wait_until(timeout: 5) { th.status == 'sleep' || th.status == false }
+      wait_until!(timeout: 5, poll: 0.005) { th.status == 'sleep' || th.status == false }
       t = Time.now
       th.kill
       th.join

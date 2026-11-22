@@ -2,6 +2,8 @@
 # its drop, with tracks, a queued change, knobs, master levels, and a scope,
 # all fixed (no Session), so band text is deterministic.
 module UIHelpers
+  include WaitHelpers
+
   UI = MB::Sound::UI
 
   # The RENDER pane renders on the drawing thread in UI specs (no worker
@@ -410,31 +412,7 @@ module UIHelpers
     def cc(*, **) = nil
   end
 
-  # Waits up to +timeout+ seconds for the block to be truthy; returns its
-  # last value (falsy after a timeout: use it in an expectation, `expect(
-  # wait_until { ... }).to eq(true), why`, or call #wait_until! instead;
-  # a bare `wait_until { }` statement fails spec_hygiene_spec, since its
-  # timeout went unnoticed: fixes-17, perf_spec's ack wait always ran out
-  # its 5 s).
-  def wait_until(timeout: 5)
-    deadline = MB::U.clock_now + timeout
-    sleep 0.01 until yield || MB::U.clock_now > deadline
-    yield
-  end
-
-  # Raised by #wait_until! when its condition isn't met in time.
-  class WaitTimeout < RuntimeError; end
-
-  # #wait_until that fails: raises WaitTimeout naming +what+ (else the
-  # block's line) if the block isn't truthy within +timeout+ seconds.
-  # Returns the block's value.
-  def wait_until!(what = nil, timeout: 5, &block)
-    value = wait_until(timeout: timeout, &block)
-    return value if value
-
-    where = block.source_location&.then { |f, l| "#{File.basename(f)}:#{l}" }
-    raise WaitTimeout, "timed out after #{timeout} s waiting for #{what || "the block at #{where}"}"
-  end
+  # (#wait_until and #wait_until!: WaitHelpers, included in every example)
 
   # Waits for +tiles+' Router to reach +mode+ and the transition to finish:
   # the Router changes its state before the screen's #mode_changed pins the
