@@ -2468,6 +2468,15 @@ module MB
         @thread.name = 'MB::Sound::Session'
         @thread.priority = RENDER_THREAD_PRIORITY
 
+        # Generator cycles are computed ahead on the scheduler thread
+        # while this session renders (Scheduler#background starts that
+        # thread on first use).  The scheduler joined Ahead only when its
+        # thread started for a scheduled block, so a console session with
+        # nothing scheduled (`track`, `bg`, `swap`) computed every new cycle
+        # of a generator on the render thread, 0.3-0.9 ms at 128 frames
+        # for the drum beats (bg-latency-2).
+        Generative::Ahead.attach(@scheduler)
+
         # Stop the thread and close the output cleanly at exit (held
         # weakly: an at_exit block would keep this Session and every graph
         # it played alive until exit)
