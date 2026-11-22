@@ -250,9 +250,6 @@ module GraphSweep
       }],
       ['proc', ->(c) { c.sig.proc { |buf| buf * 0.5 } }],
       ['tee and branches', ->(c) { t = c.sig; t.softclip + t.delay(10.samples) + t }],
-      # (midi-out-1: a MIDI out track's graph, sending a clip's notes to a
-      # logging destination; its audio is silence)
-      ['MIDI out to a destination', ->(c) { MB::Sound.midi_out(log: true, channel: 3).play(c.clip) + c.sig * 0.5 }],
       ['with_buffer (BufferAdapter)', ->(c) { c.sig.with_buffer(37.samples) }],
       ['until and and_then (TimeLimit, NodeSequence, Silence)', ->(c) { c.sig.until(0.002).and_then(c.s.silence(0.001), c.sig(220)) }],
       ['ringdown', ->(c) { c.sig.until(0.003).ringdown }],
@@ -829,6 +826,7 @@ module GraphSweep
     'MB::Sound::InputBufferWrapper' => 'wraps an input stream for window readers, not a graph node in use',
     'MB::Sound::OutputBufferWrapper' => 'wraps an output stream for window writers',
     'MB::Sound::GraphNode::DataShuffler' => 'test/debug helper with no DSL entry point',
+    'MB::Sound::MIDI::OutNode' => "a MIDI out track's graph (silent audio; pure Ruby, no C): destination_spec runs it at 800/367/128/1-frame buffers, destination_jack_spec through JACK; set documents save it as `track :x, midi_out(...)`, not as a graph",
   }.freeze
 
   # Buffer size and count of the Notes reference path pass (Kernels

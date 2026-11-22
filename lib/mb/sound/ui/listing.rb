@@ -88,7 +88,7 @@ module MB
 
       # The set's panes, shown by `ui :session` (and buses in :studio's
       # tabs) rather than on the :wall, which shows every other pane.
-      SESSION_PANES = %i[buses log lane clips clip racks rack midi].freeze
+      SESSION_PANES = %i[buses log lane clips clip racks rack midi midi_ports].freeze
 
       # The sound-design screen's panes, shown by `ui :sound` (the
       # inspector, its preview and code, the picker, the CUE line, the
