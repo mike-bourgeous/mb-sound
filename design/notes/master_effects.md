@@ -1,10 +1,10 @@
 # Master effects
 
 <!-- summary -->
-`Session#master` / console `master { |mix| mix.softclip }` runs the mix through a chain of `GraphNode::MixSource` channels; new chains start at launch points with the old one spilling over (`fade:` crossfades), `master nil` bypasses, and the master gain applies before the chain (`post: true` after it).
-Without a chain, realtime live output ends in a transparent -1 dBFS `Session::SafetyLimiter` (never in renders, stems, takes, taps).
-Mastering presets (`master :club`, `:streaming`, `:quiet`, `:vinyl`, `:hot`, `:match, reference:`; `mix.master(:club)` anywhere; `masters`) are frozen `Mastering::Preset` values: renders reach their loudness target exactly in two passes (`Mastering::Targeting`), live uses the preset's drive or `ride: true`; `:match` takes a reference track's loudness (`measure: :integrated | :loudest | :histogram`, read in both alike), true peak, and (renders) spectral tilt.
-The chain keeps as an effect rack (`Session::MasterRack`): `master.save_rack :glue` writes a rack document from the chain's recipes (a preset as `.master(:club)`, knobs as rack knobs at their current values), and `master :glue` / `master rack(:glue)` / `master arack { }` and `fx :drums, :glue` play effect racks.
+`master { |mix| mix.softclip }` (`Session#master`) runs the mix through a chain on `GraphNode::MixSource` channels, starting at launch points while the old one spills over (`fade:` crossfades); `master nil` bypasses; the master gain applies before it (`post: true` after).
+Without a chain, live output ends in a transparent -1 dBFS `Session::SafetyLimiter` (not in renders, stems, takes).
+Mastering presets (`master :club`, `:streaming`, `:quiet`, `:vinyl`, `:hot`, `:match, reference:`; `mix.master(:club)`; `masters`) are frozen `Mastering::Preset`s: renders hit their loudness target exactly in two passes (`Mastering::Targeting`), live uses the drive or `ride: true`; `:match` takes a reference's loudness, true peak, and tilt.
+Effect racks play as the chain (`master :glue`); `master.save_rack :glue` keeps the chain as a rack document (`Session::MasterRack`).
 <!-- /summary -->
 
 ## Quick reference
@@ -36,7 +36,7 @@ The maintainer: "Can I save the current master FX as a rack or fx preset?"; of t
 - **`fx` takes racks** (`Arrangement::Fx`): effect Racks as inserts; `fx :drums, :glue` finds a named rack through the library's effect entries (the Session's racks are entries of the :session shelf); set documents save a named rack by its name (`fx: :glue`), not an anonymous one.
 - **Set documents**: a master rack saves through the existing block form, `master { |mix| mix.then(&rack(:glue).using(seed: ...)) }` (an anonymous rack inline), so no saved-text form changed (no `GraphIO::FORMATS` bump); set documents don't carry rack definitions, so a named rack reloads from its rack document (or the Session).
 - Measured (spec): a chain with a defined knob, a turned read-only knob, and `:club` at the end, saved and loaded in a fresh Session, renders bit for bit like the original at 800- and 367-frame buffers; per-channel blocks, `width`, and `mono` chains load back bit for bit; `fx :keys, :glue` plays like the rack in the track's patch block.
-- Not the same: a chain that draws random seeds (noise, drift, unison, chorus hiss) renders with other draws once a rack, since each rack application builds under its own seed (racks.md, "Exact reloads"); a captured `--master`/`render(master:)` override is not part of the chain; sessions with other than two channels print on that many channels without the `.stereo` step.
+- Not the same: a chain that draws random seeds (`mix + noise.at(0.01)` measured: 0.02 apart; the sketch's `hp1(30).reverb(:room).softclip` and `chorus` render bit for bit) renders with other draws once a rack, since each rack application builds under its own seed (racks.md, "Exact reloads"); a captured `--master`/`render(master:)` override is not part of the chain; sessions with other than two channels print on that many channels without the `.stereo` step.
 
 ## Warm-ups (dropouts-2, 2026-10-28)
 
