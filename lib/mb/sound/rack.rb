@@ -102,14 +102,17 @@ module MB
       # - knobs: frozen Array of the instance's Session knob names (a
       #   rack not playing: its knob names)
       # - knob_specs: frozen { knob name => Knob::Spec }
-      # - slots: frozen Array (slots come in phase R3)
+      # - slots: frozen Array of frozen Hashes { name:, path: (the Session
+      #   name, nil for a rack not playing), type: (:audio), content: (a
+      #   description of the content playing, or the default) } (racks R3)
       # - graph: a frozen Plot::Graph of the rack's inside (its stand-in
       #   build, the same for every instance; see Rack#graph), or nil
       RackInfo = Data.define(:name, :path, :kind, :signature, :ports, :latency, :knobs, :knob_specs, :slots, :graph) do
         def initialize(graph: nil, **fields) = super
 
         def to_s
-          "#{path || name || 'rack'} #{kind} #{signature}#{latency.to_i > 0 ? ", latency #{latency} samples" : ''}#{knobs.empty? ? '' : ", knobs #{knobs.join(', ')}"}"
+          "#{path || name || 'rack'} #{kind} #{signature}#{latency.to_i > 0 ? ", latency #{latency} samples" : ''}#{knobs.empty? ? '' : ", knobs #{knobs.join(', ')}"}" \
+            "#{slots.empty? ? '' : ", slots #{slots.map { |sl| "#{sl[:path] || sl[:name]} (#{sl[:content]})" }.join(', ')}"}"
         end
       end
 
@@ -150,18 +153,33 @@ module MB
       # Drawings of racks' insides by Rack (identity; see #graph).
       GRAPHS = ObjectSpace::WeakMap.new
 
+      # (racks-r3-2, the maintainer 2026-11-21: "opt in by default"; an
+      # instance slot costs a copy into its feed and a plan boundary, +6%
+      # CPU for a small effect rack)
+      @instance_slots = false
+      class << self
+        # Whether every named audio or instrument rack plays its
+        # applications in instance slots, as if defined with `slot: true`
+        # (see #instance_slot?; default false).
+        attr_accessor :instance_slots
+      end
+
       # One application of a rack (Rack#call) while its block builds: the
       # knobs made so far by name.  Rack.application is the innermost one
       # on this thread.
       class Application
         attr_reader :rack, :knobs
 
-        # Knob start values by name (see Rack#using).
+        # The slots made so far by name (GraphNode::Slot; racks R3).
+        attr_reader :slots
+
+        # Knob start values and slot contents by name (see Rack#using).
         attr_reader :start
 
         def initialize(rack, start: {})
           @rack = rack
           @knobs = {}
+          @slots = {}
           @start = start
         end
 
@@ -313,6 +331,12 @@ module MB
       # The block that builds an instance.
       attr_reader :block
 
+      # True if applications of this named rack play in instance slots
+      # (`arack :dub, slot: true`; see #instance_slot?).
+      def slot?
+        @slot
+      end
+
       # The constructor that made the rack (:mrack, :arack, :rack, ...),
       # for printing.
       attr_reader :constructor
@@ -327,8 +351,9 @@ module MB
       # block builds under), +drawn+ (true if the application drew it),
       # +knobs+ (knob start values by name), and +application+ (the
       # Application of the call that applied the rack, for printing its
-      # knobs' current values).
-      def initialize(name = nil, in:, out: nil, constructor: :rack, block: nil, bound: {}, parts: nil, listener: false, ports: {}, quiet: false, settings: {})
+      # knobs' current values).  +slot+ (true for a named rack) plays its
+      # applications in instance slots (see #instance_slot?).
+      def initialize(name = nil, in:, out: nil, constructor: :rack, block: nil, bound: {}, parts: nil, listener: false, ports: {}, quiet: false, settings: {}, slot: false)
         main_type = binding.local_variable_get(:in)
         raise ArgumentError, "Rack names are Symbols (got #{name.inspect})" unless name.nil? || name.is_a?(Symbol)
 
@@ -338,6 +363,8 @@ module MB
         @parts = parts&.freeze
         @listener = listener
         @bound = bound.dup.freeze
+        raise ArgumentError, "slot: is true or false (got #{slot.inspect})" unless slot == true || slot == false
+        @slot = slot
 
         if parts
           @block = nil
@@ -434,14 +461,17 @@ module MB
       # exactly): +seed:+ the random seed the block builds under (without
       # it each application draws one from the root generator), and knob
       # start values by knob name (`space: 0.7`; knobs not given start
-      # at their defaults).
+      # at their defaults), and slot contents by slot name (racks R3: a
+      # Rack or block for `sig.slot(:color) { ... }`, playing instead of its
+      # default; how documents save a swapped slot).
       #
       #     bass.then(&rack(:dub).using(seed: 1234, space: 0.7))
+      #     bass.then(&rack(:dub).using(color: arack { |s| s.diode(900) }))
       def using(seed: nil, **knobs)
         raise ArgumentError, "#{label} is composed (>>); set its parts" if @parts
         raise ArgumentError, "seed: must be an Integer (got #{seed.inspect})" unless seed.nil? || seed.is_a?(Integer)
-        bad = knobs.reject { |_, v| v.is_a?(Numeric) && v.real? }
-        raise ArgumentError, "knob values are numbers (got #{bad.map { |k, v| "#{k}: #{v.inspect}" }.join(', ')})" unless bad.empty?
+        bad = knobs.reject { |_, v| (v.is_a?(Numeric) && v.real?) || v.is_a?(Rack) || v.is_a?(Proc) }
+        raise ArgumentError, "knob values are numbers and slot contents racks or blocks (got #{bad.map { |k, v| "#{k}: #{v.inspect}" }.join(', ')})" unless bad.empty?
         clash = knobs.keys & [@input.name, *@ports.keys]
         raise ArgumentError, "#{clash.join(', ')} #{clash.length > 1 ? 'are ports' : 'is a port'}; bind ports with .with" unless clash.empty?
         # A seed a graph document marked as drawn (`seed: drawn_seed(N)`,
@@ -484,7 +514,7 @@ module MB
         applied = (ports.empty? ? self : with(**ports)).send(:copy, settings: @settings.merge(seed: seed, drawn: drawn, application: app))
         result = GraphNode::Recipe.call(main, :then, [applied], {}, @block, kind: :build) { |blk|
           explain_errors(values_by_port) {
-            r = Rack.applying(app) { MB::Sound.with_seed(seed) { kw.empty? ? blk.call(main) : blk.call(main, **kw) } }
+            r = Rack.applying(app) { MB::Sound.with_seed(seed) { build_instance(blk, main, kw, applied, app, seed) } }
             # A note rack on a Notes gives a Notes (console midi stays mono-capable)
             r = MB::Sound::Notes.new(r, sustain: main.sustain?, sample_rate: main.sample_rate) if main.is_a?(MB::Sound::Notes) && r.is_a?(MIDI::Stream)
             r
@@ -497,12 +527,52 @@ module MB
       end
       alias [] call
 
+      # True if applications of this rack on +main+ are wrapped in an
+      # instance slot (racks R3): named racks taking audio and making audio,
+      # and named instrument racks (notes in, `out: :audio`: irack), so
+      # re-defining the rack swaps instances that play (see
+      # Session::Slots#swap_rack_instances).  Opt-in (racks-r3-2): racks
+      # defined with `slot: true`, or every one while Rack.instance_slots.
+      def instance_slot?(main)
+        return false unless (@slot || Rack.instance_slots) && !@name.nil? && !@listener
+        if @input.type == :notes
+          # (instruments: notes in, audio out; swapped with patch persist)
+          @out == :audio && GraphNode::Slot.notes?(main)
+        else
+          @input.type == :audio && @out != :notes && @out != :control && (main.is_a?(GraphNode) || main.is_a?(GraphNode::MultiOutput))
+        end
+      end
+
+      # Runs the block (+blk+, the recorder's wrapper of it) on +main+ with
+      # extra port values +kw+: in an instance slot when #instance_slot?
+      # (the block builds on the slot's stand-in for +main+), else directly.
+      # A block that turns out to make notes or control (an arack used as
+      # a listener) is built again without the slot.
+      def build_instance(blk, main, kw, applied, app, seed)
+        if instance_slot?(main)
+          begin
+            slot = GraphNode::Slot.new(main, name: nil, content: ->(f) { kw.empty? ? blk.call(f) : blk.call(f, **kw) }, instance_of: applied, ports: kw, application: app)
+            slot.receiver = main
+            out = slot.returned
+            # (the instance's output carries what the block's result carried:
+            # comments in a rack document's body)
+            Meta::Carrier.carry_over(slot.last_result, out)
+            return slot.result = out
+          rescue GraphNode::Slot::NotAudio
+            app.slots.clear
+            return MB::Sound.with_seed(seed) { kw.empty? ? blk.call(main) : blk.call(main, **kw) }
+          end
+        end
+        kw.empty? ? blk.call(main) : blk.call(main, **kw)
+      end
+
       # A copy of this rack named +name+ (a Symbol, or nil for anonymous;
       # not registered anywhere): how a document's rack loads under a new
-      # name (`racks: :rename`).
-      def renamed(name)
+      # name (`racks: :rename`).  +slot+: whether the copy plays its
+      # applications in instance slots (see #slot?).
+      def renamed(name, slot: @slot)
         raise ArgumentError, "#{label} is composed; rename its parts" if @parts
-        copy(name: name)
+        copy(name: name, slot: slot)
       end
 
       # Builds the block on stand-ins for every port, without recording
@@ -531,6 +601,19 @@ module MB
       def knob_specs
         _, _, app = build_on_stand_ins
         app.knobs.transform_values(&:spec)
+      end
+
+      # The rack's slots with their default contents, from a stand-in build
+      # (see #build_on_stand_ins): frozen Hashes as RackInfo#slots holds
+      # them (path nil).
+      def slot_specs
+        _, _, app = build_on_stand_ins
+        app.slots.map { |n, sl| Rack.slot_info(sl, nil) }
+      end
+
+      # A RackInfo#slots entry for Slot +sl+ (Session name +path+).
+      def self.slot_info(sl, path)
+        { name: sl.name, path: path, type: :audio, content: sl.current.description.dup.freeze }.freeze
       end
 
       # Remembers the values of this rack's knobs (every instance's, in
@@ -612,13 +695,14 @@ module MB
 
       # A frozen RackInfo for this rack (+path+ and +knobs+ for one
       # instance; see Session::Racks#rack_info).
-      def info(path: nil, knobs: nil, specs: nil, out: nil)
+      def info(path: nil, knobs: nil, specs: nil, out: nil, slots: nil)
         specs ||= (knob_specs rescue {})
+        slots ||= (slot_specs rescue [])
         ports = [{ name: @input.name, type: @input.type, role: :main, required: true }.freeze]
         @ports.each_value { |p| ports << { name: p.name, type: p.type, role: :side, required: p.required }.freeze }
         RackInfo.new(
           name: @name, path: path, kind: kind(@out || out), signature: signature(@out || out).freeze, ports: ports.freeze, latency: latency,
-          knobs: (knobs || specs.keys).map(&:to_sym).freeze, knob_specs: specs.dup.freeze, slots: [].freeze, graph: graph
+          knobs: (knobs || specs.keys).map(&:to_sym).freeze, knob_specs: specs.dup.freeze, slots: slots.dup.freeze, graph: graph
         )
       end
 
@@ -709,20 +793,20 @@ module MB
 
       # Racks are values: equal when made the same way.
       def ==(other)
-        other.is_a?(Rack) && other.name == @name && other.block.equal?(@block) && other.bound == @bound && other.parts == @parts
+        other.is_a?(Rack) && other.name == @name && other.block.equal?(@block) && other.bound == @bound && other.parts == @parts && other.slot? == @slot
       end
       alias eql? ==
 
       def hash
-        [@name, @block, @bound, @parts].hash
+        [@name, @block, @bound, @parts, @slot].hash
       end
 
       private
 
-      # A copy of this rack with +changes+ (name:, bound:, settings:).
-      def copy(name: @name, bound: @bound, settings: @settings)
+      # A copy of this rack with +changes+ (name:, bound:, settings:, slot:).
+      def copy(name: @name, bound: @bound, settings: @settings, slot: @slot)
         Rack.new(name, in: @input.type, out: @out, constructor: @constructor, block: @block, bound: bound,
-          listener: @listener, ports: @ports.transform_values(&:type), quiet: true, settings: settings)
+          listener: @listener, ports: @ports.transform_values(&:type), quiet: true, settings: settings, slot: slot)
       end
 
       public
@@ -853,6 +937,9 @@ module MB
         yield
       rescue NoMethodError => e
         port = values_by_port.find { |_, v| e.receiver.equal?(v) }&.first
+        # (an instance slot's stand-in for the main input; see #build_instance)
+        feed = e.receiver.is_a?(GraphNode::Slot::Feed) || (e.receiver.is_a?(GraphNode::Channels) && e.receiver.outputs.all?(GraphNode::Slot::Feed))
+        port ||= @input if feed
         hint = port&.hint(e.name)
         raise unless hint
 

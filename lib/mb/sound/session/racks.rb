@@ -10,8 +10,8 @@ module MB
       # remembered (weakly) so #info can say where it plays.
       #
       # Defining a named rack again replaces it for later applications;
-      # instances already built keep playing as they were (live swaps of
-      # racks and slots are a later phase).
+      # instances playing in instance slots swap to it (racks R3; see
+      # #redefine), others keep playing as they were built.
       class Racks
         # A named rack, its applications, the output type seen last, and
         # the knobs' Specs seen last ({ name => Knob::Spec }).
@@ -31,6 +31,15 @@ module MB
           # (:"dub/space" => [:dub, :space])
           @per_instance = {}
           @knob_groups = {}
+          # Instance keys given to rack Applications (see
+          # #instance_member_names), and slots by rack name and key
+          # ({ [rack, key] => { short => Slot } }), slot group names
+          # (:"dub/color" => [:dub, :color]), and slots outside racks by
+          # Session name
+          @app_keys = ObjectSpace::WeakMap.new
+          @instance_slots = {}
+          @slot_groups = {}
+          @plain_slots = {}
         end
 
         # Registers named +rack+, claiming its name.  Returns the rack, or
@@ -42,15 +51,76 @@ module MB
           rack
         end
 
+        # Gives Rack::Application +app+ the instance key +from+ (another
+        # Application) was given (a re-defined rack's new instance takes
+        # the old one's place: its knobs keep their names).
+        def inherit_key(app, from)
+          @mutex.synchronize {
+            key = from && @app_keys[from]
+            @app_keys[app] = key if key
+          }
+        end
+
+        # Defines rack +rack+ again (its name already a rack's): later
+        # applications use it, and instances playing swap to it at a
+        # launch point (+at:+/+on:+/+in:+, +fade:+, +start_time+; see
+        # Slots#swap_rack_instances), as one undo step labeled +label+.
+        # Returns +rack+.
+        #
+        # Only instances in instance slots swap (racks defined with `slot:
+        # true`, or every named rack while Rack.instance_slots; racks-r3-2,
+        # the maintainer's "opt in by default"): others keep playing as
+        # they were built, as before slots, which live mode says in one
+        # line.
+        def redefine(rack, label:, **swap)
+          name = rack.name
+          before = self[name]
+          changed = before && !before.block.equal?(rack.block)
+          held = changed ? unslotted_players(name) : []
+          Session.with_context(session: @session) {
+            @session.command(label) {
+              define(rack) or next
+              @session.note_undo_extra(self, { name => before }, { name => rack })
+              @session.swap_rack_instances(name, rack, **swap) if changed
+            }
+          }
+          if !held.empty? && MB::Sound.live?
+            warn "rack #{name.inspect}: #{held.map(&:inspect).join(', ')} #{held.length == 1 ? 'keeps' : 'keep'} playing the old definition " \
+                 "(only instance slots swap: #{rack.constructor} #{name.inspect}, slot: true, then play it again)"
+          end
+          rack
+        end
+
+        # Names of the players (playing, or stopped for resume) whose graphs
+        # hold an instance of named rack +name+ outside an instance slot,
+        # which re-defining the rack leaves as they were built (see
+        # #redefine).
+        def unslotted_players(name)
+          e = @mutex.synchronize { @entries[name]&.dup }
+          return [] unless e
+          insts = e.instances.filter_map { |w| w.__getobj__ if w.weakref_alive? }.reject { |i| Racks.instance_slot_output?(i) }
+          players_holding(insts, stopped: true)
+        end
+
+        # True if +result+ (an application's result) is an instance slot's
+        # output (a node or a bundle of them; see MB::Sound::Rack#instance_slot?).
+        def self.instance_slot_output?(result)
+          outs = result.is_a?(GraphNode::Channels) ? result.outputs : [result]
+          outs.all? { |o| o.is_a?(GraphNode::Slot::Output) && o.owner_slot.instance_of }
+        end
+
         # Replaces the definition of rack +name+ with +rack+ as one undo
-        # step labeled +label+ (instances already built keep playing as they
-        # were; later applications use +rack+).  Returns +rack+.
+        # step labeled +label+ (instances playing in instance slots swap to
+        # it at the next launch point: see #redefine; later applications
+        # use +rack+).
+        # Returns +rack+.
         def replace(name, rack, label:)
           before = self[name]
           Session.with_context(session: @session) {
             @session.command(label) {
               define(rack)
               @session.note_undo_extra(self, { name => before }, { name => rack })
+              @session.swap_rack_instances(name, rack) if before && !before.block.equal?(rack.block)
             }
           }
           rack
@@ -127,7 +197,7 @@ module MB
             out = r.out || e.out
             used = uses_text(e)
             list = e.knobs.empty? ? '' : "knobs #{e.knobs.map { |n, spec| Racks.spec_text(n, spec) }.join(', ')}, "
-            [r.name, "#{r.kind(out)} #{r.signature(out)}, #{list}#{used}"]
+            [r.name, "#{r.kind(out)} #{r.signature(out)}, #{'in instance slots, ' if r.slot?}#{list}#{slots_text(r)}#{used}"]
           }
         end
 
@@ -150,13 +220,17 @@ module MB
             r = e.rack
             instances = knob_instances(r.name)
             specs = e.knobs.empty? ? (r.knob_specs rescue {}) : e.knobs
-            infos = if instances.empty?
+            slot_keys = @mutex.synchronize { (@knob_keys[r.name] || []).select { |key| @instance_slots[[r.name, key]] } }
+            infos = if instances.empty? && slot_keys.empty?
                       [r.info(specs: specs, out: e.out)]
                     else
-                      instances.map { |key, knobs|
+                      keys = instances.keys | slot_keys
+                      keys.map { |key|
+                        knobs = instances[key] || {}
+                        slots = @mutex.synchronize { (@instance_slots[[r.name, key]] || {}).values }
                         names = knobs.values.map(&:name)
-                        path = Name[names.first].base
-                        r.info(path: path, knobs: names, specs: specs, out: e.out)
+                        path = Name[names.first || slots.first&.path].base
+                        r.info(path: path, knobs: names, specs: specs, out: e.out, slots: slots.map { |sl| MB::Sound::Rack.slot_info(sl, sl.path) })
                       }
                     end
             [r.name, infos.freeze]
@@ -203,44 +277,72 @@ module MB
         # (:"bass/dub/space") from the second key on, which renames the
         # first key's knobs.
         def instance_knob_names(knobs, player)
+          instance_member_names(knobs, player)
+        end
+
+        # #instance_knob_names for rack knobs and slots (GraphNode::Slot
+        # made inside a rack: racks R3) alike, so a rack's knobs and slots
+        # share their instance's key and path (:"bass/dub/space" and
+        # :"bass/dub/color").  Keys given to an Application once are kept
+        # for it (a slot's content swapped in later joins the same key).
+        # Renames hold knobs and slots.
+        def instance_member_names(members, player)
           renames = []
           out = {}.compare_by_identity
           @mutex.synchronize {
-            ordinals = Hash.new(0)
+            used = Hash.new { |h, k| h[k] = [] }
             apps = {}.compare_by_identity
             key_of = {}.compare_by_identity
-            knobs.each do |k|
-              info = k.rack_knob
-              rack = info.rack_name
-              key_of[k] = (apps[info.application] ||= begin
-                ord = ordinals[rack]
-                ordinals[rack] += 1
-                [player, ord]
+            members.each do |m|
+              rack, app, = Racks.member_info(m)
+              key_of[m] = (apps[app] ||= begin
+                key = @app_keys[app]
+                if key.nil? || key[0] != player
+                  ord = 0
+                  ord += 1 while used[rack].include?(ord)
+                  key = [player, ord]
+                  @app_keys[app] = key
+                end
+                used[rack] << key[1]
+                key
               end)
               keys = (@knob_keys[rack] ||= [])
-              next if keys.include?(key_of[k])
-              keys << key_of[k]
+              next if keys.include?(key_of[m])
+              keys << key_of[m]
               if rack && keys.length >= 2 && !@per_instance[rack]
                 @per_instance[rack] = true
-                keys.each { |key| (@instance_knobs[[rack, key]] || {}).each { |m, knob| renames << [knob, instance_name(rack, key, keys, m)] } }
+                keys.each { |key|
+                  (@instance_knobs[[rack, key]] || {}).each { |short, knob| renames << [knob, instance_name(rack, key, keys, short)] }
+                  (@instance_slots[[rack, key]] || {}).each { |short, slot| renames << [slot, instance_name(rack, key, keys, short)] }
+                }
               end
             end
-            knobs.each do |k|
-              info = k.rack_knob
-              rack = info.rack_name
-              key = key_of[k]
+            members.each do |m|
+              rack, _, short = Racks.member_info(m)
+              key = key_of[m]
               keys = @knob_keys[rack]
               name = if rack.nil?
-                       anonymous_name(key, info.knob)
+                       anonymous_name(key, short)
                      elsif !@per_instance[rack]
-                       Name.join(rack, info.knob)
+                       Name.join(rack, short)
                      else
-                       instance_name(rack, key, keys, info.knob)
+                       instance_name(rack, key, keys, short)
                      end
-              out[k] = [name, rack, key]
+              out[m] = [name, rack, key]
             end
           }
           [out, renames]
+        end
+
+        # [rack name, Rack::Application, short name] of rack knob or slot
+        # +m+.
+        def self.member_info(m)
+          if m.is_a?(GraphNode::Slot)
+            [m.rack&.name, m.application, m.name]
+          else
+            info = m.rack_knob
+            [info.rack_name, info.application, info.knob]
+          end
         end
 
         # Remembers Session knob +knob+ as the rack knob +short+ of instance +key+
@@ -284,23 +386,105 @@ module MB
         def prune_knob_instances
           gone = []
           groups = []
+          slots = []
           @mutex.synchronize {
             @knob_keys.each do |rack, keys|
               keys.reject! { |key|
                 player = key[0]
                 next false if player.nil? || yield(player)
                 gone.concat((@instance_knobs.delete([rack, key]) || {}).values)
+                slots.concat((@instance_slots.delete([rack, key]) || {}).values)
                 true
               }
               next unless keys.empty?
               @per_instance.delete(rack)
               @knob_groups.reject! { |g, (r, _)| r == rack && groups << g }
+              @slot_groups.reject! { |g, (r, _)| r == rack && groups << g }
             end
+            @plain_slots.reject! { |_, slot| slot.player && !yield(slot.player) && slots << slot }
           }
-          [gone, groups]
+          [gone, groups, slots]
+        end
+
+        # Remembers +slot+ as slot +short+ of instance +key+ of rack +rack+
+        # (see #instance_member_names; nil +rack+ for an anonymous rack's).
+        # Returns the group name to claim (:"dub/color", once the rack's
+        # slots are per instance) or nil.
+        def slot_joined(rack, key, short, slot)
+          @mutex.synchronize {
+            (@instance_slots[[rack, key]] ||= {})[short] = slot
+            next nil unless rack && @per_instance[rack]
+            group = Name.join(rack, short)
+            next nil if @slot_groups.key?(group)
+            @slot_groups[group] = [rack, short]
+            group
+          }
+        end
+
+        # Remembers +slot+ (outside any rack) under its Session name.
+        def plain_slot_joined(slot)
+          @mutex.synchronize { @plain_slots[slot.path] = slot }
+        end
+
+        # The slots Session name +name+ stands for: one slot, every
+        # instance's slot of a group (:"dub/color" once the rack plays in
+        # several players), or an empty Array.
+        def slots_for(name)
+          @mutex.synchronize {
+            if (s = @plain_slots[name])
+              next [s]
+            end
+            if (rack, short = @slot_groups[name])
+              next (@knob_keys[rack] || []).filter_map { |key| @instance_slots[[rack, key]]&.[](short) }
+            end
+            @instance_slots.each_value.filter_map { |by| by.each_value.find { |sl| sl.path == name } }.first(1)
+          }
+        end
+
+        # Every slot in the Session ({ name => Slot }), groups left out.
+        def slots
+          @mutex.synchronize {
+            list = @plain_slots.dup
+            @instance_slots.each_value { |by| by.each_value { |sl| list[sl.path] = sl } }
+            list
+          }
+        end
+
+        # Slot and slot group names (for messages).
+        def slot_names
+          slots.keys + @mutex.synchronize { @slot_groups.keys }
+        end
+
+        # True if +name+ is a slot group (see #slots_for).
+        def slot_group?(name)
+          @mutex.synchronize { @slot_groups.key?(name) }
+        end
+
+        # The slots of named rack +name+, every instance's: { path => Slot }.
+        def rack_slots(name)
+          @mutex.synchronize {
+            (@knob_keys[name] || []).each_with_object({}) { |key, h|
+              (@instance_slots[[name, key]] || {}).each_value { |sl| h[sl.path] = sl }
+            }
+          }
         end
 
         private
+
+        # "slots color (softclip), " for rack +r+: its slots' contents
+        # playing (each instance's when they differ), else the defaults.
+        def slots_text(r)
+          playing = rack_slots(r.name)
+          list = if playing.empty?
+                   (r.slot_specs rescue []).map { |sl| "#{sl[:name]} (#{sl[:content]})" }
+                 else
+                   playing.values.group_by(&:name).map { |n, sls|
+                     contents = sls.map { |sl| sl.current.description }.uniq
+                     contents.length == 1 ? "#{n} (#{contents[0]})" : sls.map { |sl| "#{sl.path} (#{sl.current.description})" }.join(', ')
+                   }
+                 end
+          list.empty? ? '' : "slots #{list.join(', ')}, "
+        end
 
         def uses_text(e)
           used = e.uses.zero? ? 'not used yet' : "#{e.uses} use#{'s' if e.uses != 1}"
@@ -330,11 +514,17 @@ module MB
         # Names of the current players whose graphs hold an instance of
         # entry +e+.
         def players_using(e)
-          insts = e.instances.filter_map { |w| w.__getobj__ if w.weakref_alive? }
+          players_holding(e.instances.filter_map { |w| w.__getobj__ if w.weakref_alive? })
+        end
+
+        # Names of the current players (and with +stopped+, those stopped
+        # for resume) whose graphs hold one of +insts+.
+        def players_holding(insts, stopped: false)
           return [] if insts.empty?
 
           players = @session.instance_variable_get(:@players)
-          list = @session.instance_variable_get(:@mutex).synchronize { players.values.select(&:current?) }
+          kept = @session.instance_variable_get(:@stopped)
+          list = @session.instance_variable_get(:@mutex).synchronize { players.values.select(&:current?) + (stopped ? kept.values : []) }
           list.select { |p|
             p.input.nodes.any? { |n|
               nodes = n.respond_to?(:graph) ? n.graph : [n]

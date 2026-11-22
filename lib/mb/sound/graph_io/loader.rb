@@ -283,7 +283,16 @@ module MB
           pr.define_singleton_method(:graph_io_locals) { last ? last.vars.dup : {} }
 
           name = @document.name&.to_sym
-          rack = Rack.new(name, in: main_type, out: out, constructor: constructor, block: pr, ports: ports.to_h { |k, t| [k, t] }, listener: listener, quiet: true)
+          slot = @document.header[:slot]
+          unless slot.nil? || slot == true || slot == false
+            raise LoadError.new("#{@label}: slot: is true or false (instance slots; got #{slot.inspect})", path: @path)
+          end
+          rack = begin
+            Rack.new(name, in: main_type, out: out, constructor: constructor, block: pr, ports: ports.to_h { |k, t| [k, t] }, listener: listener, quiet: true, slot: slot == true)
+          rescue ArgumentError => e
+            raise LoadError.new("#{@label}: #{e.message}", path: @path)
+          end
+          check_rack_slots(rack)
           @document.rack = rack
           GraphIO.remember_rack_document(rack, @document)
           @loaded = true
@@ -296,6 +305,18 @@ module MB
           extra = @given_inputs.keys - types.keys
           raise LoadError.new("#{@label}: no input#{'s' if extra.length > 1} #{extra.join(', ')} (the rack's inputs: #{types.keys.join(', ')})#{GraphIO.suggest(extra[0], types.keys)}", path: @path) unless extra.empty?
           rack.call(@given_inputs[main_name], **@given_inputs.except(main_name))
+        end
+
+        # Checks a rack document's `slot` lines against the slots its body
+        # makes (built once on stand-ins, when the document mentions slots).
+        def check_rack_slots(rack)
+          return unless GraphIO.since?(@document.format, :rack_slots)
+          return if @document.slots.empty? && !@text.to_s.include?('.slot(')
+          _, _, app = rack.build_on_stand_ins
+          made = app.slots.to_h { |n, sl| [n, sl.notes? ? :notes : :audio] }
+          return if made == @document.slots
+          lines = made.map { |n, t| "slot #{n.inspect}, #{t.inspect}" }
+          raise LoadError.new("#{@label}: the slot lines (#{@document.slots.empty? ? 'none' : @document.slots.keys.join(', ')}) don't match the slots the rack makes (#{made.empty? ? 'none' : made.keys.join(', ')}; #{lines.empty? ? 'remove the slot lines' : lines.join('; ')})", path: @path)
         end
 
         # Walks the top-level statements +body+ in +scope+ (a rack
@@ -313,7 +334,9 @@ module MB
         # is what this document's rack(:dub) means from then on.
         def define_named_rack(node, receiver, ctor, args, kwargs, block)
           name = args[0]
-          saved = receiver.public_send(ctor, *args[1..], **kwargs, &block).renamed(name)
+          # (`slot: true` goes with a name, given after the anonymous build)
+          slot = kwargs.key?(:slot) ? kwargs[:slot] : false
+          saved = receiver.public_send(ctor, *args[1..], **kwargs.except(:slot), &block).renamed(name, slot: slot)
           rack = GraphIO.place_rack(@session || Session.current, saved, racks: @racks_choice, source: @label.to_s) { |msg| error(node, msg) }
           @rack_aliases[name] = rack.name unless rack.name == name
           rack
@@ -579,6 +602,16 @@ module MB
                 raise error(node, "knob #{name}: #{e.message}")
               end
               @document.params[name] = kwargs.merge(value: base_number(spec.param.default.nil? ? spec.default : spec.param.default), knob: true, param: spec.param)
+            when :slot
+              # (rack documents: the rack's slots, declared; the body's
+              # slot calls hold their defaults; racks-r3-2)
+              name, type = args
+              raise error(node, 'slot lines belong to rack documents (graph ..., rack: :arack)') unless @document.rack?
+              unless args.length == 2 && name.is_a?(Symbol) && %i[audio notes].include?(type) && kwargs.empty?
+                raise error(node, 'slot takes a name and the type its content takes (slot :color, :audio; slot :keys, :notes)')
+              end
+              raise error(node, "slot #{name} is declared twice") if @document.slots.key?(name)
+              @document.slots[name] = type
             when :clock
               name, base = args
               raise error(node, 'clock needs a name and a tempo, ratio, or period (clock :tide, 31.1.seconds)') unless name.is_a?(Symbol) && args.length == 2

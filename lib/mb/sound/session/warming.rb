@@ -273,7 +273,8 @@ module MB
 
         # A throwaway Session for warm-ups and rehearsals: this session's
         # tempo, meter, channels, rate, and buffer size, and copies of its
-        # knobs (at their values) and clocks; never warming itself.
+        # knobs (at their values), named racks, and clocks; never warming
+        # itself.
         def warm_sandbox
           t = @transport
           transport = Sequence::Transport.new(bpm: t.bpm, bar_length: t.bar_length)
@@ -283,6 +284,14 @@ module MB
           knobs.each do |name, k|
             sp = k.spec
             box.knob(name, k.value, range: sp.range, curve: sp.curve, unit: sp.unit, takeover: sp.takeover, smooth: sp.smooth)
+          end
+          # (the named racks too, the same Rack values: a graph copy's
+          # document says `rack(:dub)`, which loads from the session's racks;
+          # racks-r3-2: every warm-up of a graph using a named rack failed
+          # with "rack :dub isn't defined here")
+          racks.names.each do |name|
+            r = racks[name]
+            box.racks.define(r) if r
           end
           box
         end
@@ -493,11 +502,17 @@ module MB
         end
 
         # A copy of the graph whose outputs are +nodes+ from its recipe, or
-        # nil if it has none (or the recipe can't be loaded back).
+        # nil if it has none (or the recipe can't be loaded back).  The copy
+        # is the graph's document, as saving writes it: its header declares
+        # the Session knobs it reads (racks-r3-2: a graph reading
+        # `knob(:busy)` printed only the body, whose `knob(...)` the loader
+        # refuses outside the header, so its warm-up failed; SessionFuzz
+        # seeds 36 and 78), and named racks load from the sandbox's copies
+        # (see #warm_sandbox).
         def recipe_copy(nodes)
           root = nodes.length == 1 ? nodes[0] : GraphNode::Channels.new(nodes)
           return nil unless root.respond_to?(:to_ruby) && GraphNode::Recipe.record_of(nodes[0])
-          text = root.to_ruby
+          text = GraphIO.dump(root)
           return nil if text.include?('FIXME')
           GraphIO.load(text)
         end

@@ -13,8 +13,9 @@ module MB
       #     inputs sig: :audio, side: :audio
       #     outputs :audio
       #     knob :space, 0.3
+      #     slot :color, :audio
       #
-      #     sig.duck(side).delay(3.n16, feedback: space * 0.6, wet: space)
+      #     sig.duck(side).slot(:color) { |c| c.softclip }.delay(3.n16, feedback: space * 0.6, wet: space)
       #
       # GraphIO.load gives the Rack back (each application makes its own
       # knobs from the knob lines), or applies it when inputs are given.
@@ -54,6 +55,7 @@ module MB
           fields[:name] = @name.to_s if @name
           fields[:kind] = @rack.kind(out)
           fields[:rack] = @rack.constructor
+          fields[:slot] = true if @rack.slot? # (instance slots, opt-in: racks-r3-2)
           fields[:saved] = Time.now.utc.iso8601
           fields[:mb_sound] = GraphIO.library_version
           fields[:from] = @from if @from
@@ -71,6 +73,11 @@ module MB
           header << "outputs #{out.inspect}" if out
           rack_knobs.each do |n, k|
             header << "knob #{GraphNode::Recipe::RubyWriter.knob_args(k, writer.method(:literal), name: n).join(', ')}"
+          end
+          # (the rack's slots, declared; the body's slot calls hold their
+          # defaults; racks-r3-2, the maintainer's "yes")
+          app.slots.each do |n, sl|
+            header << "slot #{n.inspect}, #{sl.notes? ? ':notes' : ':audio'}"
           end
           (@assets&.entries || []).each do |e|
             header << "asset #{e.name.inspect}#{", sha256: #{e.sha256.inspect}" if e.sha256}"
