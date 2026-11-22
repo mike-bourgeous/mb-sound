@@ -509,20 +509,26 @@ RSpec.describe('session fuzzing') do
     end
   end
 
-  # (OPEN, the 2026-11-22 merge train's soak, seed 789018, drawn by the
-  # one-shot swap command; shrunk by hand past the command: a 2-bar render
-  # whose last scheduled block is a tempo ramp at bar 2 beat 4 ends at that
+  # (the 2026-11-22 merge train's soak, seed 789018, drawn by the one-shot
+  # swap command; shrunk by hand past the command: a 2-bar render whose
+  # last scheduled block is a tempo ramp at bar 2 beat 4 ended at that
   # block's frame, 134400, with 367-frame buffers, and 1 frame later with
-  # 800 (3 with a linear ramp).  The same at the trunk before the train, so
-  # not the swap: where a render stops once nothing plays or is scheduled.
-  # Pending until a fix round; it fails loudly once fixed.)
-  it 'holds buffer_size for a render whose last block is a tempo ramp (seed 789018)' do
-    pending 'a render stopping early after a tempo ramp block ends on a buffer-size-dependent frame'
-    song = SessionFuzz::Song.new(header: ['bpm 150'], lines: [
-      'track(:t1, q: 1/2r) { |clip| clip.synth(voices: 2) { |v| v.hz.triangle * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
-      'at_bar(2, beat: 4) { tempo 180, over: 3.beats, curve: :smooth, on: :now }',
-    ], bars: 2)
-    expect(SessionFuzz.check(:buffer_size, song)).to be_nil
+  # 800 (3 with a linear ramp).  fixes-16: Session#schedule_ran_frame
+  # counted the block's frame back from the end of the last buffer at the
+  # tempo there, which the ramp had already raised; it now keeps the frame
+  # found in the span that reached the block's time.  SessionFuzz.generate
+  # draws the case: everything stopped, then a ramp as the last block.)
+  [', curve: :smooth', ''].each do |curve|
+    it "holds buffer_size for a render whose last block is a tempo ramp#{curve.empty? ? ' (linear)' : ' (smooth)'} (seed 789018)" do
+      song = SessionFuzz::Song.new(header: ['bpm 150'], lines: [
+        'track(:t1, q: 1/2r) { |clip| clip.synth(voices: 2) { |v| v.hz.triangle * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        "at_bar(2, beat: 4) { tempo 180, over: 3.beats#{curve}, on: :now }",
+      ], bars: 2)
+      expect(SessionFuzz.check(:buffer_size, song)).to be_nil
+      # (bar 2 beat 4 at 150 BPM, before the ramp starts: 1.75 bars of
+      # 76800 frames, where the block ran and nothing played after it)
+      expect(SessionFuzz.render(song.code, 2, buffer_size: 800)[0].length).to eq(134_400)
+    end
   end
 
   # (batch 16's soak, fix-fuzz-1106: the parity-1 kit swap of t3's first
