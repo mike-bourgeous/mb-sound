@@ -54,7 +54,7 @@ module MB
           seed: 'The seed of the draws (another seed, another line)',
           harmony: 'The probability scale the notes are drawn from (Weights, a Harmony, a Field)',
           scale: 'The scale the notes walk',
-          energy: 'How busy: 0 nearly nothing, 0.5 as written, 1 everything (read once a cycle)',
+          energy: 'How busy: 0 nearly nothing, 0.5 as written, 1 everything (read each beat)',
           density: 'How many steps start a note (read once a cycle)',
           mutate: 'How far the motifs drift from their first form (read once a cycle)',
           vary: 'How much repeats within a pass vary',
@@ -161,7 +161,8 @@ module MB
         # params become track knobs like preset params): numeric params
         # with a bounded range and a number default (`energy:
         # (0.0..1.0).at(0.5)`) that the generator steers by, the options
-        # read once a cycle (energy, density, mutate, chance, ...).
+        # read for each unit they steer (energy, density, mutate, chance,
+        # ...: each beat in beats and rhythms, each cycle in melodic lines).
         # Values (harmonies, scales, chords), structure (grids,
         # divisions), seeds, and plain-number params stay as they are.
         # Library file generators' ranged params too (`param :energy,
