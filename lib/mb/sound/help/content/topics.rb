@@ -1064,7 +1064,11 @@ module MB
       about <<~TEXT
         The Set layer: tracks remember a patch and a clip, scenes are the
         state of every track, `go` launches one at its launch point
-        (`on:`, `in:`, `at: bar(n)`).  Every command is one undo step.
+        (`on:`, `in:`, `at: bar(n)`).  Every command is one undo step,
+        and `undo` takes back one at a time (at the next bar; `undo on:
+        :now` at once), also a redefinition that never got to play: three
+        quick `track :bass` lines before the bar, then `undo`, plays the
+        second; `redo!` steps forward again.
         Each track keeps the clips it has played as numbered slots (the
         clip matrix): `launch :bass, :bass_b` (or a slot number) plays one,
         and `tweak :bass, transpose: 2` (legato:, swing:, quantize:,
