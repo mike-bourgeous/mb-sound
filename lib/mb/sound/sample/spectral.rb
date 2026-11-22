@@ -153,10 +153,14 @@ module MB
         # much output before the wrap.  With +lock+ :shape (#shape_lock;
         # the default, #loop_lock, unless +randomize+ is 1 or +closure+
         # :shift; :peaks for identity locking alone) the frames close
-        # over SHAPE_CLOSING windows before the wrap (or
-        # +closure_length+), unlocked there; report[:shift] is the
-        # pitch change (cents) and report[:residual] what it left.
-        def looped(channels, ratio, passes: 1, window: WINDOW, overlap: OVERLAP, onsets: nil, randomize: 0, seed: 0, link: true, shape: :hann, report: nil, span: 1.0, noise: 0, closure: :spread, closure_length: nil, lock: nil)
+        # over a span before the wrap (+closure_length+ samples, or
+        # :auto: SHAPE_CLOSING_ATTACK seconds at +sample_rate+ ending
+        # before the frames of an attack at the loop point, else
+        # SHAPE_CLOSING windows; at most a quarter of the loop), unlocked
+        # there; report[:closing] is the span [from, to] (output
+        # samples), report[:shift] the pitch change (cents) and
+        # report[:residual] what it left.
+        def looped(channels, ratio, passes: 1, window: WINDOW, overlap: OVERLAP, onsets: nil, randomize: 0, seed: 0, link: true, shape: :hann, report: nil, span: 1.0, noise: 0, closure: :spread, closure_length: nil, lock: nil, sample_rate: 48000)
           raise ArgumentError, "Stretch ratios are positive (got #{ratio})" unless ratio > 0
           passes = Integer(passes)
           raise ArgumentError, "passes: is 1 or more (got #{passes})" unless passes >= 1
@@ -195,10 +199,34 @@ module MB
           # where they run free (their phases are the input's, moved in
           # time, until then).
           free_span = lock == :shape
-          closure_length = MB::M.min(out_len / 4, SHAPE_CLOSING * n) if free_span && closure_length.nil?
-          from = closure_length.nil? ? 0 : out_len - MB::M.clamp(Integer(closure_length.round), 1, out_len)
+          closure_length = nil if closure_length == :auto
+          to = out_len
+          if free_span
+            # (which frames hold an attack: an onset at the loop point
+            # makes the frames before the wrap attack frames, which
+            # rebuild it from the input; shape-locked frames close before
+            # them, since a closing phase step there smeared the attack)
+            attack_until = nil
+            ri = 0
+            flags = centers.map { |_, center|
+              while ri < resets.length && center + n / 2 > resets[ri]
+                attack_until = resets[ri] + n / 2
+                ri += 1
+              end
+              !attack_until.nil? && center < attack_until
+            }
+            j = centers.length - 2
+            j -= 1 while j > 0 && flags[j]
+            attack_at_wrap = j < centers.length - 2
+            to = MB::M.max(MB::M.max(1, centers[j + 1][0]), out_len * 3 / 4) if attack_at_wrap
+            # (closure_length: :auto: a short span where the loop point
+            # is an attack, the long one where a tone is held through it)
+            closure_length ||= MB::M.min(out_len / 4, attack_at_wrap ? (SHAPE_CLOSING_ATTACK * sample_rate).round : SHAPE_CLOSING * n)
+          end
+          from = closure_length.nil? ? 0 : MB::M.max(0, to - MB::M.clamp(Integer(closure_length.round), 1, to))
+          report[:closing] = [from, to] if report
           shares = centers.each_with_index.map { |(pos, _), m|
-            m.zero? ? 0.0 : MB::M.max(0, pos - MB::M.max(centers[m - 1][0], from)).to_f / (out_len - from)
+            m.zero? ? 0.0 : MB::M.max(0, MB::M.min(pos, to) - MB::M.max(centers[m - 1][0], from)).to_f / (to - from)
           }
 
           run = ->(extra, sums, scale = nil, track = false) {
@@ -215,7 +243,7 @@ module MB
               hop = m.zero? ? hs : pos - centers[m - 1][0]
               closing = m == centers.length - 1
               part = extra && shares[m] > 0 ? extra * shares[m] : nil
-              ys = voc.frame(m, center, attack: attack, hop: hop, extra: part, synth: !sums.nil? && !closing, scale: scale, track: track, free: free_span && shares[m] > 0)
+              ys = voc.frame(m, center, attack: attack, hop: hop, extra: part, synth: !sums.nil? && !closing, scale: scale, track: track, free: free_span && pos > from)
               sums.add_wrapped(pos, ys, voc, attack) if sums && !closing
               last = voc.rotation if closing
             end
@@ -920,9 +948,20 @@ module MB
         SHAPE_AROUND = 4
 
         # Shape-locked loops (lock: :shape, closure: :spread) close
-        # their phases over this many windows before the wrap (at most a
-        # quarter of the loop), running free there.
+        # their phases before the wrap (at most a quarter of the loop),
+        # running free there, over SHAPE_CLOSING windows (0.51 s at
+        # 4096) where a tone is held through the loop point, and over
+        # SHAPE_CLOSING_ATTACK seconds, ending before the attack's
+        # frames, where the loop point is an attack (closure_length:
+        # :auto, the default).  The maintainer, stretch-attacks-1
+        # (2026-11-22): 50 ms picked on a saw bass and a two-note loop
+        # (0.51 s changed the waveform for 380 ms before each wrap), and
+        # "Per material", since on a held pad 50 ms changes the tone at
+        # the wrap (spectral flux 2.6 times the median inside the pass at
+        # 1.25x, as the pre-roll he heard as a discontinuity in
+        # stretch-fixes-1).
         SHAPE_CLOSING = 6
+        SHAPE_CLOSING_ATTACK = 0.05
 
         # Peaks below this share of a frame's top magnitude (-40 dB), and
         # beyond this many of the strongest, set no shape (shape_lock).

@@ -529,6 +529,39 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
       expect(out[:closure][1]).to be < 0.01
     end
 
+    it 'closes over 50 ms before an attack at the loop point and over 0.51 s through a held tone (closure_length: :auto)' do
+      # (the maintainer, stretch-attacks-1: "Per material"; 50 ms picked
+      # on loops with an attack there, while on a held tone 50 ms changed
+      # the tone at the wrap)
+      held = {}
+      described_class.looped([saw], 1.285, report: held)
+      n = (saw.length * 1.285).round
+      expect(held[:closing]).to eq([n - [n / 4, 6 * 4096].min, n])
+
+      tt = Numo::DFloat.new(96000).seq / 48000
+      f = Numo::DFloat.new(96000).fill(55.0)
+      f[48000..] = 73.42
+      plucks = MB::Sound::Sample[Numo::SFloat.cast((0.6 + 0.4 * Numo::NMath.exp(-(tt % 1.0) * 30)) * Numo::NMath.sin(tt * f * (2 * Math::PI)) * 0.5)].looped
+      expect(plucks.onsets(wrap: true).first).to eq(0)
+      hit = {}
+      x = plucks.to_a.map { |c| Numo::DFloat.cast(c) }
+      a = described_class.looped(x, 1.285, onsets: plucks.onsets(wrap: true), report: hit)[0]
+      from, to = hit[:closing]
+      expect(to - from).to eq(2400)
+      # (it ends before the frames holding the attack: within half a
+      # window before the loop point, on a frame)
+      expect(to).to be < a.length - 1024
+      expect(to).to be > a.length - 2048 - 1024
+      expect(hit[:closure][1]).to be < 0.01
+
+      # Sample#stretch: :auto is the default and does not print; a length forces the span
+      expect(plucks.stretch(1.285, mode: :spectral, closure_length: :auto).data(0)).to eq(plucks.stretch(1.285, mode: :spectral).data(0))
+      expect(plucks.stretch(1.285, mode: :spectral, closure_length: :auto).lineage.last).to eq({ mode: :spectral })
+      forced = {}
+      described_class.looped([saw], 1.285, closure_length: 2400, report: forced)
+      expect(forced[:closing]).to eq([n - 2400, n])
+    end
+
     it 'takes the options through Sample#stretch, printing them, and checks them' do
       s = MB::Sound::Sample[Numo::SFloat.cast(saw)].looped
       t = s.stretch(1.25, mode: :spectral, lock: :shape)
