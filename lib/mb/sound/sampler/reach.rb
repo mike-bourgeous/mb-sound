@@ -192,15 +192,9 @@ module MB
         # a live Session's render thread whenever that waits for it
         # (UI::Yielding, as the warm-up and painter threads do), unless it
         # yields already.  Elsewhere (renders, specs, no fast_ui) it just
-        # runs the block.
-        def self.yielding
-          render = Session.existing&.render_thread
-          y = render&.alive? && render != Thread.current && defined?(MB::Sound::UI::Yielding) && MB::Sound::UI::Yielding.available? &&
-              !FastUI::GVLYield.yielders.include?(Thread.current)
-          y &&= MB::Sound::UI::Yielding.join(Thread.current, render: render)
-          yield
-        ensure
-          MB::Sound::UI::Yielding.leave(Thread.current) if y
+        # runs the block (Internal.yielding_to_render).
+        def self.yielding(&block)
+          Internal.yielding_to_render(&block)
         end
 
         # The placeholder's kernel spec at +rate+ for +interpolation+.

@@ -64,8 +64,12 @@ module MB
           count = planned.length
           # (what the clip sources' readers need for the new clips is made
           # here, on the calling thread, not where the swap lands: a drum
-          # kit's tables for keys its old clip didn't play; Sampler::Reach)
-          planned.each { |n, c| n.prepare_clip(c) }
+          # kit's tables for keys its old clip didn't play, Sampler::Reach;
+          # a generator clip's first cycles, edge tables, and chase,
+          # Sequence::Clip#pregenerate, handing the GVL to the render thread
+          # while it works)
+          prepare_clips(planned, stopped ? nil : time)
+          plan = SwapPlan.of(nodes, planned)
 
           if !stopped && clips_over_by?(name, time)
             # (the voices reading an ended one-shot clip have ended, so the
@@ -74,10 +78,57 @@ module MB
             raise ClipsOver, "#{name.inspect}'s clip has ended (only its tail is ringing), so a swap would never be heard: start it again with `bg #{name.inspect}, ...`"
           end
           change(:swap, name, time, data: { clip: clip_label(clips) }) { |t|
-            swap_now(name, clips, stopped ? nil : t)
+            swap_now(name, clips, stopped ? nil : t, plan)
           }
 
           count
+        end
+
+        # The swaps #swap planned on its own thread: the clip +sources+ it
+        # found, the clips each one played then (ring, pending, current),
+        # and the [source, new clip] pairs.  #swap_now lands these very
+        # clips (which hold what Sequence::Clip#pregenerate made for them)
+        # when the player's sources and their clips are still those;
+        # otherwise it works the swaps out again from what plays then.
+        SwapPlan = Data.define(:sources, :played, :swaps) do
+          def self.of(sources, swaps)
+            new(sources: sources.dup.freeze, played: sources.map { |n| [n.ring_clip, n.pending_clip, n.clip].freeze }.freeze, swaps: swaps.freeze)
+          end
+
+          # True if clip sources +nodes+ are the planned ones, each still
+          # playing the clips it played when planned (allocates nothing).
+          def still?(nodes)
+            return false unless nodes.length == sources.length
+            i = 0
+            while i < nodes.length
+              n = nodes[i]
+              p = played[i]
+              return false unless n.equal?(sources[i]) && n.ring_clip.equal?(p[0]) && n.pending_clip.equal?(p[1]) && n.clip.equal?(p[2])
+              i += 1
+            end
+            true
+          end
+        end
+
+        # Gets clip sources ready, on the calling thread, for the clips
+        # they will start playing at timeline position +time+ (whole notes;
+        # nil: only their preparers, e.g. a stopped player's swap):
+        # +sources+ are [source, clip] pairs, or sources starting with
+        # their own clips (a new graph).  A drum kit builds its new keys'
+        # tables, a generator clip makes what its first reads need
+        # (MIDI::ClipSource#prepare_clip, Sequence::Clip#pregenerate;
+        # bg-latency-2), handing the GVL to the render thread meanwhile.
+        # Called by #swap, Arrangement#start_track, PlaybackMethods#bg, and
+        # for starts re-timed after a late warm-up (#release_warm_hold).
+        def prepare_clips(sources, time)
+          return if sources.empty?
+          ep = epoch
+          Internal.yielding_to_render(self) {
+            sources.each do |n, c|
+              next unless n.is_a?(MIDI::ClipSource)
+              n.prepare_clip(c || n.clip, at: time, epoch: ep)
+            end
+          }
         end
 
         # Raised by #swap when the player's clips are one-shots that have
@@ -215,7 +266,7 @@ module MB
         # Swaps clips at +time+ (applied by the change queue; nil for a
         # stopped player, whose clips change when it resumes).  Returns the
         # number of clip sources that change.
-        def swap_now(name, clips, time)
+        def swap_now(name, clips, time, plan = nil)
           # (a later command may have removed the player before the swap
           # landed, e.g. `forget` after a scene's swap was queued: nothing
           # to swap; omnibus13, arm_state_spec's random walk, seed 9509)
@@ -232,7 +283,9 @@ module MB
             return 0 if player && player.timeline_nodes.grep(MIDI::ClipSource).empty?
 
             _, _, nodes = swap_target(name)
-            swaps = planned_swaps(name, nodes, clips, strict: false)
+            # (the clips #swap planned and pregenerated, while nothing
+            # changed what the player plays; SwapPlan)
+            swaps = plan&.still?(nodes) ? plan.swaps : planned_swaps(name, nodes, clips, strict: false)
             swaps.each { |n, c| n.swap_clip(c, time: time) }
             swaps.length
           }

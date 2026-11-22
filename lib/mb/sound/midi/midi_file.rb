@@ -109,7 +109,8 @@ module MB
         end
 
         # Returns information about each track in the underlying midilib
-        # sequence object (see #seq).
+        # sequence object (see #seq).  Channels count from 1, as synths show
+        # them (midilib's are the wire's 0-based numbers).
         def tracks
           @track_info ||= @seq.tracks.map.with_index { |t, idx|
             stats = track_note_stats(idx)
@@ -118,9 +119,9 @@ module MB
               index: idx,
               name: t.name.gsub("\x00", ''),
               instrument: t.instrument,
-              channel_mask: t.channels_used.to_s(2).chars.map.with_index { |v, idx| v == '1' ? idx : nil }.compact,
-              event_channels: t.events.select { |v| v.is_a?(::MIDI::ChannelEvent) }.map(&:channel).uniq,
-              channel: t.events.group_by { |v| v.is_a?(::MIDI::ChannelEvent) ? v.channel : nil }.max_by { |ch, events| events.count }[0],
+              channel_mask: (0..15).select { |c| t.channels_used[c] == 1 }.map { |c| Channel.show(c) },
+              event_channels: t.events.select { |v| v.is_a?(::MIDI::ChannelEvent) }.map { |e| Channel.show(e.channel) }.uniq,
+              channel: Channel.show(t.events.group_by { |v| v.is_a?(::MIDI::ChannelEvent) ? v.channel : nil }.max_by { |ch, events| events.count }[0]),
               num_events: t.events.length,
               num_notes: t.events.select { |v| v.is_a?(::MIDI::NoteOn) }.length,
               min_note: stats[0],

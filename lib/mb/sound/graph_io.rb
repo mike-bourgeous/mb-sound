@@ -91,6 +91,12 @@ module MB
       # given a Hash (it stops at the format line instead); older
       # documents' quoted keys load as before.  (Numbered 15 after
       # drum-gen-1's 14, :beat_family, by the 2026-11-22 merge train.)
+      # Format 16 (midi-one-based-1, 2026-11-22; the maintainer's "yes"
+      # to channels and programs counted from 1 everywhere a person types
+      # or sees them): MIDI channel arguments print counted from 1
+      # (`riff.stream(channel: 2)`, `.channel(10)`, `cc(1, channel: 2)`);
+      # older documents' 0-based ones load shifted by one (Loader
+      # #old_midi_arguments; MIDI::Channel).
       #
       # FORMATS names the change each version made, so loaders gate on a
       # name (GraphIO.since?) and branches adding versions touch only this
@@ -110,6 +116,7 @@ module MB
         13 => :rack_slots,
         14 => :beat_family,
         15 => :track_hashes,
+        16 => :midi_one_based,
       }.freeze
       FORMAT = FORMATS.keys.max
 

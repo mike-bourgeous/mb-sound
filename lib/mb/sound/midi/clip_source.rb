@@ -50,7 +50,8 @@ module MB
         # The controller of a spill-over's choke (see #ring_out).
         ALL_SOUND_OFF = 120
 
-        # The MIDI channel (0-based) given to the clip's events.
+        # The MIDI channel given to the clip's events: 0-based, as on the
+        # wire (Event#channel); Clip#stream takes it 1-based.
         attr_reader :channel
 
         # Read spans the clip's edges can't land in take a quiet path:
@@ -128,9 +129,22 @@ module MB
         # swap will play here (Session#swap calls this on its own thread
         # before the swap is queued: a drum kit builds the tables of the
         # clip's new keys there, not in the buffer where the swap lands).
-        def prepare_clip(clip)
+        #
+        # With +at:+ (the timeline position, whole notes, where the clip
+        # will start playing here: a swap's time, or a new graph's launch)
+        # and +epoch:+ (the playing Session's, Session#epoch), a generator
+        # clip also makes what its first reads need, so the buffer where
+        # the change lands only reads it (Sequence::Clip#pregenerate;
+        # bg-latency-2): Session#swap and Arrangement#start_track call it
+        # so.  Returns the number of results made then (0 for clips on a
+        # clock, and clips that generate nothing).
+        def prepare_clip(clip, at: nil, epoch: 0)
           @preparers&.each { |p| p.cover(clip) }
-          self
+          return 0 if at.nil? || @clock || clip.clocking
+
+          time = at.to_r + @ahead
+          origin = clip_origin(clip, time, time)
+          clip.pregenerate(time - origin, origin: origin, epoch: epoch)
         end
 
         # Holds while the transport is paused (Session::TransportPause): the

@@ -118,10 +118,12 @@ RSpec.describe(MB::Sound::MIDI::Transform::NoteMap, :midi_transforms) do
 
   describe 'Stream#rechannel' do
     it 'moves every channel message' do
-      out = read_events(chordy.rechannel(9))
-      expect(out.map(&:channel).uniq).to eq([9])
+      out = read_events(chordy.rechannel(10))
+      expect(out.map(&:channel).uniq).to eq([9]) # (Event#channel is the wire's 0-based nibble)
       expect(out.first.bytes.bytes).to eq([0x99, 60, 114])
       expect(chordy.to_channel(3)).to be_a(MB::Sound::MIDI::Stream)
+      expect { chordy.rechannel(0) }.to raise_error(ArgumentError, /channels count from 1/)
+      expect { chordy.rechannel(17) }.to raise_error(ArgumentError, /1 to 16/)
     end
   end
 

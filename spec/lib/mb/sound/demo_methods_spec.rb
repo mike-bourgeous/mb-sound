@@ -163,7 +163,8 @@ RSpec.describe(MB::Sound::DemoMethods) do
     end
 
     MB::Sound::DemoMethods::DEMOS.each_key do |name|
-      it "starts #{name.inspect} and launches each of its scenes with no error or warning" do
+      it "starts #{name.inspect} and launches each of its scenes with no error or warning",
+        render_budget: { seconds: 100, reason: 'the slow tier counted 41-67 s per demo, above the timeline it plays (the warm-up sandboxes, likely; 2026-11-22)' } do
         out = MB::Sound::NullOutput.new(channels: 2, sleep: :virtual, buffer_size: 800)
         @live = MB::Sound::Session.new(output: out, realtime: true, channels: 2, buffer_size: 800, transport: MB::Sound::Sequence::Transport.new(bpm: 120))
         MB::Sound.live = true

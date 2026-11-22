@@ -142,6 +142,11 @@ module MB
         def decide(cycle, length, offset = 0)
           u = unit_index(offset, length)
           key = Steer.key(cycle * units(length) + u)
+          # (pregenerating: what the unit would get if decided now, the
+          # same values for every ask in the pass; nothing decided)
+          if (pre = Thread.current[:mb_steer_pregen])
+            return pre.values(self, key) { read(cycle, length, Steer.origin, u) }
+          end
           hit = @mutex.synchronize { @decided[key] }
           return hit if hit
 
@@ -184,9 +189,57 @@ module MB
           Thread.current[:mb_steer_origin] = origin
         end
 
-        # The epoch of the Session rendering on this thread (0 outside one).
+        # The epoch of the Session rendering on this thread (0 outside one;
+        # while pregenerating, the epoch of the Session the clip will play
+        # in: .pregenerating).
         def self.epoch
-          Session.span&.session&.epoch || 0
+          (pre = Thread.current[:mb_steer_pregen]) ? pre.epoch : (Session.span&.session&.epoch || 0)
+        end
+
+        # What a pass of .pregenerating holds: the +epoch+ the clip will
+        # play in, and the values each Steer's units got in the pass
+        # (#values), so every ask for a unit sees the same values.
+        class Pregen
+          attr_reader :epoch
+
+          def initialize(epoch)
+            @epoch = epoch
+            @memo = {}.compare_by_identity
+          end
+
+          # The values +steer+'s unit +key+ got in this pass, read with the
+          # block (under Param.peek: nothing decided or logged) the first
+          # time.
+          def values(steer, key)
+            per = (@memo[steer] ||= {})
+            per.fetch(key) { per[key] = MIDI::Param.peek { yield } }
+          end
+        end
+
+        # Runs the block computing what a clip's first reads will need
+        # before it plays (Sequence::Clip#pregenerate, on the thread that
+        # queues the change: the console, not the render thread), with
+        # Steer.origin +origin+ (where the clip's position 0 will be on the
+        # timeline) and cache keys of +epoch+ (the playing Session's).
+        # Steered units get the values their params have now for them
+        # (#peek), the same for every ask in the pass; nothing is decided
+        # or logged, so the playing clip decides as it always does, and a
+        # result made here is used only when the decision brings the same
+        # values (Sequence::Clip, "Pregenerated").
+        def self.pregenerating(origin, epoch)
+          prev_origin = Thread.current[:mb_steer_origin]
+          prev = Thread.current[:mb_steer_pregen]
+          Thread.current[:mb_steer_origin] = origin
+          Thread.current[:mb_steer_pregen] = Pregen.new(epoch)
+          yield
+        ensure
+          Thread.current[:mb_steer_pregen] = prev
+          Thread.current[:mb_steer_origin] = prev_origin
+        end
+
+        # True inside .pregenerating on this thread.
+        def self.pregenerating?
+          !Thread.current[:mb_steer_pregen].nil?
         end
 
         # A cache key for +cycle+ in the current epoch (an Integer, so

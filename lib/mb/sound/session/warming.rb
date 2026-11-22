@@ -478,6 +478,14 @@ module MB
         # its last warm-up is done): a change whose time has passed is
         # re-timed by its Proc (the launch point's next alignment from now).
         def release_warm_hold(hold)
+          # (a start re-timed below lands at another position than the one
+          # its generator clips were made ahead for: they make what their
+          # first reads need there too, now, outside the render lock;
+          # #prepare_clips, bg-latency-2)
+          hold.changes.each do |c, retime|
+            prepare_clips(c.starts, retime.call.to_r) if c.starts && c.time < @transport.position
+          end
+
           @render_lock.synchronize {
             hold.changes.each do |c, retime|
               next unless @changes.include?(c) # (cancelled or undone meanwhile)

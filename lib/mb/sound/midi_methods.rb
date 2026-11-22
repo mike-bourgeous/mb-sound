@@ -36,7 +36,7 @@ module MB
       #
       # +track:+ a name (or a unique part of one) or index, needed when
       # several tracks have notes (`midi_tracks(path)` lists them);
-      # +channel:+ (0-based) keeps one channel; +from:+ skips that many
+      # +channel:+ (1 to 16) keeps one channel; +from:+ skips that many
       # bars and +bars:+ sets the length (else up to the bar line after the
       # last note); +loop: false+ for a one-shot.
       #

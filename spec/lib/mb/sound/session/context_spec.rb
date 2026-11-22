@@ -17,6 +17,7 @@ RSpec.describe(MB::Sound::Session::Context, :aggregate_failures) do
   # key => what it holds
   keys = {
     mb_sound_context: 'Session::Context: who issued the commands running on this thread, and when',
+    mb_sound_midi_zero_based: 'MIDI::Channel.zero_based: channel arguments read 0-based while an old take\'s line replays',
     mb_sound_span: 'the span a Session renders on this thread (Session.span; render path)',
     mb_sound_plan_deferral: 'the plan rebuild deferral of the render (render path)',
     mb_sound_tee_new_branches: 'Tee.collect_branches: branches made while building',
@@ -25,6 +26,7 @@ RSpec.describe(MB::Sound::Session::Context, :aggregate_failures) do
     mb_sound_inspecting: 'GraphNode::Inspect: no nested one-line inspects',
     mb_sound_pry_command: 'the running Pry command, for the pager',
     mb_steer_origin: 'Generative::Steer.origin while a ClipSource reads (render path)',
+    mb_steer_pregen: 'Generative::Steer.pregenerating: the epoch and values of a pass making a clip\'s first reads ahead (Clip#pregenerate)',
     sound_io_log_depth: 'nesting depth of sound I/O logs',
     mb_sound_ui_repl: 'the UI REPL host on its thread',
     mb_sound_clamp_notes: 'the notes of knob turns limited to their ranges, while a screen runs a pane\'s turn line (UI::Tiles#run_turn_line)',

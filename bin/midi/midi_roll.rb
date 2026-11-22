@@ -29,10 +29,10 @@ MB::Sound.script(
     abort 'Specify one of --end-time or --duration, or neither, but not both'
   end
 
-  channel = options[:channel] - 1
-  channel = nil if channel == -2
-  abort 'MIDI channel must be an integer from 1 to 16, or -1' if channel && !(0..15).cover?(channel)
-  channel_description = channel.nil? ? 'all channels' : "channel #{channel + 1}"
+  user_channel = options[:channel] == -1 ? nil : options[:channel]
+  abort 'MIDI channel must be an integer from 1 to 16 (channels count from 1), or -1 for all' if user_channel && !MB::Sound::MIDI::Channel::RANGE.cover?(user_channel)
+  channel = MB::Sound::MIDI::Channel.of_optional(user_channel) # (the notes' :channel is the wire's 0-based number)
+  channel_description = channel.nil? ? 'all channels' : "channel #{user_channel}"
 
   abort 'Specify a MIDI file to display (see --help)' unless filename
   abort "MIDI file #{filename.inspect} not found" unless File.readable?(filename)
@@ -52,7 +52,7 @@ MB::Sound.script(
   col_range = 0..cols
 
   # Determine note offset based on note stats and window size
-  _min, mid, _max = f.note_stats(channel: channel)
+  _min, mid, _max = f.note_stats(channel: user_channel)
   min_note = options[:'min-note']&.number || mid - options[:rows] / 2
   min_note = 0 if min_note < 0
   max_note = min_note + options[:rows] - 1

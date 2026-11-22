@@ -241,6 +241,23 @@ RSpec.describe('MB::Sound generator clips', :aggregate_failures) do
       rt.close
       expect(MB::Sound::Generative::Ahead.runner).not_to equal(rt.instance_variable_get(:@scheduler))
     end
+
+    it 'has a rendering realtime session scheduler as its runner before anything is scheduled' do
+      # (bg-latency-2: the scheduler joined Ahead only when its thread
+      # started for a scheduled block, so a console session with nothing
+      # scheduled computed every new generator cycle on the render thread)
+      rt = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 1, sleep: :virtual), transport: MB::Sound::Sequence::Transport.new,
+                                  realtime: true, channels: 1)
+      MB::Sound::Session.with_context(session: rt) { MB::Sound.bg(:a, 330.hz.at(0.1)) }
+      expect(MB::Sound::Generative::Ahead.runner).to equal(rt.instance_variable_get(:@scheduler))
+      gen = arp(seed: 12).variations.first.block
+      expect(MB::Sound::Generative::Ahead.request(gen, 3)).to eq(true)
+      deadline = MB::U.clock_now + 5
+      sleep 0.005 until gen.cached?(3) || MB::U.clock_now > deadline
+      expect(gen.cached?(3)).to eq(true)
+    ensure
+      rt&.close
+    end
   end
 
   describe 'strikes' do
