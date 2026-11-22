@@ -611,6 +611,31 @@ RSpec.describe(MB::Sound::Arrangement) do
       expect(set.playback).to be_nil
     end
 
+    # fixes-17 (a merge train's console run of a demo, 2026-11-22: `start`
+    # printed "Scene :weather names :"vinyl/level", which is not a track or
+    # knob" for every section, and rehearsed none): a track hash's level:
+    # for a track the rehearsal leaves out (only built: it reaches a node
+    # made outside its patch) is the track's strip knob, which the sandbox
+    # doesn't have
+    it 'rehearses scenes and sections that set the level of a track it leaves out' do
+      lfo = 2.hz.lfo
+      within { session.knob(:"shared/cutoff", 500, range: 100..5000) }
+      played = Hash.new(0)
+      set.track(:c) { |c| (c.number * 0.1).proc { |b| played[:c] += 1; b } }
+      set.track(:shared) { |c| (c.tone.saw * lfo).proc { |b| played[:shared] += 1; b } }
+      set.scene(:three, c: a1, shared: { clip: b1, level: 1, cutoff: 900 }, others: :keep)
+      set.scene(:four, c: b1, shared: { level: [0, over: 2.bars] }, others: :keep)
+      expect(set.scenes[:four].values).to include(:"shared/level")
+      form = within { MB::Sound::Form.build { three 2, shared: { level: 0.5 }; four 2, c: { level: 0.7 } } }
+      expect(form.sections[:three].knobs).to include(:"shared/level")
+
+      expect { set.warm_up(form: form) }.not_to output.to_stderr
+      expect(set.rehearsal).to eq(2)
+      expect(played[:c]).to be > 0
+      expect(played[:shared]).to eq(0)
+      expect(session.players).to be_empty
+    end
+
     it 'warns and gives up when a scene block raises, leaving the form to play' do
       set.scene(:bad) { raise 'nope' }
       form = MB::Sound::Form.build { one 1; bad 1 }
