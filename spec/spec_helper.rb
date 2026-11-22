@@ -155,6 +155,9 @@ RSpec.configure do |config|
   # node-set caches of Session::Strip trust it; omnibus10): checked every
   # span in specs
   MB::Sound::Session::Strip.structure_check = true
+  # A thread holding a realtime Session's render lock never waits for a
+  # song form's lock (the deadlock of fixes-17): checked in specs
+  MB::Sound::Form::Playback::Lock.check = true
 
   # Examples tagged :check_shared raise if a node modifies a buffer that a
   # Tee shares among its branches (see MB::Sound::GraphNode::Tee)
