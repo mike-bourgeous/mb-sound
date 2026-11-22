@@ -1153,8 +1153,9 @@ module MB
         last is built: "starting: building 4 tracks ...") and `pause` (NAV
         Space) toggles: the bar stops, sounding notes
         release, loops and drones fade out and hold their place, and
-        echoes and reverbs ring out; playing on doesn't retrigger notes
-        (`start resync: true` puts tempo-synced LFOs back on the grid).
+        echoes and reverbs ring out; playing on (`pause` again, `start`,
+        or a bare `resume`) doesn't retrigger notes (`start resync: true`
+        puts tempo-synced LFOs back on the grid).
         `suspend` is the old freeze (silence, nothing renders).  `outro
         in: 4.bars` and `stop :all` end the flow too; `go :scene` during
         it seeks the flow to the next section playing that scene (else the
@@ -2046,7 +2047,8 @@ module MB
         steps by its last written digit (300 -> 301, 0.125 -> 0.126);
         Alt-Shift is a fine step (0.125 -> 0.1251), Ctrl-Alt a coarse one
         (10 steps); Alt-Shift-Left/Right jump between numbers, and Esc then
-        Up/Down works where Alt-arrows don't arrive.  Keys pressed together
+        Up/Down (within half a second) works where Alt-arrows don't arrive;
+        off a number, the first press moves the cursor onto the nearest one.  Keys pressed together
         run the line once; history keeps one entry for the run.
 
         `ui :tiles` (or `:studio`, `:keys`, `:wall`) takes the whole screen:
@@ -2057,7 +2059,10 @@ module MB
         its number jumps straight in (i the REPL, k the keyboard, a the
         clips).  Ctrl-W is NAV for one key: Ctrl-W z zooms and comes back,
         Ctrl-W a goes into the clips, Ctrl-W Ctrl-W swaps between the last
-        two panes, Ctrl-W Ctrl-] stays in NAV.  F2 or
+        two panes, Ctrl-W Ctrl-] stays in NAV.  NAV Alt-arrows swap the
+        focused pane with the one that way (again: on across; u puts it
+        back); `ui.swap :left` from the console, or `ui.swap :tracks,
+        :knobs` by name.  F2 or
         `keys` is the keyboard, Ctrl-Z hides the tiles while the set plays
         on (`fg` brings them back, `jobs` lists what runs).
 
@@ -2175,7 +2180,7 @@ module MB
       section do |d|
         # (The pane catalog, ui.panes: ux-1 r3 item 40)
         d.heading('Panes  (ui.panes; ui.list: what is on screen; ui.size)')
-        d.rows(UI.pane_catalog.entries.map { |e| [[e.name, *e.aliases].map(&:inspect).join(' '), "#{e.description} (#{e.open})"] }, max_label: 12, wrap: true)
+        d.rows(UI.pane_catalog.entries.map { |e| [e.name.inspect, "#{"(also #{e.aliases.map(&:inspect).join(', ')}) " unless e.aliases.empty?}#{e.description} (#{e.open})"] }, max_label: 12, wrap: true)
         d.heading('Sizes  (one decision per terminal size: UI::Density)')
         d.rows(UI::Density.table.map { |t| t.split(': ', 2) }, max_label: 20)
       end

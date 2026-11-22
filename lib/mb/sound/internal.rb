@@ -114,6 +114,17 @@ module MB
         "#{path}:#{loc.lineno}"
       end
 
+      # True if +location+ (a Thread::Backtrace::Location: the caller of a
+      # console command) is the user's own code, a console line
+      # ("(pry):3"), a script, or a spec, rather than mb-sound's library
+      # or a gem: the console's warm-ups, demo and document loads, design's
+      # temporary tracks, the capture's track.  Notices about what a typed
+      # command did print only then (followups-1: the console's warm-up
+      # printed three "isn't playing" lines at every start).
+      def user_call?(location)
+        !location.nil? && !location_outside([location]).nil?
+      end
+
       # mb-sound's lib/mb/sound directory, for .creation_trace.
       SOUND_LIB = File.expand_path('.', __dir__).freeze
 

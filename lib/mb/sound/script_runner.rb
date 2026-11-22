@@ -60,8 +60,15 @@ module MB
     #     preset: [nil, 'Reverb preset', Symbol],
     class ScriptRunner
       @songs = {}
+      @require_once = true
 
       class << self
+        # True (default) when live playback installs MB::Sound::RequireOnce
+        # (see #live); the spec process sets it false, so a spec playing a
+        # script live in-process leaves Kernel#require as it was for the
+        # rest of the run (scripts the specs start as processes install it).
+        attr_accessor :require_once
+
         # Remembers a song script's parameter declarations and block (see
         # ScriptingMethods#song_script), so a take replay can run the song
         # again (see .replay_song).
@@ -1149,7 +1156,15 @@ module MB
       # script plays and saves its report there at the end.  Likewise
       # MB_SOUND_DROPOUT_PROBE (a .json path, or 1) or DropoutProbe.arm
       # (bin/dropout_probe.rb) runs a DropoutProbe.
+      #
+      # Live playback holds a realtime Session while the script prints and
+      # loads lazily, as the console does: RequireOnce makes a repeated
+      # `require` of a loaded feature return without the load-path search
+      # that holds the GVL (bin/sound.rb installs it at start;
+      # MB_SOUND_REQUIRE_ONCE=0 turns both off; followups-1).  Renders to a
+      # file never get here.
       def live
+        RequireOnce.install if ScriptRunner.require_once
         name = File.basename(@script.to_s, '.rb')
         probe = LatencyProbe.from_env(Session.current, name: name)
         dropouts = DropoutProbe.from_env(Session.current, name: name)

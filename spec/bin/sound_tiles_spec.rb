@@ -42,6 +42,10 @@ RSpec.describe('bin/sound.rb with ui :tiles', :aggregate_failures) do
     type = ->(s) { s.each_char { |c| w.write(c); sleep 0.003 } }
 
     expect(wait.(/MB::Sound\(0\) >/, 60)).to eq(true), text.call
+    # (the start steps print their own lines only, on a terminal too:
+    # followups-1, the UI warm-up's tracks printed "isn't playing" notices)
+    start = all_text.call.split('Welcome to mb-sound').first.lines.map(&:strip).reject(&:empty?)
+    expect(start).to all(match(/\A(Loading .*|Warming up .*|Started in .*)\z/)), start.join("\n")
     type.("ui :tiles\r")
     expect(wait.(' REPL ')).to eq(true), text.call
     expect(lock.synchronize { vt.alt? }).to eq(true)

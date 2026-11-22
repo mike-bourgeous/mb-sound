@@ -793,6 +793,20 @@ module SessionFuzz
         end
       end
     },
+    ->(s) {
+      # (ux-friction-2, the maintainer's take of 2026-11-21: a sampler kit
+      # with an effect insert) a patch block playing a sampler instrument
+      # (the shipped break's slices as a kit, given as the track or in a
+      # patch block), a drum clip on it, and a compressor insert
+      # swapped in at its launch point, sometimes taken out again later
+      name = :smp # (its own name: a graph track of a bg name would refuse the fx)
+      # (a sampler instrument given as the track is a patch track:
+      # InstrumentPatch.voice?; the block form plays the same)
+      kit = s.rng.rand < 0.5 ? "track :#{name}, breakbeat(:jungle).slices(8).instrument" : "track(:#{name}) { |c| breakbeat(:jungle).slices(8).instrument.sampler(c, voices: 4) * 0.4 }"
+      play = "bg :#{name}, seq(36, 38, 39, 41).n8.loop#{s.on}"
+      insert = "fx :#{name}, ->(sig) { sig.compress(threshold: #{s.pick(['-30.db', '-18.db'])}) }"
+      s.rng.rand < 0.5 ? "#{kit}; #{play}; #{insert}" : "#{kit}; #{play}; after(in: 2.beats) { #{insert} }; after(in: 1.bar) { fx :#{name}, :off }"
+    },
     # (new commands go here, at the end)
   ].freeze
 

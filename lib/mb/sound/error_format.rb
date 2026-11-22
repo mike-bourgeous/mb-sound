@@ -135,13 +135,31 @@ module MB
       # Entry, or nil.
       def entry_guess(e)
         entry = e.receiver
-        return nil unless entry.is_a?(Library::Entry) && ENTRY_CHAIN.include?(e.name)
+        return nil unless entry.is_a?(Library::Entry)
+        return clip_entry_guess(entry, e) unless ENTRY_CHAIN.include?(e.name)
 
         other = e.args.first
         b = other.is_a?(Library::Entry) ? other.head_path : 'L.fx.hall'
         Library::Entry.chain_hint(entry.head_path, b)
       rescue StandardError
         nil
+      end
+
+      # A clip method (transpose, echo, ...) on a generator or clip entry
+      # that hasn't been called (the maintainer's take, 2026-11-21: `bg
+      # :drums, L.gen.techno_beat.transpose(4)` said "undefined method
+      # 'transpose' for an instance of MB::Sound::Library::Entry", and
+      # `L.gen.techno_beat.call.transpose(1)` worked): the call that makes
+      # the clip, or nil.
+      def clip_entry_guess(entry, e)
+        return nil unless %i[generator clip].include?(entry.kind) && Sequence::Clip.method_defined?(e.name)
+
+        list = e.args.dup
+        kw = list.last.is_a?(Hash) && list.last.keys.all?(Symbol) ? list.pop : {}
+        text = ->(v) { RubyValue.text(v) rescue v.inspect }
+        args = (list.map(&text) + kw.map { |k, v| "#{k}: #{text.(v)}" }).join(', ')
+        "#{entry.head_path}.call.#{e.name}#{"(#{args})" unless args.empty?} (a library #{entry.kind} gives its clip when called; " \
+          "#{entry.head_path}(...) takes its params)"
       end
 
       # Mode names and wave shapes tried as methods on values (ux-friction-1

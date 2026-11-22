@@ -645,6 +645,9 @@ module MB
                 official = ([first] + aliases).to_h { |n| [n, official_name(target, n)] }
                 mod.define_method(first) do |*args, **kwargs, &block|
                   callee = __callee__
+                  # (MIDI transforms taking arguments in either order record
+                  # them canonically: `echo(3, 1.n32)` prints echo(1.n32, 3))
+                  args = MB::Sound::MIDI::Stream.ordered_args(callee, args) if MB::Sound::MIDI::Stream::ARGUMENT_ORDER.key?(callee)
                   Recipe.call(self, official[callee] || callee, args, kwargs, block, written: callee) { |b, a = args, kw = kwargs| super(*a, **kw, &b) }
                 rescue ArgumentError => e
                   raise ErrorFormat.argument_help(e, self, callee) || e

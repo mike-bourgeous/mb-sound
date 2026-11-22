@@ -67,6 +67,14 @@ Decibels on clips are not in the table: clip velocities go through each patch's 
 - Tag new frequency-producing node methods with `ArgTypes.tag(..., :frequency)` (or make their class a frequency in `ArgTypes.frequency?`).
 - Add a guard row example in `arg_types_spec.rb` for each new type.
 
+## Either order for disjoint types (ux-friction-2, 2026-11-22)
+
+The maintainer's take of 2026-11-21: `clip.echo(3, 1.n32, pitch: 10)` raised while `echo(1.n32, 3, ...)` worked, and his note was "dwim argument order".  The rule: two positional arguments may come in either order only when their types are disjoint, never two of one type, and what prints (to_ruby, set documents, graph views, stream lineage) is always the one canonical order.  `MIDI::Stream::ARGUMENT_ORDER` names the transforms and a Proc giving their arguments in canonical order; Stream's argument-help wrapper, unattached chains (`Transform::Spec`), and the recipe recorder all reorder through it before recording, so no saved text changes.
+
+- echo (`Transform::Echo::SIGNATURE`): a typed length (Duration, Length, Rational, or an Array of one type: `Signature.new(..., lists: true)`) is the delay wherever written, the plain number beside it the count.  Two plain numbers keep their order (seconds, then the count; `echo(3)` is still a 3-second delay); `echo(3, 0.25)` and two delays are refused with the spelling.
+- arp (`Stream::ARP_SIGNATURE`) and strum (`STRUM_SIGNATURE`): a lone Symbol (the mode, the direction) written in the other's place swaps; everything else stays as written, since rates and spreads may be clips or MIDI params.
+- Not adopted (options in the ux-friction-2 report): console commands such as `turn 0.5, :knob` or `level -30.db, :drums` (a Symbol beside a value, clear-cut by type but not seen in a take yet), and `scale(:a, :phrygian)` (two Symbols: a did-you-mean).
+
 ## Lessons
 
 | lesson | mechanism | class ruled out | status |

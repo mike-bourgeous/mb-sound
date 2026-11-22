@@ -1,3 +1,5 @@
+require_relative '../../../../support/sf2_writer'
+
 # A track's effect insert (library-2; the maintainer, 2026-10-30: "Build fx:
 # slot"): `track :keys, instrument, fx: L.fx.reverb.hall`, `fx :keys, ...`
 # swapping it at the launch point with the instrument's state carried and
@@ -102,7 +104,7 @@ RSpec.describe(MB::Sound::Arrangement::Fx, :aggregate_failures) do
       expect { MB::Sound.fx(:keys, :hal) }.to raise_error(described_class::Error, /no effect :hal.*hall/m)
       expect { MB::Sound.fx(:keys, MB::Sound::L.inst.dnb_sub) }.to raise_error(described_class::Error, /L\.inst\.dnb_sub is an instrument, not an effect/)
       expect { MB::Sound.fx(:keys, 3) }.to raise_error(described_class::Error, /a library effect.*Integer/)
-      expect { MB::Sound.fx(:pad, :hall) }.to raise_error(described_class::Error, /a graph track's effects go in its graph/)
+      expect { MB::Sound.fx(:pad, :hall) }.to raise_error(described_class::Error, /:pad plays a graph: its effects go in its graph/)
       expect { MB::Sound.fx(:nope, :hall) }.to raise_error(ArgumentError, /no track :nope/)
       expect { MB::Sound.track(:keys, :funk_keys, fx: :hal) }.to raise_error(described_class::Error, /no effect :hal/)
 
@@ -113,6 +115,76 @@ RSpec.describe(MB::Sound::Arrangement::Fx, :aggregate_failures) do
       ).to_stderr
       expect(s.arrangement.tracks[:keys].fx).to be_nil.or eq([])
     }
+  end
+
+  # (the maintainer's take, 2026-11-21: `kit = sf2(...)`, `track :drums,
+  # kit`, a generator on it, then `fx :drums, ->{ it.compress(threshold:
+  # -30) }`: "Why can I not put effects on a soundfont track?"  The
+  # SoundFont was a graph track; a sampler instrument given to `track` is
+  # now a patch track, as `track(:drums) { |c| kit.sampler(c, voices: 8) }`)
+  describe 'a SoundFont or sampler instrument as the track' do
+    def kit_path
+      path = tmp_path('kit.sf2')
+      return path if File.exist?(path)
+      SF2Writer.write(path,
+        samples: [
+          { name: 'thump', data: Array.new(4000) { |i| Math.sin(2 * Math::PI * 60 * i / 44100.0) * Math.exp(-i / 900.0) }, rate: 44100, pitch: 36 },
+          { name: 'tick', data: Array.new(2000) { |i| Math.sin(2 * Math::PI * 3000 * i / 44100.0) * Math.exp(-i / 300.0) }, rate: 44100, pitch: 60 },
+        ],
+        instruments: [{ name: 'Kit', zones: [{ key_range: [0, 37], sample_id: 0 }, { key_range: [38, 127], sample_id: 1 }] }],
+        presets: [{ name: 'Spec Kit', program: 0, zones: [{ instrument: 0 }] }, { name: 'GM Kit', bank: 128, program: 0, zones: [{ instrument: 0 }] }])
+    end
+
+    let(:beat) { MB::Sound::L.gen.techno_beat.call(seed: 5) }
+
+    it 'plays clips through an fx insert, bit for bit like the block form with the effect inside' do
+      font = MB::Sound.sf2(kit_path)
+      comp = ->(sig) { sig.compress(threshold: -30.db) }
+      _, ref = run(->(_s) { MB::Sound.track(:drums) { |c| comp.(font.sampler(c, voices: 8)) }; MB::Sound.bg(:drums, beat) })
+      s, got = run(->(_s) { MB::Sound.track(:drums, font); MB::Sound.bg(:drums, beat); MB::Sound.fx(:drums, comp) })
+      expect(ref.abs.max).to be > 0.01
+      expect(got).to eq(ref)
+      expect(s.arrangement.tracks[:drums]).to be_patch
+      expect(s.arrangement.tracks[:drums].fx).to eq([comp])
+      # (the compressor is heard: the dry kit differs)
+      _, dry = run(->(_s) { MB::Sound.track(:drums, font); MB::Sound.bg(:drums, beat) })
+      expect((dry - got).abs.max).to be > 0.01
+
+      # fx: on the track line, a preset as the instrument, and the errors
+      s2, = run(->(_s) { MB::Sound.track(:d2, font[128, 0], fx: :hall) }, buffers: 1)
+      expect(s2.arrangement.tracks[:d2].fx).to eq([MB::Sound::L.fx.hall])
+      MB::Sound::Session.with_context(session: s2) {
+        expect { MB::Sound.track(:d3, font) { |c| c } }.to raise_error(ArgumentError, /a sampler instrument or a patch block, not both/)
+        expect { MB::Sound.track(:d3, font, :funk_keys) }.to raise_error(ArgumentError, /one instrument \(got two\)/)
+        MB::Sound.track(:pad, 0.1.constant)
+        expect { MB::Sound.fx(:pad, :hall) }.to raise_error(described_class::Error, /:pad plays a graph: its effects go in its graph/)
+      }
+    end
+
+    it 'saves as the track line it was given (a font as its preset) and loads back to the same kind of track' do
+      s, = run(->(_s) {
+        MB::Sound.track(:drums, beat, MB::Sound.sf2(kit_path), fx: :hall)
+        MB::Sound.track(:gm, MB::Sound.sf2(kit_path, [128, 0]))
+      }, buffers: 1)
+      text = MB::Sound::Session.with_context(session: s) { MB::Sound::GraphIO::SetWriter.new(s.arrangement).to_s }
+      expect(text).to include(%(track :drums, drums, sf2("#{kit_path}", preset: [0, 0]), fx: :hall\n))
+      expect(text).to include(%(track :gm, sf2("#{kit_path}", preset: [128, 0])\n))
+      s2 = MB::Sound::Session.new(realtime: false)
+      @sessions << s2
+      MB::Sound::Session.with_context(session: s2) { MB::Sound::GraphIO.load(text.gsub(kit_path, 'kit.sf2'), session: s2, base_dir: File.dirname(kit_path)) }
+      expect(s2.arrangement.tracks.transform_values(&:patch?)).to eq(drums: true, gm: true)
+      expect(s2.arrangement.tracks[:drums].fx).to eq([MB::Sound::L.fx.hall])
+    end
+
+    it 'rings its effect out through a pause, the notes released' do
+      font = MB::Sound.sf2(kit_path)
+      s, = run(->(_s) { MB::Sound.track(:drums, font, fx: ->(sig) { sig.delay(0.25, feedback: 0.6) }); MB::Sound.bg(:drums, beat) }, buffers: 60)
+      s.pause_transport
+      tail = SpecBuffers.join(Array.new(60) { s.process_buffer[0].dup })
+      # (the echoes go on after the pause, then die away)
+      expect(tail[12000...24000].abs.max).to be > 0.001
+      expect(tail[-4800..].abs.max).to be < tail[0...12000].abs.max
+    end
   end
 
   it 'saves the insert in set documents and loads it back' do
