@@ -36,6 +36,33 @@ RSpec.describe(MB::Sound::ErrorFormat) do
       expect(described_class.console(e, color: false)).to eq("NoMethodError: undefined method 'plya' (did you mean play?)")
     end
 
+    # (ux-friction-3: before asking how to clear everything he tried
+    # clear, reset, session.clear, clear :form, Session.clear, "a few
+    # others")
+    it 'points the guesses at emptying the set to clear_set' do
+      want = 'did you mean clear_set (stops everything and takes out the tracks, scenes, flow, knobs, buses, and racks; tempo, key, and master gain stay; undo puts it back)'
+      %w[reset clear_session clear_all new_set reset_set start_over Session.clear Session.current.clear Session.current.reset].each do |code|
+        e = (MB::Sound.module_eval(code) rescue $!)
+        expect(described_class.summary(e)).to include(want), "#{code}: #{described_class.summary(e)}"
+      end
+      expect(described_class.summary((MB::Sound.module_eval('reset') rescue $!))).to include("or pry-reset (Pry's reset of the console itself)")
+      %w[session.clear session.reset].each do |code|
+        e = (MB::Sound.module_eval(code) rescue $!)
+        expect(described_class.summary(e)).to eq("NameError: undefined local variable or method 'session' (did you mean Session.current (the console's session; " \
+                                                 'clear_set empties its set: stops everything and takes out the tracks, scenes, flow, knobs, buses, and racks; ' \
+                                                 'tempo, key, and master gain stay; undo puts it back)?)'), code
+      end
+    end
+
+    it 'clears the screen with clear, saying once what empties the set, and points clear :form at the commands that clear parts' do
+      MB::Sound::Internal.instance_variable_set(:@clear_told, nil)
+      expect { MB::Sound::Internal.console_clear }.to output("\e[H\e[2J\e[2mclear clears the screen; clear_set empties the set (tracks, scenes, flow, knobs, buses, racks)\e[0m\n").to_stdout
+      expect { MB::Sound::Internal.console_clear }.to output("\e[H\e[2J").to_stdout
+      expect { MB::Sound::Internal.console_clear(:form) }.to raise_error(ArgumentError, /\Aclear clears the screen; :form goes to another command: clear_set empties the whole set .*untrack :name .*finish/)
+      MB::Sound::Internal.instance_variable_set(:@clear_told, nil)
+      expect { MB::Sound::Internal.console_clear(quiet: true) }.to output("\e[H\e[2J").to_stdout
+    end
+
     it 'points a note for a track at meta notes:, about:, and ui.note (GUESSES)' do
       e = (MB::Sound.note(:lead, 'breathy') rescue $!)
       expect(e).to be_a(NoMethodError)
@@ -85,13 +112,13 @@ RSpec.describe(MB::Sound::ErrorFormat) do
       expect(sig.blend(0.5) { it.then(&circle) }).to be_a(MB::Sound::GraphNode)
     end
 
-    # (the maintainer's take, 2026-11-21: `bg :drums, L.gen.techno_beat.transpose(4)`)
+    # (the maintainer's take, 2026-11-21: `bg :drums, L.gen.beat.techno.transpose(4)`)
     it 'names .call for a clip method on a generator entry that was not called (ux-friction-2)' do
-      gen = MB::Sound::L.gen.techno_beat
+      gen = MB::Sound::L.gen.beat.techno
       e = (gen.transpose(4) rescue $!)
-      expect(described_class.summary(e)).to include('did you mean L.gen.techno_beat.call.transpose(4) (a library generator gives its clip when called; L.gen.techno_beat(...) takes its params)?')
+      expect(described_class.summary(e)).to include('did you mean L.gen.beat.techno.call.transpose(4) (a library generator gives its clip when called; L.gen.beat.techno(...) takes its params)?')
       e = (gen.echo(3, 1.n32, pitch: 10) rescue $!)
-      expect(described_class.summary(e)).to include('L.gen.techno_beat.call.echo(3, 1.n32, pitch: 10)')
+      expect(described_class.summary(e)).to include('L.gen.beat.techno.call.echo(3, 1.n32, pitch: 10)')
       e = (gen.frobnicate rescue $!)
       expect(described_class.summary(e)).not_to include('.call.')
       e = (MB::Sound::L.fx.reverb.hall.transpose(4) rescue $!)

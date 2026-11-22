@@ -7,12 +7,21 @@ module MB
       # chain (`L.`, `L.inst.ree`, `L.reese`), a Reline dialog under it
       # lists the entries matching what is typed anywhere in their names,
       # name words, tags, and families (Library::Finder, ranked), narrowing
-      # with every key.  Up and Down pick, Tab or Enter puts the picked
-      # entry's full chain on the line (Enter again runs it), Esc closes the
-      # list until the word changes.  Only typing or deleting opens it (a
-      # chain recalled from history doesn't, so Up goes on through it).  The keys are Reline one-shot bindings
-      # held only while the list shows, so Tab, the arrows, and Enter work
-      # as before everywhere else (Pry's own completion included); multi-line
+      # with every key.  While typing the list is only shown: no row is
+      # picked and every key edits the line as if it weren't there (Enter
+      # runs the line as typed, Up is history); Tab or Down goes into it
+      # (the first row picked), where Up, Down, PageUp, and PageDown move,
+      # Tab or Enter puts the picked entry's full chain on the line, and
+      # Esc, Up from the first row, or typing go back to the line (ux-
+      # friction-3, the maintainer: "don't focus the find-as-you-type popup
+      # unless I press tab or down; enter as I type should act like a
+      # normal enter").  Its first row says which state it is in.  Esc
+      # while it is only shown closes it until the word changes.  Only
+      # typing or deleting opens it (a chain recalled from history doesn't,
+      # so Up goes on through it).  The keys are Reline one-shot bindings
+      # held only while the list shows (Tab, Down, and Esc until it is
+      # entered), so Tab, the arrows, and Enter work as before everywhere
+      # else (Pry's own completion included); multi-line
       # input reads the line being edited.  The plain console and the tiled
       # screen's REPL share it (both are Reline).  Installed by
       # UI::Completion.install (bin/sound.rb).
@@ -33,9 +42,18 @@ module MB
         # listed?"; L.gen. has 17, L.inst.a 62, L. 198).
         MAX = 250
 
+        # The keys that go into the list while it is only shown.
+        ENTER_KEYS = %i[tab down down_app].freeze
+
+        # The first row, while the list is only shown and once entered.
+        HINT_SHOWN = 'Tab or Down: pick'
+        HINT_PICKING = 'Enter or Tab: put it on the line  Esc: back'
+
         # The dialog's state (Reline gives the proc this context): the word
-        # it lists for, the picked row, the word Esc closed it for.
-        State = Struct.new(:word, :pointer, :closed, :list, :finder)
+        # it lists for, the picked row, the word Esc closed it for, the
+        # entries, the finder, and whether the list has the keys (Tab or
+        # Down went into it).
+        State = Struct.new(:word, :pointer, :closed, :list, :finder, :focused)
 
         PROC = -> { LibraryPopup.render(self) }
 
@@ -43,7 +61,7 @@ module MB
 
         def install
           return false unless defined?(::Reline) && ::Reline.respond_to?(:add_dialog_proc)
-          ::Reline.add_dialog_proc(:mb_library, PROC, State.new(nil, 0, nil, nil, Library::Finder.new))
+          ::Reline.add_dialog_proc(:mb_library, PROC, State.new(nil, 0, nil, nil, Library::Finder.new, false))
           true
         end
 
@@ -54,23 +72,35 @@ module MB
           pre, word, post = scope.retrieve_completion_block
           key = scope.key
           trapped = key && key.method_symbol == scope.dialog.name
-          if trapped && st.list
+          if trapped && st.list && !st.focused
             case key_of(key)
-            when :up, :up_app then st.pointer = (st.pointer - 1) % st.list.length
-            when :down, :down_app then st.pointer = (st.pointer + 1) % st.list.length
+            when *ENTER_KEYS
+              st.focused = true
+              st.pointer = 0
+            when :escape
+              st.closed = word
+              return close(st)
+            end
+          elsif trapped && st.list
+            case key_of(key)
+            when :up, :up_app
+              if st.pointer.zero?
+                st.focused = false
+              else
+                st.pointer -= 1
+              end
+            when :down, :down_app then st.pointer = [st.pointer + 1, st.list.length - 1].min
             when :page_up then st.pointer = [st.pointer - LIMIT, 0].max
             when :page_down then st.pointer = [st.pointer + LIMIT, st.list.length - 1].min
             when :tab, :enter
               pick(scope, pre, st.list[st.pointer].chain, post)
               st.closed = st.list[st.pointer].chain
-              st.list = nil
-              return nil
+              return close(st)
             when :escape
-              st.closed = word
-              st.list = nil
-              return nil
+              st.focused = false
             end
           else
+            st.focused = false # (any other key: back to the line, the list only shown)
             return close(st) if word.nil? || word == st.closed
             # (Only typing opens it: a line recalled from history or a cursor
             # moved onto a chain kept Up from reaching the next entry;
@@ -85,13 +115,14 @@ module MB
             st.list = list
           end
 
-          # (Enter runs the line when the picked chain is what is typed)
-          scope.dialog.trap_key = st.list[st.pointer].chain == word ? KEYS.except(:enter).values : KEYS.values
-          scope.dialog.pointer = st.pointer
+          # (only shown: the keys that go in, and Esc; Enter, Up, and the
+          # rest edit the line)
+          scope.dialog.trap_key = st.focused ? KEYS.values : KEYS.slice(*ENTER_KEYS, :escape).values
+          scope.dialog.pointer = st.focused ? st.pointer + 1 : nil
           x = [scope.cursor_pos.x - word.to_s.length, 0].max
           ::Reline::DialogRenderInfo.new(
-            pos: ::Reline::CursorPos.new(x, 0), contents: st.list.map(&:label),
-            scrollbar: st.list.length > LIMIT, height: [st.list.length, LIMIT].min, face: :completion_dialog
+            pos: ::Reline::CursorPos.new(x, 0), contents: [st.focused ? HINT_PICKING : HINT_SHOWN, *st.list.map(&:label)],
+            scrollbar: st.list.length > LIMIT, height: [st.list.length, LIMIT].min + 1, face: :completion_dialog
           )
         rescue StandardError
           nil
@@ -129,6 +160,7 @@ module MB
         def close(st)
           st.list = nil
           st.word = nil
+          st.focused = false
           nil
         end
 

@@ -62,7 +62,7 @@ module MB
       # ":pager should be an alias"; and of the library picker, titled
       # "library" on screen, ":library should be an alias for it" (the
       # `help :library` topic is another namespace).
-      PANE_ALIASES = { pager: :page, library: :picker }.freeze
+      PANE_ALIASES = { pager: :page, library: :picker, midi_devices: :midi_ports, ports: :midi_ports }.freeze
       MB::Term::Viewports.pane_aliases = PANE_ALIASES
 
       # Every pane there is (`ui.panes`): built-in, defined with `pane`,
@@ -84,7 +84,8 @@ module MB
       # Panes that commands open, not layouts (so no built-in layout shows
       # them): name => the command.
       ON_DEMAND_PANES = { message: 'ui.message n', page: 'help (a page while the tiled screen is up), ui.page false closes it',
-                         plot: 'plot, spectrum, chart { } (while the tiled screen is up), ui.plot false closes it' }.freeze
+                         plot: 'plot, spectrum, chart { } (while the tiled screen is up), ui.plot false closes it',
+                         midi_ports: 'ui.show :midi_ports (alias :midi_devices; or `pane :midi_ports` in a layout of yours)' }.freeze
 
       # The set's panes, shown by `ui :session` (and buses in :studio's
       # tabs) rather than on the :wall, which shows every other pane.

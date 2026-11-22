@@ -78,11 +78,20 @@ module MB
       def turn(name, value = nil, at: nil, on: nil, in: nil, over: nil, curve: nil, from: nil, follow: nil, smooth: nil, **keys)
         point = LaunchPoint.of(binding) or return nil
         if (pairs = track_turn(name, value, keys))
-          unless over.nil? && curve.nil? && from.nil? && follow.nil? && smooth.nil?
-            raise ArgumentError, "turn #{name.inspect}, #{keys.keys.first}: ...: a track's knobs together take plain values (ramps, follows, and curves turn one knob)"
+          raise ArgumentError, "turn #{name.inspect}, #{keys.keys.first}: ...: follow: turns one knob (give each knob its node: turn #{name.inspect}, #{keys.keys.first}: node)" unless follow.nil?
+          label = "turn #{name.inspect}, #{keys.keys.join(', ')}"
+          if over.nil? && curve.nil? && from.nil? && smooth.nil? && pairs.each_value.all? { |v| v.is_a?(Numeric) }
+            return session_command(name, label: label, kind: :turn, all: true) { |session, time|
+              session.turn_knobs(pairs, at: point, start_time: point.given? ? nil : time)
+            }
           end
-          return session_command(name, label: "turn #{name.inspect}, #{keys.keys.join(', ')}", kind: :turn, all: true) { |session, time|
-            session.turn_knobs(pairs, at: point, start_time: point.given? ? nil : time)
+          # (ramps, curves, and moving values apply to each knob, as one
+          # command: form-knobs-1, `turn :drums, energy: 0.8, fill: 0.3,
+          # over: :section`; the track hashes of scenes read the same)
+          return session_command(name, label: label, kind: :turn, all: true) { |session, time|
+            pairs.map { |k, v|
+              session.turn(k, v, at: point, over: over, curve: curve, from: from, smooth: smooth, start_time: point.given? ? nil : time)
+            }
           }
         end
         name = knob_name(name)
@@ -187,11 +196,9 @@ module MB
         own = session.knobs.keys.select { |k| k.to_s.start_with?(prefix) }
         return nil if own.empty? # (Session#turn says which keywords it takes)
         keys.to_h { |p, v|
-          kname = Session::Name.param(name, p)
-          unless session.knobs[kname]
-            params = own.map { |k| k.to_s.delete_prefix(prefix) }
-            hint = DidYouMean::SpellChecker.new(dictionary: params).correct(p.to_s).first
-            raise ArgumentError, "turn #{name.inspect}, #{p}: #{name.inspect} has no knob #{p}#{hint ? " (did you mean #{hint}:?)" : ''} (its knobs: #{params.join(', ')})"
+          kname = session.track_knob_name(name, p)
+          unless session.knobs[kname] || session.track_strip_knob?(kname)
+            raise ArgumentError, session.track_knob_message("turn #{name.inspect}, #{p}", name, p)
           end
           [kname, v]
         }

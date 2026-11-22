@@ -345,7 +345,7 @@ RSpec.describe(MB::Sound::MIDI::Transform::Echo, :midi_transforms) do
       expect(MB::Sound.echo(3, 1.n16).steps.first[1]).to eq([1.n16, 3])
 
       # Generator clips (each cycle baked through the transform)
-      gen = MB::Sound::L.gen.techno_beat.call(seed: 5)
+      gen = MB::Sound::L.gen.beat.techno.call(seed: 5)
       expect(gen.echo(3, 1.n32).to_ruby).to eq(gen.echo(1.n32, 3).to_ruby)
       expect(gen.echo(3, 1.n32).to_ruby).to include('echo(1.n32, 3)')
 

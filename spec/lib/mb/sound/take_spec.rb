@@ -568,6 +568,38 @@ RSpec.describe(MB::Sound::Take) do
     end
   end
 
+  # form-knobs-1: a scene's and a section's track hashes (`t: { clip:
+  # ..., cut: [3500, over: :section] }`), a turn of several track knobs
+  # with over:, and an undo, replayed from the saved script
+  it 'replays track hashes in scenes and sections, over: :section, and a track turn bit for bit' do
+    lines = {
+      0 => [
+        'bpm 150',
+        'knob :"t/cut", 16000, range: 200..16000, curve: :exp',
+        'knob :"t/amp", 0.2, range: 0..1',
+        "track(:t) { |c| c.synth(voices: 4) { |v| v.hz.saw * v.env(0.01, 0.2, 0.8, 0.3, gm: false) }.filter(:lowpass, cutoff: knob(:\"t/cut\"), quality: 0.9) * knob(:\"t/amp\") }",
+        'scene :a, t: { clip: seq(A2, E3).n8.loop, cut: 800, amp: 0.3 }',
+        'scene :b, t: { cut: [6000, over: :section] }',
+        'flow { a 1; b 2, t: { amp: [0.6, over: :section] }; a 1 }',
+      ],
+      150 => ['turn :t, cut: 2000, amp: 0.4, over: 1.beat'],
+      180 => ['undo'],
+    }
+    live, t = perform_lines(lines, buffers: 300)
+    expect(live.abs.max).to be > 0.02
+    expect(t.entries.count { |e| e.kind == :turn }).to be >= 4
+
+    path = tmp_path('take.rb')
+    expect { t.save(path) }.to output(/Saved/).to_stdout
+    expect(File.read(path)).to include('t: { cut: [6000, over: :section] }')
+    load path
+    r = MB::Sound::Take::Replay.last
+    MB::Sound.seed(5)
+    data = replay(r, [800])
+    diff = (data[0...live.length] - live).abs.max
+    expect(diff).to eq(0), "max difference #{diff}"
+  end
+
   it 'replays a take that ends (players ring out) to where its timeline stops, at any buffer size' do
     # Live in 1000-frame buffers: the timeline stops at the end of the
     # buffer in which the last player ends (bar 2 + 1000 frames), which a
@@ -642,6 +674,21 @@ RSpec.describe(MB::Sound::Take) do
     }.not_to output.to_stderr
     expect(played.call).to eq([[1r, 60], [2r, 60]])
     expect(frames).to be_between(192000, 193600)
+  end
+
+  # (ux-friction-3: `seek 0` is the start, as seek 1, since the
+  # maintainer asked for it back)
+  it 'replays seek 0 as a seek to the start' do
+    r = MB::Sound::Take::Replay.new(bpm: 120, bar_length: 1r, master_gain: 0.5, fade_in: nil, fade_out: nil, rng: nil, ends: 4r) { |rp|
+      rp.line(0r, [0r], 'bg :x, 0.1.constant')
+      rp.line(2r, [2r], 'seek 0')
+    }
+    seeks = nil
+    allow(MB::Sound::Session).to receive(:new).and_wrap_original { |m, *a, **k|
+      m.call(*a, **k).tap { |s| seeks = -> { s.journal.changes.select { |c| c.kind == :seek }.map(&:to_s) } }
+    }
+    r.render(MB::Sound::NullOutput.new(channels: 2, sleep: false), tail: 0)
+    expect(seeks.call).to eq(['seek 1 landed 3:1'])
   end
 
   it 'stops a replay that never reaches its end after its length plus EXTRA_SECONDS, or MAX_SECONDS' do

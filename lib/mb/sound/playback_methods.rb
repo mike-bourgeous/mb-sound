@@ -161,8 +161,8 @@ module MB
       # for its main out) route a named player (see BusMethods).
       #
       # On a track (see ArrangementMethods#track), a clip or generator
-      # entry is its clip at the defaults: `bg :drums, L.gen.techno_beat`
-      # plays `L.gen.techno_beat.()` on the track, steered by the track's
+      # entry is its clip at the defaults: `bg :drums, L.gen.beat.techno`
+      # plays `L.gen.beat.techno.()` on the track, steered by the track's
       # knobs (:"drums/energy"; a new player auditions the entry, as #play
       # does).
       #
@@ -187,11 +187,27 @@ module MB
         # A library entry given to a track: a clip or generator entry is its
         # clip at the defaults (as `track :x, entry` takes it), played on
         # the track; instruments and effects say how to change the track's
-        # (lesson-fixes-1: `bg :drums, L.gen.techno_beat` played the 8-bar
-        # audition in place of the track; `play` and new players keep it)
+        # (lesson-fixes-1: `bg :drums, L.gen.beat.techno` played the 8-bar
+        # audition in place of the track; `play` keeps it)
         if sound.is_a?(Library::Entry) && name && Session.current.arrangement.tracks[name]
           sound = Internal.entry_for_track('bg', name, sound)
           return MB::Sound.live_error(sound) if sound.is_a?(Exception)
+        end
+        # A generator entry with no track of that name plays its clip on its
+        # instrument without an end (beat-halftime-1, 2026-11-22: `bg
+        # :drums, L.gen.beat.halftime` after a new output had dropped the
+        # track played the 8-bar audition and stopped; `play entry` keeps
+        # the audition), saying what it plays on, and naming a track of
+        # that name that a new output left behind (his `latency` after
+        # `panic` had dropped the set unseen)
+        notice = MB::Sound.live? && Session.context&.session.nil? && !Session.context&.batch
+        gone = notice && name.is_a?(Symbol) && !Session.current.arrangement.tracks[name] && Session.left_behind.include?(name)
+        gone_text = gone ? ": it went with the old session when latency or use_output changed the output" : ''
+        if sound.is_a?(Library::Entry) && sound.kind == :generator
+          sound = Library::Generators.endless(sound, name)
+          $stdout.puts "\e[2mbg#{" #{name.inspect}" if name}: #{sound.description}, as a player#{" (no track #{name.inspect}#{gone_text})" if name}; #{sound.note}\e[0m" if notice
+        elsif gone
+          $stdout.puts "\e[2mbg #{name.inspect}: a player, not a track #{name.inspect}#{gone_text}\e[0m"
         end
         sound = Sequence::Clocked.apply(sound, clock) if clock
         raise ArgumentError, ':all is reserved for stop(:all)' if name == :all
@@ -389,6 +405,9 @@ module MB
             disarmed = session.arrangement.panic_disarm
           }
         }
+        # MIDI out: all notes off now on every destination (the stopped
+        # tracks' own note-offs follow on their stop frame)
+        MIDI::Destination.panic_all
         return stops if Session.context&.batch
 
         stopped = Array(stops).grep(Session::Journal::Entry)
@@ -742,7 +761,8 @@ module MB
           example = name.length == 1 ? "swap #{name.keys.first.inspect}, clip" : 'swap :bass, clip'
           return MB::Sound.live_error(ArgumentError.new("swap takes the player's name first, then its new clip: #{example} (a Hash in parentheses is the name; old => new pairs follow the name: swap :drums, beat => beat2)"))
         end
-        if (e = Internal.stream_for_track_error('swap', name, clips, any: true) || Internal.clip_name_for_track_error('swap', name, clips))
+        if (e = Internal.sound_for_name_error('swap', name) || Internal.stream_for_track_error('swap', name, clips, any: true) ||
+                Internal.clip_name_for_track_error('swap', name, clips))
           return MB::Sound.live_error(e)
         end
         raise ArgumentError, 'Pass a new clip or old => new pairs, not both' if clips && !pairs.empty?
@@ -770,10 +790,23 @@ module MB
         # same launch point (gen-ux-1, the maintainer, 2026-11-17: "swap on
         # a track that's not playing should act like bg instead of
         # displaying an error"; since ux-notes-1 it was an error naming bg)
+        # A track whose one-shot clip has ended while its tail still rings
+        # (or will have when the swap lands) starts the same way
+        # (ux-friction-3, the maintainer's `swap :drums, euclid(8, 8).loop`
+        # after a one-bar euclid had played once: "this is really effing
+        # annoying"; Session#swap raises ClipsOver there).
         session = Session.current
-        if name.is_a?(Symbol) && (track = session.arrangement.tracks[name]) && !session.playing_after_queue?(name)
+        track = name.is_a?(Symbol) && session.arrangement.tracks[name]
+        stopped = track && !session.playing_after_queue?(name)
+        ended = track && !stopped && !clips.is_a?(Hash) &&
+                session.swap_unheard?(name, at: point, start_time: point.given? ? nil : Session.context&.time)
+        if stopped || ended
           unless clips.is_a?(Hash)
-            $stdout.puts "swap #{name.inspect}: #{name.inspect} wasn't playing; starting it with the new clip (as bg #{name.inspect}, clip)" if MB::Sound.live?
+            if MB::Sound.live?
+              why = ended ? "#{name.inspect}'s clip had ended (only its tail rang); starting it again" : "#{name.inspect} wasn't playing; starting it"
+              $stdout.puts "swap #{name.inspect}: #{why} with the new clip (as bg #{name.inspect}, clip)"
+            end
+            plays_once_note(name, clips)
             return bg(name, given, at: point.given? ? point : nil)
           end
           if track.patch? && !session.resumable?(name)
@@ -795,6 +828,7 @@ module MB
           end
           return bg(name, given, at: point.given? ? point : nil)
         end
+        plays_once_note(name, clips)
         session_command(name, label: "swap #{name.inspect}", kind: :swap) { |session, time|
           session.swap(name, clips, at: point, start_time: point.given? ? nil : time)
           # A track remembers the swapped clip, as `bg :track, clip` does
@@ -805,6 +839,18 @@ module MB
           end
           name
         }
+      end
+
+      # A dim line when #swap puts a one-shot clip on player +name+: it
+      # plays once and the player ends with its tail (ux-friction-3: the
+      # maintainer's `swap :drums, euclid(8, 8)` replaced a loop, played
+      # one bar, and went quiet; his next swap then met the ended clip).
+      private def plays_once_note(name, clip)
+        return unless MB::Sound.live? && clip.is_a?(Sequence::Clip) && !clip.looping? && !Session.context&.batch
+
+        text = clip.to_s
+        text = "#{text[0, 37]}..." if text.length > 40
+        $stdout.puts "\e[2mswap #{name.inspect}: #{text} plays once (a one-shot clip; .loop repeats it)\e[0m"
       end
 
       # The console side of #swap for a rack slot (see Session#swap_slot).

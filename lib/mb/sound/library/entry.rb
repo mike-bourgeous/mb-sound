@@ -160,10 +160,22 @@ module MB
 
         # The head path that reaches it: "L.fx.hall" when the name is
         # unique under its head, else with the family ("L.fx.reverb.plate").
+        # An entry of a family that is a sub-namespace of its head (see
+        # Family) always prints with its family: "L.gen.beat.rock".
         def head_path(index = Library.index)
           head = HEADS.key(kind)
+          return [*(head ? ['L', head] : ['L.all']), family, name].join('.') if namespaced?
           same = index.entries(kind: kind).count { |e| e.name == name }
           [*(head ? ['L', head] : ['L.all']), (family if same > 1 && family != :preset), name].compact.join('.')
+        end
+
+        # True when the entry's family is a sub-namespace of its head
+        # (L.gen.beat: see Family's +namespace+): its name lives inside
+        # the family, so under the head alone the name narrows like a tag
+        # (`L.gen.rock` is the one entry left, `L.gen.techno` the beat and
+        # the entries tagged techno).
+        def namespaced?
+          Library.families[family]&.namespace || false
         end
 
         # How to chain effects +a+ then +b+ (head paths), for the errors of
@@ -180,6 +192,22 @@ module MB
 
           b = args.first.is_a?(Entry) ? args.first.head_path : 'L.fx.hall'
           raise ArgumentError, "#{head_path}.then takes a block, not an argument: #{Entry.chain_hint(head_path, b)}"
+        end
+
+        # Kernel#loop with a block; without one, a generator entry itself,
+        # since its clip loops already (beat-halftime-1: the maintainer's
+        # `L.gen.beat.pop.call.loop` guess, after bg of an entry with no
+        # track stopped at 8 bars; `L.gen.beat.pop.loop` raised Kernel's
+        # "private method"), saying so in the console; other entries raise
+        # with what loops.
+        def loop(&block)
+          return super if block
+          if kind == :generator
+            $stdout.puts "\e[2m#{head_path} loops already (a generator has no end)\e[0m" if MB::Sound.live?
+            return self
+          end
+          hint = kind == :clip ? "#{head_path}.call.loop loops its clip" : "#{head_path} is #{label}; clips loop (seq(C3, E3).loop)"
+          raise NoMethodError, "#{head_path}.loop: #{hint}"
         end
 
         # A Proc calling the entry (`sig.then(&L.fx.hall)`).
@@ -274,8 +302,14 @@ module MB
       # track knobs), so `glass` under L.inst is the struck wine glass
       # (maintainer, 2026-10-31: "Struck glass wins"); `sq80(:glass)` and
       # the family's own lookups still read the class presets.
-      Family = Data.define(:name, :kind, :about, :owner, :apply, :code, :document) do
-        def initialize(name:, kind:, about: nil, owner: nil, apply: nil, code: nil, document: nil)
+      #
+      # +namespace+ (true or false) makes the family a sub-namespace of its
+      # head (drum-gen-1, the maintainer's "families: L.gen.beat.rock"):
+      # its entries print as `L.gen.beat.rock`, `L.gen.beat.` lists them,
+      # and their names don't clash with tags under the head (see
+      # Entry#namespaced?).
+      Family = Data.define(:name, :kind, :about, :owner, :apply, :code, :document, :namespace) do
+        def initialize(name:, kind:, about: nil, owner: nil, apply: nil, code: nil, document: nil, namespace: false)
           raise ArgumentError, "Unknown entry kind #{kind.inspect} (#{KINDS.join(', ')})" unless KINDS.include?(kind)
           super
         end

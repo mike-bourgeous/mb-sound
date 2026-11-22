@@ -241,7 +241,7 @@ module MB::Sound
     # (gain inside the chain: master_gain comes after it, past the limiter)
     master { |mix| (mix * 2.5.db).compress(threshold: -16.db, ratio: 2.5, attack: 10.ms, release: 120.ms, makeup: 2.db).limit(ceiling: -1.db) }
 
-    track(:beat, q: 1) { |c| funk_beat(loop_church_drum_source(c)) }
+    track(:beat, q: 1) { |c| funk_kit(loop_church_drum_source(c)) }
     track(:perc, q: 1) { |c| funk_perc(loop_church_drum_source(c)) }
     track(:bass, q: 1) { |c| funk_bass_voice(c) }
     track(:bass_b, q: 1) { |c| funk_bass_voice(c) }

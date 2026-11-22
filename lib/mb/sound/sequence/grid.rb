@@ -20,13 +20,25 @@ module MB
           maracas: 70, claves: 75,
         }.freeze
 
+        # Drum roles beyond GM's names that acoustic kits play (drum-gen-1):
+        # hat and cymbal articulations, chokes, and tom rim hits, each on a
+        # key above GM's drum keys, which a kit maps to its own key
+        # (MB::Sound::Drums::Roles: a kit without the role plays its
+        # fallback, Roles::FALLBACK).
+        EXTENDED_DRUMS = {
+          half_open_hat: 100, hat_swish: 101, ride_shank: 102, crash3: 103,
+          crash_choke: 104, crash2_choke: 105, ride_choke: 106,
+          rack_tom_edge: 107, floor_tom_edge: 108,
+        }.freeze
+
         # More row names: drum machine voices and short names, with the GM
-        # notes they play (see MB::Sound::Drums::TR808::GM_MAP).
+        # notes they play (see MB::Sound::Drums::TR808::GM_MAP), and the
+        # EXTENDED_DRUMS roles.
         ROW_ALIASES = {
           bd: 36, sd: 38, rim: 37, cp: 39, ch: 42, hh: 42, oh: 46, cb: 56, cy: 49, cymbal: 49,
           lt: 45, mt: 47, ht: 50, conga: 63, high_conga: 62, mid_conga: 63,
           lc: 64, mc: 63, hc: 62, clave: 75,
-        }.freeze
+        }.merge(EXTENDED_DRUMS).freeze
 
         # Step characters.  Values are a Hash of Seq::Step attributes for a
         # hit (merged over the defaults), :rest for an empty step, :tie for a

@@ -28,6 +28,9 @@ default:
   file: 20
   example: 8
 files:
+  spec/lib/mb/sound/library/generators_endless_melodic_spec.rb:
+    file: 30
+    reason: every melodic L.gen entry (16) launched on a track and with no track for 40 bars at 960 BPM in non-realtime Sessions, counting note-ons (the guard for generators that end; the dense harp, chime, and koto entries render most of it); 15 s alone at load 12 and 29.7 s at load 30 on the 7950X container against the default 20 (beat-halftime-1, 2026-11-22)
   spec/bin/sound_nudge_spec.rb:
     example: 14
     reason: one real bin/sound.rb in a pty with a track playing (about 2 s of startup), a track line defined, recalled, and nudged three times with each step landing a bar later at 960 bpm, three console probes, undo landing, and a failing line; 7.8 s at PARALLEL=4 on the busy 7950X container against the default 8 (repl-scrub-1, 2026-11-21)

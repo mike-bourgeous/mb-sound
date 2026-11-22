@@ -41,6 +41,7 @@ module QuickSelection
     spec/lib/mb/sound/sample_stretch_attack_sweep_spec.rb
     spec/lib/mb/sound/held_voice_pitch_spec.rb
     spec/lib/mb/sound/sequence/transform_parity_spec.rb
+    spec/lib/mb/sound/library/generators_endless_spec.rb
     spec/lib/mb/sound/graph_node/dsl_shadowing_spec.rb
     spec/lib/mb/sound/name_clash_guard_spec.rb
     spec/lib/mb/sound/ui/term_integration_spec.rb

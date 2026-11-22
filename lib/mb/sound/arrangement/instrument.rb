@@ -71,7 +71,7 @@ module MB
             raise Error, "track #{track.inspect}, #{name.inspect}: #{hits.length} instruments are named #{name} (#{paths.join(', ')}): give one, e.g. track #{track.inspect}, #{paths.first}"
           end
           names = Library.index.entries.select { |e| KINDS.include?(e.kind) }.map(&:name).uniq
-          raise Error, "track #{track.inspect}, #{name.inspect}: no instrument #{name}#{did_you_mean(name, names)} (find '#{name}' searches the library; L.inst lists instruments)"
+          raise Error, "track #{track.inspect}, #{name.inspect}: no instrument #{name}#{Library::Heads.renamed_hint(nil, name)}#{did_you_mean(name, names)} (find '#{name}' searches the library; L.inst lists instruments)"
         end
 
         # +entry+ if a track can play it from its clip (an instrument or
@@ -162,13 +162,23 @@ module MB
         # track).  Such a track is a patch track, as
         # `track(:drums) { |c| kit.sampler(c, voices: 8) }`, and prints
         # back as `track :drums, sf2(...)` (#voice_of; SetWriter).
+        #
+        # A MIDI::Destination (`midi_out('KRONOS', channel: 1)`) is a voice
+        # too: its patch sends the track's clips to the synth.
         def voice?(value)
-          value.is_a?(Sampler::Instrument) || value.is_a?(Sampler::SF2::Font)
+          value.is_a?(Sampler::Instrument) || value.is_a?(Sampler::SF2::Font) || value.is_a?(MIDI::Destination)
         end
 
         # The patch playing a track's clips on sampler instrument +value+
         # (see #voice?): Playable's voices (one for split instruments).
         def voice_patch(value)
+          if value.is_a?(MIDI::Destination)
+            patch = ->(clip) { value.play(clip) }
+            patch.define_singleton_method(:track_voice) { value }
+            patch.define_singleton_method(:source_location) { nil }
+            patch.define_singleton_method(:inspect) { "#<patch #{value}>" }
+            return patch
+          end
           inst = value.is_a?(Sampler::SF2::Font) ? value.instrument : value
           voices = inst.split ? 1 : Playable::VOICES
           patch = ->(clip) { inst.sampler(clip, voices: voices) }

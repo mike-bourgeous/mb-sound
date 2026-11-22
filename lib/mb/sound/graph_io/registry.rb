@@ -147,7 +147,7 @@ module MB
         # with_seed: a block whose random draws start from a given seed
         # (MB::Sound.with_seed; fit-patch-2: fits print it around a voice),
         # walked as document code.)
-        TOP_EXTRA = (Set[:per_voice, :per_channel, :per_harmonic, :scale, :tones, :weights, :harmony, :markov, :lsystem, :knob, :cc, :modes, :breakbeat, :with_seed] |
+        TOP_EXTRA = (Set[:per_voice, :per_channel, :per_harmonic, :scale, :tones, :weights, :harmony, :markov, :lsystem, :knob, :cc, :modes, :breakbeat, :with_seed, :midi_out] |
                      MB::Sound::Rack::CONSTRUCTORS).freeze
 
         # Methods whose blocks build graphs (run once per call as document
@@ -183,7 +183,7 @@ module MB
 
         NOTE_NAME = /\A[A-G][sb]?\d+\z/
 
-        # Library heads documents may walk (`L.gen.techno_beat(seed: 3)`,
+        # Library heads documents may walk (`L.gen.beat.techno(seed: 3)`,
         # `generate L.flow.techno_chain.(), bars: ...`): the generators'
         # (lib-gen-1; recipes print their builds as these calls).
         LIBRARY_HEADS = Set[:gen, :flow].freeze

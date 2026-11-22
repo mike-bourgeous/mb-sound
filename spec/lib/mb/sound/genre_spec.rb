@@ -216,6 +216,32 @@ RSpec.describe(MB::Sound::Genre, :aggregate_failures) do
       expect(t.scenes).to eq({ a: { a: :x }, b: { a: :x, b: :x } })
     end
 
+    # form-knobs-1: a role's track hash names its clip by name, like a
+    # role's plain value, and passes its knob values on
+    it 'resolves the clip of a track hash and sets up its knob values' do
+      t = in_sound(<<~RUBY)
+        Genre.template(:spec_hash) do
+          tempo 120
+          flow { a 1; b 1 }
+          clip :x, seq(C3).n4.loop
+          role :lead, :tr808
+          scene :a, lead: { clip: :x, level: 0.5 }
+          scene :b, lead: { level: [1, over: :section] }
+        end
+      RUBY
+      expect(t.scene(:a)).to eq({ lead: { clip: t.clips[:x], level: 0.5 } })
+      expect(t.scene(:b)).to eq({ lead: { level: [1, { over: :section }] } })
+      expect(in_sound(t.to_ruby)).to eq(t)
+      expect {
+        genre.template(:spec_bad) { tempo 120; flow { a 1 }; role :lead, :tr808; scene :a, lead: { clip: :nope } }
+      }.to raise_error(ArgumentError, /plays :nope on :lead, which is no kit or clip/)
+
+      t.setup
+      set = MB::Sound::Session.current.arrangement
+      expect(set.scenes[:a].values).to eq({ lead: t.clips[:x], "lead/level": 0.5 })
+      expect(set.scenes[:b].values).to eq({ lead: :keep, "lead/level": [1, { over: :section }] })
+    end
+
     it 'shortens the form by a power of two, at least a bar a section, with fills and bars: params' do
       t = genre[:dnb]
       s = t.short(60)

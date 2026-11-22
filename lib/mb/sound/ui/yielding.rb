@@ -82,6 +82,20 @@ module MB
             nil
           end
 
+          # Yielders stop following +thread+ if it is the followed render
+          # thread (Session#close, after its render thread ended).  The
+          # hook drops yielders that end, but the hook and kicker stopped
+          # only on a later join or leave: a screen stopped while the
+          # Session's scheduler still yielded left the closed Session's dead
+          # render thread followed, and the kicker running with no yielder
+          # (fast_ui_spec's GVLYield example after live_threads_spec, merge
+          # train 2026-11-22).
+          def unfollow(thread)
+            return nil unless thread && available? && FastUI::GVLYield.priority.equal?(thread)
+            FastUI::GVLYield.priority = nil
+            nil
+          end
+
           # True while the hook runs (a render thread and a yielder set).
           def active? = available? && FastUI::GVLYield.active?
 

@@ -249,9 +249,14 @@ module MB
       # raising the energy only adds hits and `hold: 2` plays each random
       # bar twice.  +groove+ is the velocity per step (an Array, cycled, or
       # a lambda of the step's 0...1 position), +swing+ (0.5 straight to
-      # 0.75) delays odd steps, +humanize+ varies velocities.  A knob for
-      # +energy+ or +swing+ is read once per cycle at its decision point,
-      # +lead:+ (one beat) before it (Generative::Steer).
+      # 0.75) delays odd steps, +humanize+ varies velocities.  A knob or
+      # other param for +energy+ or +swing+ is read once per beat, for the
+      # beat's start (a square LFO on the energy plays its own bars or
+      # beats; Generative::Steer): +decide:+ sets how often (:beat by
+      # default, :step, :bar, :cycle, or a length like 1.n8), +lead:+ how
+      # long before each read the values must be known (0 by default: a
+      # turn lands on the next beat; values known ahead, like LFOs and
+      # ramps, are read for the beat's start whatever the lead).
       #
       #     knob :energy, 0.4
       #     groove = beats(16, hold: 2, swing: 0.54, energy: knob(:energy), seed: 5) do
@@ -262,9 +267,10 @@ module MB
       #       fill every: 8, snare: 0.7, low_tom: 0.3
       #     end
       #     bg :drums, tr909(groove)
-      #     turn :energy, 0.9, over: 8     # a build, a cycle at a time
+      #     turn :energy, 0.9, over: 8     # a build, a beat at a time
+      #     turn :energy, 2.bars.lfo.square.at(0.1..1)   # busy bar, sparse bar
       def beats(steps = 16, step: 1.n16, hold: 1, over: 8, energy: 0.5, swing: 0.5, groove: Generative::Beats::GROOVE, humanize: 0.08,
-                seed: nil, align: :timeline, lead: nil, &block)
+                seed: nil, align: :timeline, lead: 0, decide: :beat, &block)
         raise ArgumentError, 'beats needs a block of rows: beats(16) { kick [1, 0, 0, 0] * 4 }' unless block
         raise ArgumentError, "beats' steps is an Integer from 1 to 256 (got #{steps.inspect})" unless steps.is_a?(Integer) && steps.between?(1, 256)
         step = Generative.length_of(step, :step)
@@ -278,6 +284,11 @@ module MB
         end
         raise ArgumentError, "beats' groove: is an Array of velocities or a lambda of the step's position (got #{groove.inspect})" unless groove.respond_to?(:call) || (groove.is_a?(Array) && !groove.empty?)
         raise ArgumentError, "beats' humanize: is from 0 to 1 (got #{humanize.inspect})" unless humanize.is_a?(Numeric) && humanize.between?(0, 1)
+        # (how often steered values are read: a beat by default, capped at
+        # the cycle so short cycles read once; :step is the step length)
+        decide = step if decide == :step
+        decide = :cycle if decide == :beat && step * steps <= 1r / 4
+        Generative::Steer.unit_of(decide, step * steps, 'beats')
 
         builder = Generative::Beats::Builder.new(steps, step * steps)
         builder.instance_exec(&block)
@@ -298,7 +309,7 @@ module MB
         params = { energy: energy, swing: swing }.select { |_, v| !v.respond_to?(:call) && MIDI::Param.param?(v) }
         unless params.empty?
           return Sequence::Clip.generate(b.length, values: b.values, seed: seed, name: "beats(seed: #{seed})", align: align, reach: reach,
-            lead: lead, params: params) { |cycle, dice, **v| b.events(cycle, dice, **v) }
+            lead: lead, decide: decide, params: params) { |cycle, dice, **v| b.events(cycle, dice, **v) }
         end
         Sequence::Clip.generate(b.length, values: b.values, seed: seed, name: "beats(seed: #{seed})", align: align, reach: reach) { |cycle, dice|
           b.events(cycle, dice)

@@ -55,10 +55,10 @@ module MB
         @rom_lock = Mutex.new
 
         # General MIDI notes per voice.
-        GM_MAP = {
+        GM_MAP = Roles.extend_gm_map({
           kick: [35, 36], rimshot: [37], snare: [38, 40], clap: [39], closed_hat: [42, 44], open_hat: [46],
           low_tom: [41, 43, 45], mid_tom: [47, 48], high_tom: [50], crash: [49, 52, 55, 57], ride: [51, 53, 59],
-        }.freeze
+        })
 
         module_function
 

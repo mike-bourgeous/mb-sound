@@ -38,7 +38,7 @@ module MB
           # clip length and origin).
           def request(generator, cycle, data = nil)
             r = nil
-            key = [generator, cycle]
+            key = [generator, cycle, data && data[2]]
             @mutex.synchronize {
               r = @runners.last
               return false if r.nil? || @pending.key?(key)

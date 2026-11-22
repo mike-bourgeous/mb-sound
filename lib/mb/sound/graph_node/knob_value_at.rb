@@ -16,6 +16,14 @@ module MB
         #   (a knob following a node or another knob) is never extrapolated:
         #   while following, the answer is the latest value; a follow queued
         #   before the position answers the value before it starts.
+        # - Except a follow of something the timeline position alone decides
+        #   (a tempo LFO, constants, sums and products of them; Follow's
+        #   +pure+): at any position from its start, rendered or ahead, the
+        #   answer is the LFO's value at that position, exactly (not the
+        #   sample on the frame before it, which for a square LFO flipping
+        #   on a bar line that falls between samples is still the old value;
+        #   beats-timing-1).  Such answers aren't decisions: nothing to
+        #   remember or log, since they never change.
         # - Answers for future positions are decisions: the knob remembers
         #   each one (asking again for the same position gives the same
         #   value, even after a later turn), and the Session logs them so a
@@ -47,6 +55,11 @@ module MB
 
             frame ||= frame_of_position(pos)
             snap = @lock.synchronize {
+              if pos && frame && (seg = @segment).is_a?(Follow) && seg.pure && frame >= seg.start && @pending.none? { |p| p.start <= frame }
+                # (a timeline-pure follow: its value at the position, unless
+                # a turn queued in the Session lands before it)
+                return pure_value(seg, pos) if frame < @next_frame || queued_segments(pos, frame).empty?
+              end
               if frame && @span_frame && frame >= @span_frame && frame < @span_frame + @span_count
                 out = @span_out
                 return out.is_a?(Numo::NArray) ? out[frame - @span_frame].to_f : out.to_f
@@ -86,6 +99,14 @@ module MB
           end
 
           private
+
+          # The value of timeline-pure follow +seg+ (see Follow) at timeline
+          # position +pos+: the followed tree counted from the follow's
+          # landing, limited to the range like rendered follows.
+          def pure_value(seg, pos)
+            v = MIDI::Param::Graph.eval(seg.pure, pos - seg.time).to_f
+            @spec.clamp? ? v.clamp(@spec.range.begin.to_f, @spec.range.end.to_f) : v
+          end
 
           # Remembers a decision for +pos+ (see ValueAt) and logs it in the
           # Session for takes.  Returns +value+.

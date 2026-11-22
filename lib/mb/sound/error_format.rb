@@ -47,7 +47,14 @@ module MB
           end
         end
         console = e.is_a?(NameError) && (e.receiver.equal?(MB::Sound) rescue false)
-        if console && !e.is_a?(NoMethodError) && (hint = session_name_hint(e.name))
+        if console && CLEAR_WORDS.include?(e.name)
+          # (bare words and calls alike: `clear_all`, `new_set(...)`)
+          suggestions.replace([e.name == :reset ? "#{CLEAR_SET}, or pry-reset (Pry's reset of the console itself)" : CLEAR_SET])
+        elsif console && !e.is_a?(NoMethodError) && e.name == :session
+          # (`session.clear`, `session.reset`: the console has no
+          # `session` variable)
+          suggestions.replace(["Session.current (the console's session; clear_set empties its set: #{CLEAR_SET[/\((.*)\)/, 1]})"])
+        elsif console && !e.is_a?(NoMethodError) && (hint = session_name_hint(e.name))
           suggestions.unshift(hint)
         elsif e.is_a?(NoMethodError) && (e.receiver.is_a?(Symbol) rescue false) && MB::Sound.respond_to?(e.name) && !Symbol.method_defined?(e.name)
           # (ux-notes-1: the maintainer's `swap :growl. seq(...)`, a period
@@ -58,6 +65,8 @@ module MB
           # nowhere)
           suggestions.replace([hint.call(*e.args.first(1))])
         elsif e.is_a?(NoMethodError) && (hint = node_guess(e) || entry_guess(e) || value_guess(e))
+          suggestions.replace([hint])
+        elsif e.instance_of?(ArgumentError) && (hint = arity_guess(e))
           suggestions.replace([hint])
         end
         message = message.sub(/ for module MB::Sound\z/, '').sub(/ for module MB::Sound(?=\n)/, '')
@@ -82,6 +91,19 @@ module MB
           "or ui.note '...' (a note about what you hear, with the screen)"
       }
       GUESSES = { attach: CLIP_ON_TRACK, note: NOTE_ON_TRACK }.freeze
+
+      # Console words for emptying the set, and what does it (ux-friction-3:
+      # the maintainer tried `clear`, `reset`, `session.clear`, `clear
+      # :form`, `Session.clear`, "a few others", then asked "How do I
+      # clear everything in form/track/bg/etc.?").  Also the methods
+      # people call on a Session for it (#value_guess).
+      CLEAR_SET = 'clear_set (stops everything and takes out the tracks, scenes, flow, knobs, buses, and racks; ' \
+                  'tempo, key, and master gain stay; undo puts it back)'
+      CLEAR_WORDS = %i[
+        reset clear_session clear_all clear_everything clear_tracks clear_form clear_flow clear_players reset_session
+        reset_all reset_set new_set new_session empty_set start_over wipe wipe_set clearset
+      ].freeze
+      SESSION_CLEAR = %i[clear reset clear_set clear_all reset_all empty wipe new_set clear!].freeze
 
       # Method names people reach for on graph nodes, and what they meant
       # (feedback-api-guesses: the omnibus19 name test's runners-up for
@@ -113,6 +135,32 @@ module MB
             'which has no transpose) or v.hz.vibrato(5.5, depth: 30.cents) (vibrato that stays a pitch)'
         },
       }.freeze
+
+      # Methods called without the argument they need, by the method's
+      # name and the end of its file's path, and what was meant (Ruby's
+      # "wrong number of arguments (given 0, expected 1)" names neither
+      # the method nor what goes in): [name, path pattern] => suggestion.
+      # (ux-friction-3: the maintainer's `kit = sf2(path).sampler(voices:
+      # 8)`, then `help sampler` and four show-docs to find its arguments)
+      # (Procs: Playable may load after this file)
+      SAMPLER_SOURCE = -> {
+        'kit.sampler(clip, voices: 8) (sampler plays a source: a clip, midi, or a MIDI file); ' \
+          "on a track, track :drums, kit already plays the kit's clips on #{Playable::VOICES} voices, " \
+          'and track(:drums) { |c| kit.sampler(c, voices: 4) } picks the voices'
+      }
+      ARITY_GUESSES = {
+        [:sampler, %r{/sampler/(?:sf2|instrument)\.rb\z}] => SAMPLER_SOURCE,
+      }.freeze
+
+      # The ARITY_GUESSES suggestion for Ruby's arity ArgumentError +e+
+      # (raised at the called method's def line), or nil.
+      def arity_guess(e)
+        return nil unless e.message.match?(/\Awrong number of arguments \(given 0, expected/)
+
+        loc = e.backtrace_locations&.first or return nil
+        ARITY_GUESSES.each { |(name, path), hint| return hint.call if loc.base_label == name.to_s && loc.path.to_s.match?(path) }
+        nil
+      end
 
       # The NODE_GUESSES suggestion for NoMethodError +e+ on a graph node,
       # or nil.
@@ -147,9 +195,9 @@ module MB
 
       # A clip method (transpose, echo, ...) on a generator or clip entry
       # that hasn't been called (the maintainer's take, 2026-11-21: `bg
-      # :drums, L.gen.techno_beat.transpose(4)` said "undefined method
+      # :drums, L.gen.beat.techno.transpose(4)` said "undefined method
       # 'transpose' for an instance of MB::Sound::Library::Entry", and
-      # `L.gen.techno_beat.call.transpose(1)` worked): the call that makes
+      # `L.gen.beat.techno.call.transpose(1)` worked): the call that makes
       # the clip, or nil.
       def clip_entry_guess(entry, e)
         return nil unless %i[generator clip].include?(entry.kind) && Sequence::Clip.method_defined?(e.name)
@@ -175,6 +223,8 @@ module MB
         elsif r.is_a?(Sequence::Duration) && Tone::WAVE_TYPES.include?(name)
           d = RubyValue.to_ruby(r)
           "#{d}.lfo.#{name} (the shape comes after .lfo; #{d}.hz.#{name} is a tone at that rate)"
+        elsif (r.is_a?(Session) || r.equal?(Session)) && SESSION_CLEAR.include?(name)
+          CLEAR_SET
         elsif (r.is_a?(UI::Facade) || r.is_a?(UI::Pending)) && %i[warn warning warnings].include?(name)
           # (his `ui.warn`, looking for where warnings show with a screen up)
           'ui.messages (the messages pane, NAV m: warnings from players and threads; the console\'s own commands warn in the REPL) ' \

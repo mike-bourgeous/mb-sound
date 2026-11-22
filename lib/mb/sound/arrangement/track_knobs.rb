@@ -35,9 +35,10 @@ module MB
           # (booms' voice settings and tail level; boom-1)
           boom: ->(_entry) { MB::Sound::Boom::KNOB_PARAMS },
           genre_patch: ->(entry) { MB::Sound::Genre::PATCH_KNOBS.fetch(entry.name, {}).keys },
-          # (generators' ranged params, read once a cycle; the clip, not the
+          # (generators' ranged params, read for each unit they steer; the clip, not the
           # patch, reads them: Library::Generators.track_clip; gen-knobs-1)
           generator: ->(entry) { MB::Sound::Library::Generators.knob_params(entry) },
+          beat: ->(entry) { MB::Sound::Library::Generators.knob_params(entry) },
         }.freeze
 
         module_function
