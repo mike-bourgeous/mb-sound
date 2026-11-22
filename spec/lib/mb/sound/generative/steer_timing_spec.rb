@@ -240,6 +240,25 @@ RSpec.describe('MB::Sound generator steering: when values are read (beats-timing
     expect(steered.steer_units).to eq(4)
   end
 
+  it 'reads per beat by default in every beat of the library\'s family (L.gen.beat)' do
+    # (drum-gen-1's beats are beats entries: merged after this branch, the
+    # train checked the default reaches them; a saw LFO, four energies a bar)
+    lfo = 1.bar.lfo.ramp.at(0.0..1.0)
+    beat_of = ->(list, b) { list.select { |e| e.start >= b * 1r / 4 && e.start < (b + 1) * 1r / 4 }.map { |e| [e.start, e.value, e.velocity] } }
+    MB::Sound::L.gen.beat.names.each do |name|
+      steered = MB::Sound::L.gen.beat.send(name, energy: lfo)
+      expect(steered.steer_units).to eq(4), name.to_s
+      (0..1).each do |cycle|
+        events = steered.events_for(cycle)
+        (0..3).each do |b|
+          e = MB::Sound::MIDI::Param::Graph.eval(lfo, cycle + b * 1r / 4)
+          plain = MB::Sound::L.gen.beat.send(name, energy: e).events_for(cycle)
+          expect(beat_of.(events, b)).to eq(beat_of.(plain, b)), "#{name} cycle #{cycle} beat #{b}"
+        end
+      end
+    end
+  end
+
   describe 'the decide: setting' do
     it 'takes :beat (the default), :step, :bar, :cycle, and lengths, and explains mistakes' do
       MB::Sound::Session.with_context(session: new_session.tap { |s| @s = s }) {
