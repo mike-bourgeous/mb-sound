@@ -29,6 +29,21 @@ RSpec.describe('spec hygiene') do
     end
   end
 
+  # (fixes-17: perf_spec's `wait_until { acks >= 3 }` ran out its 5 s on
+  # every run, silently, and under load the next wait did too, leaving a
+  # nil that failed far from the cause.)  The files with a wait_until of
+  # their own (device and JACK specs) are left to a later round.
+  it 'has no bare wait_until statement (a timeout that goes unnoticed)' do
+    hits = files.flat_map { |f|
+      text = File.read(File.join(root, f))
+      next [] if text.match?(/^\s*def wait_until\b/)
+
+      text.each_line.with_index(1).filter_map { |line, n| "#{f}:#{n}" if line.match?(/^\s*wait_until\s*(\(|\{|do\b)/) }
+    }
+    expect(hits).to eq([]), "#{hits.join("\n")}\na wait whose result nobody reads times out silently; " \
+                            'write wait_until!(what) { } (UIHelpers: raises on timeout) or expect(wait_until { }).to eq(true), why'
+  end
+
   # A constant assigned in a spec file's describe block is a top-level
   # constant: two files using one name warn "already initialized
   # constant" whenever both load (wire-1's SIZES, editability-1's ENTRIES,
