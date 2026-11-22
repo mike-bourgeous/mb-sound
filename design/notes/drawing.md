@@ -64,7 +64,7 @@ What it replaces: `graphviz`/`open_graphviz` (DOT text and a PNG through the sys
 
 ## Questions (racks-v-1) and the maintainer's answers (2026-11-21)
 
-1. Instance graphs or the definition?  "Show me a picture of the two options if they both already exist."  Only the definition drawing existed; racks-v-2 made a text capture of a cheap instance drawing (the definition's boxes with each knob's value as an inline slot, `Plot::Graph.new` with the boxes changed: a few lines, a relayout of ~5 ms for the 17-box dub rack on the Mac, so built off the painter when values change, not per frame) beside the definition's (`/app/workbench/data/ui/work/2026-11-21-racks-v-2-captures/`); not built into the pane.
+1. Instance graphs or the definition?  "Show me a picture of the two options if they both already exist."  Only the definition drawing existed; racks-v-2 made a text capture of a cheap instance drawing (the definition's boxes with each knob's value as an inline slot, `Plot::Graph.new` with the boxes changed: a few lines, a relayout of ~5 ms for the 17-box dub rack on the Mac, so built off the painter when values change, not per frame) beside the definition's (the private UI notes of 2026-11-21-racks-v-2-captures); not built into the pane.
 2. The rack pane in a built-in layout: "yes": the lower half of `ui :session`'s racks column (racks-v-2).
 3. graphviz beside `node.draw`: "retire": done in racks-v-2 (above).
 4. Bus routing drawn by `Plot.graph` instead of a tree: "If it ever supports loops."  It does: forward wires that close a cycle are drawn as feedback (their back edge on its own lane under the boxes; `graph_spec` "draws a cycle among forward wires as feedback"), and bus routing can't loop anyway (`to:`, `feed`, and readers refuse a loop through `live_error`; one that slipped through warns and reads silence; buses.md).  Converting the buses pane is a note for later, not built.
@@ -72,7 +72,7 @@ What it replaces: `graphviz`/`open_graphviz` (DOT text and a PNG through the sys
 
 ## Questions (racks-v-2, for the maintainer)
 
-1. The instance drawing (captures in `/app/workbench/data/ui/work/2026-11-21-racks-v-2-captures/`: `rack_dub_instance.txt` beside `rack_dub_definition_graph.txt`): build it into the rack pane (knob values as an inline slot on each knob box, relaid out off the painter when a value changes), or keep the definition?
+1. The instance drawing (captures in the private UI notes of 2026-11-21-racks-v-2-captures: `rack_dub_instance.txt` beside `rack_dub_definition_graph.txt`): build it into the rack pane (knob values as an inline slot on each knob box, relaid out off the painter when a value changes), or keep the definition?
 2. Image files of drawings (SVG/PNG through Plot's renderers, for the blog and videos), or are `.html`/`.ans` enough?
 3. `ChannelGroup` keeps a per-channel call's members, inputs, per-channel arguments, and argument nodes, which only graphviz read (LiteralBinding reads `bundle`): fold each per-channel call into one box in `Plot.graph` as graphviz did, or drop the unread fields?
 4. Reverb's network inside its box (the old `show_internals:`): draw it in `Plot.graph` later, or leave it gone?

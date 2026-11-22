@@ -220,7 +220,9 @@ RSpec.describe MB::Sound::Library::Generators, 'drum beats', :aggregate_failures
       s2 = MB::Sound::Session.new(realtime: false)
       begin
         MB::Sound::Session.with_context(session: s2) { io.load(text) }
-        expect(io.dump(s2.arrangement, name: 'g')).to eq(text)
+        # (without the saved: stamps: two saves a second apart differ there;
+        # fixes-16, spec_hygiene_spec)
+        expect(io.dump(s2.arrangement, name: 'g').sub(/saved: "[^"]*"/, '')).to eq(text.sub(/saved: "[^"]*"/, ''))
       ensure
         s2.close
       end
