@@ -741,11 +741,17 @@ module MB
 
         `sample.follow` plays a loop in time with the session: its beats
         fill the same span at any tempo, lined up with bar 1 (`align:
-        :launch` counts from the launch), restretched when `bpm` changes.
+        :launch` counts from the launch), restretched when `bpm` changes
+        (live, on a worker thread: the loop plays its `interim:`
+        meanwhile, `:slice` slices at the new tempo by default, `:hold`
+        the old stretch at the new speed, or `:coarse` a quicker
+        vocoder, then crossfades to the new stretch).
         `follow` keeps the pitch: drums with the slice stretch, notes and
         pads with the phase vocoder (`sample.material` decides from name
         words or how noisy it sounds; `stretch: :slice` or `:spectral`
-        to say); `follow(:resample)` lets the pitch follow
+        to say; the vocoder keeps a tone's waveform, `stretch: { mode:
+        :spectral, lock: :peaks }` for its plain phases, about half
+        the time per restretch); `follow(:resample)` lets the pitch follow
         the tempo like a varispeed.  `.stretch(r, mode: :slice)` cuts at
         the hits (markers, else onsets, else the 16th grid; `slices:
         :transients` cuts only at attacks, the clear ones and the softer
@@ -832,11 +838,16 @@ module MB
         `.looped`, anything `follow` plays) gets a spectral stretch
         that is a loop itself: read round and round, its end flowing
         into its start (`wrap: true` asks for it, `wrap: false` gives a
-        stretch with its own ends).  `lock: :shape` keeps a tone's
+        stretch with its own ends).  A looped stretch keeps a tone's
         waveform as it stretches (its harmonics in step with each
-        other: what a distortion after it hears); a loop's phases close
-        evenly over the loop, or over `closure_length: 0.5` before its
-        end, or with a pitch change of a few cents (`closure: :shift`).
+        other: what a distortion after it hears; `lock: :shape`, the
+        default for loops, about 3x the time to make; `lock: :peaks`
+        for the plain vocoder's phases, also how unlooped stretches
+        run unless they ask for `lock: :shape`); a loop's phases close
+        over its last half second or so, or evenly over the loop with
+        `lock: :peaks`, or over `closure_length: 0.5` before its end,
+        or with a pitch change of a few cents (`closure: :shift`, with
+        `lock: :peaks`).
         `follow(stretch: { mode: :spectral, live: true })` runs
         the vocoder as the loop plays: any tempo, nothing restretched.
         The vocoder finds the attacks it keeps sharp by itself
@@ -1146,8 +1157,9 @@ module MB
         last is built: "starting: building 4 tracks ...") and `pause` (NAV
         Space) toggles: the bar stops, sounding notes
         release, loops and drones fade out and hold their place, and
-        echoes and reverbs ring out; playing on doesn't retrigger notes
-        (`start resync: true` puts tempo-synced LFOs back on the grid).
+        echoes and reverbs ring out; playing on (`pause` again, `start`,
+        or a bare `resume`) doesn't retrigger notes (`start resync: true`
+        puts tempo-synced LFOs back on the grid).
         `suspend` is the old freeze (silence, nothing renders).  `outro
         in: 4.bars` and `stop :all` end the flow too; `go :scene` during
         it seeks the flow to the next section playing that scene (else the
@@ -1492,11 +1504,22 @@ module MB
         rack plays in several, and `:"dub/space"` turns them all); `share: true` joins the session knob
         `:space`, `follow: :space` maps it onto this knob's range, and
         `.mod(lfo, depth: 0.2)` swings around it.  `rack(:dub).snap :wide`
-        and `recall :"dub/wide", only: [:space]` keep variations.  `help
-        rack(:dub)` shows ports, knobs, and latency; `rack(:dub).draw` draws
-        its inside by rank (its ports at the left), and the rack pane (under
-        the racks in `ui :session`, or `ui.show :rack`) shows the instance
-        the racks pane picked, its knobs, and that drawing.  `save :dub,
+        and `recall :"dub/wide", only: [:space]` keep variations.
+        `sig.slot(:color) { |s| s.softclip }` inside a rack block is a hole
+        you swap while it plays: `swap :"dub/color", arack { |s|
+        s.diode(800) }` lands on the next bar, the old content ringing out
+        (`fade: 1.n8` crossfades, `fade: 0` cuts; undo and takes too).
+        `midi.slot(:keys) { |n| n.synth { |v| ... } }` swaps instruments:
+        notes still sounding stay on the old one for a second (`ring:
+        4.bars` for longer).  A named rack defined with `slot: true`
+        (`arack :dub, slot: true do ... end`) swaps its instances, stopped
+        ones too, when you define it again (`swap :dub, arack { ... }, fade:
+        0` picks the launch point and handover); without it they keep
+        playing as they were built.  `help rack(:dub)` shows ports, knobs,
+        slots, and latency; `rack(:dub).draw` draws its inside by rank (its
+        ports at the left), and the rack pane (under the racks in `ui
+        :session`, or `ui.show :rack`) shows the instance the racks pane
+        picked, its knobs, and that drawing.  `save :dub,
         rack(:dub)` writes a rack document: `preset :dub` gives the rack
         back, `preset :dub, sig: mic` plays it on an input (try the library
         rack `preset :dub_echo`); a saved rack that differs from the
@@ -1508,6 +1531,11 @@ module MB
       example 'a note rack: an anonymous value' do
         wobble = mrack { it.arp(:up, 16).echo(3.n16, 2, pitch: 7) }
         bg :try, seq(A3, C4, E4, G4).n4.loop.then(&wobble).synth { |v| v.hz.triangle.at(-17.db) * v.amp_env(0.005, 0.1, 0.3, 0.1) }.until(1.bar)
+      end
+      example 'a slot: swap part of a rack while it plays' do
+        arack(:try_color) { |sig| sig.slot(:color) { |s| s.softclip(0.2, 0.5) }.lp4(1800) }
+        bg :try, 55.hz.saw.at(-20.db).then(&rack(:try_color)).until(2.bars)
+        swap :"try_color/color", arack { |s| s.diode(600, resonance: 0.7) }, on: :bar
       end
       example 'an effect rack with a sidechain port' do
         arack(:try_pump, side: :audio) { |sig, side:| sig.duck(side, amount: 12.db, threshold: -24.db).softclip }
@@ -2023,7 +2051,8 @@ module MB
         steps by its last written digit (300 -> 301, 0.125 -> 0.126);
         Alt-Shift is a fine step (0.125 -> 0.1251), Ctrl-Alt a coarse one
         (10 steps); Alt-Shift-Left/Right jump between numbers, and Esc then
-        Up/Down works where Alt-arrows don't arrive.  Keys pressed together
+        Up/Down (within half a second) works where Alt-arrows don't arrive;
+        off a number, the first press moves the cursor onto the nearest one.  Keys pressed together
         run the line once; history keeps one entry for the run.
 
         `ui :tiles` (or `:studio`, `:keys`, `:wall`) takes the whole screen:
@@ -2034,7 +2063,10 @@ module MB
         its number jumps straight in (i the REPL, k the keyboard, a the
         clips).  Ctrl-W is NAV for one key: Ctrl-W z zooms and comes back,
         Ctrl-W a goes into the clips, Ctrl-W Ctrl-W swaps between the last
-        two panes, Ctrl-W Ctrl-] stays in NAV.  F2 or
+        two panes, Ctrl-W Ctrl-] stays in NAV.  NAV Alt-arrows swap the
+        focused pane with the one that way (again: on across; u puts it
+        back); `ui.swap :left` from the console, or `ui.swap :tracks,
+        :knobs` by name.  F2 or
         `keys` is the keyboard, Ctrl-Z hides the tiles while the set plays
         on (`fg` brings them back, `jobs` lists what runs).
 
@@ -2152,7 +2184,7 @@ module MB
       section do |d|
         # (The pane catalog, ui.panes: ux-1 r3 item 40)
         d.heading('Panes  (ui.panes; ui.list: what is on screen; ui.size)')
-        d.rows(UI.pane_catalog.entries.map { |e| [[e.name, *e.aliases].map(&:inspect).join(' '), "#{e.description} (#{e.open})"] }, max_label: 12, wrap: true)
+        d.rows(UI.pane_catalog.entries.map { |e| [e.name.inspect, "#{"(also #{e.aliases.map(&:inspect).join(', ')}) " unless e.aliases.empty?}#{e.description} (#{e.open})"] }, max_label: 12, wrap: true)
         d.heading('Sizes  (one decision per terminal size: UI::Density)')
         d.rows(UI::Density.table.map { |t| t.split(': ', 2) }, max_label: 20)
       end

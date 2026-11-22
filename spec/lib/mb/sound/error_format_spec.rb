@@ -71,6 +71,33 @@ RSpec.describe(MB::Sound::ErrorFormat) do
       expect(cab.then { |x| x.name }).to eq(:cabinet)
     end
 
+    # followups-1: the maintainer's `fx :drums, L.fx.circle(mix: 0.5)` and
+    # `L.fx.circle(dry: -3.db, wet: -6.db)` said "wrong number of arguments
+    # (given 1, expected 2)"
+    it 'says an effect entry takes the signal first, with its settings in the spellings that work' do
+      circle = MB::Sound::Library.index.lookup(:phaser, :circle)
+      expect { circle.call(mix: 0.5) }.to raise_error(ArgumentError,
+        /\AL\.fx\.circle takes the signal first: sig\.then \{ L\.fx\.circle\.\(it, mix: 0\.5\) \}, or on a track fx :track, ->\(s\) \{ L\.fx\.circle\.\(s, mix: 0\.5\) \}.*sig\.blend\(0\.5\)/)
+      expect { circle.call(dry: -3.db, wet: -6.db) }.to raise_error(ArgumentError, /L\.fx\.circle\.\(s, dry: -3\.db, wet: -6\.db\)/)
+      # (the spellings it gives work)
+      sig = 220.hz.saw
+      expect(circle.(sig, mix: 0.5)).to be_a(MB::Sound::GraphNode)
+      expect(sig.blend(0.5) { it.then(&circle) }).to be_a(MB::Sound::GraphNode)
+    end
+
+    # (the maintainer's take, 2026-11-21: `bg :drums, L.gen.techno_beat.transpose(4)`)
+    it 'names .call for a clip method on a generator entry that was not called (ux-friction-2)' do
+      gen = MB::Sound::L.gen.techno_beat
+      e = (gen.transpose(4) rescue $!)
+      expect(described_class.summary(e)).to include('did you mean L.gen.techno_beat.call.transpose(4) (a library generator gives its clip when called; L.gen.techno_beat(...) takes its params)?')
+      e = (gen.echo(3, 1.n32, pitch: 10) rescue $!)
+      expect(described_class.summary(e)).to include('L.gen.techno_beat.call.echo(3, 1.n32, pitch: 10)')
+      e = (gen.frobnicate rescue $!)
+      expect(described_class.summary(e)).not_to include('.call.')
+      e = (MB::Sound::L.fx.reverb.hall.transpose(4) rescue $!)
+      expect(described_class.summary(e)).not_to include('.call.')
+    end
+
     it "points the maintainer's LFO, scale, and note guesses at what exists (ux-friction-1 round 2)" do
       lfo = 2.bars.lfo.ramp
       expect(described_class.summary((lfo.exp rescue $!))).to include('did you mean at(D3.number..B6.number).freq (an LFO swept in notes')

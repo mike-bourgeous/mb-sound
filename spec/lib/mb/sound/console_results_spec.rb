@@ -112,6 +112,38 @@ RSpec.describe('console command results') do
     end
   end
 
+  # followups-1 (the maintainer: "default pry output should not be to
+  # inspect the full ruby object"): the console cuts any result at
+  # Help.result_lines (help/result_print_spec.rb); the look commands' own
+  # results stay within it on a small playing set, so nothing he asks for
+  # is cut
+  describe 'the look commands' do
+    let(:looks) { %i[players tracks scenes knobs mutes changes markers stopped scheduled snaps captures buses racks clocks] }
+
+    it 'return results that print within the console\'s cut' do
+      require 'mb/sound/help'
+      within do
+        MB::Sound.knob(:cut, 900, range: 100..8000)
+        MB::Sound.track(:t1) { |c| c.hz.ramp.filter(:lowpass, cutoff: MB::Sound.knob(:cut)) * c.amp_env }
+        MB::Sound.track(:t2) { |c| c.hz.sine * c.amp_env }
+        MB::Sound.scene(:a, t1: MB::Sound.seq(MB::Sound::A2, MB::Sound::C3).n8.loop, t2: MB::Sound.seq(MB::Sound::E4).n4.loop)
+        MB::Sound.go(:a)
+        MB::Sound.bg(:pad, 220.hz.triangle.at(-20.db))
+      end
+      run(96000)
+      sizes = {}
+      long = looks.filter_map { |cmd|
+        next unless MB::Sound.respond_to?(cmd)
+        v = within { MB::Sound.public_send(cmd) }
+        n = v.pretty_inspect.lines.length
+        sizes[cmd] = n
+        "#{cmd}: #{n} lines" if n > MB::Sound::Help.result_lines
+      }
+      expect(sizes.keys).to include(:players, :tracks, :scenes, :knobs)
+      expect(long).to eq([])
+    end
+  end
+
   describe '#forget' do
     it 'returns journal entries and can be undone' do
       within do

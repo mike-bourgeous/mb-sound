@@ -8,6 +8,15 @@ module MB
     # Command-line interface methods for playing sounds.  MB::Sound extends
     # itself with this module.
     module PlaybackMethods
+      # The fade of a stop, outro, or fadeout given as +fade:+ (bars) or
+      # +over:+ (the same span as a length: the word level, turn, and feed
+      # use), refusing both.
+      def self.fade_over(command, fade, over)
+        return fade if over.nil?
+        raise ArgumentError, "#{command}: give the fade once, fade: (bars) or over: (a length; over: 8.bars)" unless fade.nil?
+        over
+      end
+
       # Plays +sound+ in the foreground: it starts right away in the
       # background Session (mixed with anything playing there, through the
       # master chain, the master gain, and the monitor trim) and the prompt
@@ -242,7 +251,9 @@ module MB
       # recently started one; with names or numbers, those players; with
       # :all, every player (see also #outro and #panic).  Players fade out
       # over four bars by default; pass +:fade+ for a different number of
-      # bars, or 0 to stop right away.  When nothing is left playing, the
+      # bars, or 0 to stop right away; +over:+ is the same span as a
+      # length, the word other commands use for a span (`over: 8.bars`, as
+      # `level :pad, 0, over: 2.bars`).  When nothing is left playing, the
       # timeline pauses where it is (see SequenceMethods#seek and #rewind).
       #
       # Stops land right away (or at a scheduled block's time) unless given
@@ -254,11 +265,12 @@ module MB
       # playing until its tail is silent, e.g. `stop :bass, ring: true`.
       #
       # Returns the stop's journal entry (see #bg; e.g. `stop :bass lands
-      # 9:1 (queued)`), an Array of entries for several players, or an
-      # empty Array if nothing was playing.  Inside a scheduled block,
-      # returns the names.
-      def stop(*names, fade: nil, ring: false, at: nil, on: nil, in: nil)
+      # 9:1 (queued), fading over 4 bars to 13:1`), an Array of entries for
+      # several players, or an empty Array if nothing was playing.  Inside
+      # a scheduled block, returns the names.
+      def stop(*names, fade: nil, over: nil, ring: false, at: nil, on: nil, in: nil)
         point = LaunchPoint.of(binding) or return nil
+        fade = PlaybackMethods.fade_over(:stop, fade, over)
         names = names.map { |n| player_name(n) }
         session_command(names, label: "stop #{names.map(&:inspect).join(', ')}".strip, kind: :stop, all: true) { |session, time|
           time = session.send(:launch_time, point, [], default: nil) if point.given?
@@ -289,29 +301,45 @@ module MB
       end
 
       # Ends everything playing in the background, fading out over four bars
-      # by default (+:fade+ sets the number of bars), starting now or at a
-      # launch point (`outro on: 4`, `outro at: bar(33)`).  A flow playing
+      # by default (+:fade+ sets the number of bars, +over:+ the same as a
+      # length: `outro over: 8.bars`), starting now or at a launch point
+      # (`outro on: 4`, `outro at: bar(33)`; +in:+ is when the fade starts,
+      # not its length).  A flow playing
       # ends at the same point (no section begins after it; as `stop
       # :all`).  #fadeout without names does the same.  Returns the journal
       # entries, as #stop.  See #stop, and #panic to stop everything right
       # away.
-      def outro(fade: nil, at: nil, on: nil, in: nil)
+      def outro(fade: nil, over: nil, at: nil, on: nil, in: nil)
         point = LaunchPoint.of(binding) or return nil
-        stop(:all, fade: fade, at: point)
+        stop(:all, fade: PlaybackMethods.fade_over(:outro, fade, over), at: point)
       end
 
       # Fades out and stops the named tracks or players (+names+, as #stop
-      # takes them; unknown names get a did-you-mean) over four bars by
-      # default (+:fade+ sets the number of bars), now or at a launch point;
-      # with no names, ends everything, exactly as #outro.  Returns the
-      # journal entries, as #stop.  (gen-ux-1, the maintainer, 2026-11-17:
-      # "I'd like fadeout to accept a track name".)
+      # takes them; unknown names get a did-you-mean), or with no names
+      # everything, exactly as #outro.  (gen-ux-1, the maintainer,
+      # 2026-11-17: "I'd like fadeout to accept a track name".)
+      #
+      # - +fade:+ the fade's length in bars (4 by default; 0 stops at once),
+      #   or +over:+ the same as a length (`over: 8.bars`, `over: 6.seconds`:
+      #   the word `level`, `turn`, and `feed` use for a span).
+      # - +on:+, +in:+, +at:+ when the fade starts (a launch point: `on:
+      #   :bar`, `in: 8.bars` from now, `at: bar(33)`); now by default.
+      #   +in:+ is not the fade's length.
+      #
+      # Returns the journal entries, as #stop; each says how long the fade
+      # is and where it ends: `stop :pad lands 9:1 (queued), fading over 8
+      # bars to 17:1`.  (The maintainer's take, 2026-11-21: `fadeout over:
+      # 8.bars` was an unknown keyword, and "fadeout help does not describe
+      # arguments and does not show fade length".)
       #
       #     fadeout :pad                 # the pad fades out over 4 bars
+      #     fadeout :pad, over: 8.bars   # over 8 bars
       #     fadeout :pad, :bell, fade: 8, on: :bar
+      #     fadeout in: 8.bars           # everything, starting 8 bars from now
       #     fadeout                      # everything (outro)
-      def fadeout(*names, fade: nil, at: nil, on: nil, in: nil)
+      def fadeout(*names, fade: nil, over: nil, at: nil, on: nil, in: nil)
         point = LaunchPoint.of(binding) or return nil
+        fade = PlaybackMethods.fade_over(:fadeout, fade, over)
         return outro(fade: fade, at: point) if names.empty?
         stop(*names, fade: fade, at: point)
       end
@@ -638,6 +666,17 @@ module MB
       # graph` earlier, or nothing yet) replaces its graph, or starts it,
       # as `bg :x, graph` at the swap's launch point.  See Session#swap.
       #
+      # A rack slot's name swaps the slot's content (racks R3; see
+      # Session#swap_slot): the old content spills over (an instrument
+      # slot's rings for a second at most, +ring:+ a length for longer),
+      # crossfades over +fade:+ bars, or is cut (`fade: 0`).  A named
+      # rack's name defines the rack again from a rack or block, and its
+      # instances in instance slots (`arack :dub, slot: true`) swap the same
+      # way (see Session::Racks#redefine).
+      #
+      #     swap :"dub/color", arack { |s| s.diode(900) }, fade: 1.n8
+      #     swap :"keys/inst", irack { |n| n.synth { |v| v.hz.triangle * v.amp_env } }, ring: 4.bars
+      #
       #     bg :hum, 55.hz.saw.lp4(300)
       #     swap :hum, 55.hz.square.lp4(500)        # the new hum on the next bar
       #
@@ -651,8 +690,18 @@ module MB
       #     beat2 = grid(16, kick: 'x..x..x.', snare: '....x..x')
       #     swap :drums, beat => beat2               # swaps each matching row
       #     swap :drums, beat2                       # the same: rows by name (rows it lacks go silent)
-      def swap(name, clips = nil, at: nil, on: nil, in: nil, **pairs)
+      def swap(name, clips = nil, at: nil, on: nil, in: nil, fade: nil, ring: nil, **pairs, &block)
         point = LaunchPoint.of(binding) or return nil
+        if name.is_a?(Symbol) && pairs.empty? && Internal.slot_name?(name)
+          # A rack slot (racks R3): its content swaps on the launch point
+          return swap_slot_command(name, clips || block, point, fade, ring)
+        end
+        if name.is_a?(Symbol) && pairs.empty? && Session.existing&.names&.kind(name) == :rack
+          # A named rack (racks R3): defined again, its instances swap
+          return swap_rack_command(name, clips || block, point, fade, ring)
+        end
+        raise ArgumentError, "swap #{name.inspect}: fade: goes with rack slots (swap :\"dub/color\", arack { ... }, fade: 1.n8)" unless fade.nil?
+        raise ArgumentError, "swap #{name.inspect}: ring: goes with rack slots (swap :\"keys/inst\", irack { ... }, ring: 4.bars)" unless ring.nil?
         if name.is_a?(Hash) && clips.nil? && pairs.empty?
           # (ux-notes-1: the maintainer's `swap({bowl: riff})`, a Hash in
           # parentheses, which Ruby passes as the name)
@@ -724,12 +773,55 @@ module MB
         }
       end
 
+      # The console side of #swap for a rack slot (see Session#swap_slot).
+      def swap_slot_command(name, content, point, fade, ring)
+        session_command(name, label: "swap #{name.inspect}", kind: :slot) { |session, time|
+          session.swap_slot(name, content, at: point, fade: fade, ring: ring, start_time: point.given? ? nil : time)
+          name
+        }
+      end
+      private :swap_slot_command
+
+      # The console side of #swap for a named rack: +content+ (a Rack, or a
+      # block taking what the rack takes) becomes rack +name+'s definition,
+      # and its instances playing swap to it on the launch point (see
+      # Session::Racks#redefine).
+      def swap_rack_command(name, content, point, fade, ring)
+        session = Session.current
+        old = session.racks.fetch(name)
+        rack = case content
+               when Rack then content.composed? ? raise(ArgumentError, "swap #{name.inspect}: a composed rack (>>) can't be a named rack's definition") : content.renamed(name, slot: old.slot? || content.slot?)
+               when Proc then Rack.new(name, in: old.input.type, out: old.out, constructor: old.constructor, block: content, ports: old.ports.transform_values(&:type), quiet: true, slot: old.slot?)
+               else raise ArgumentError, "swap #{name.inspect}: the rack's new definition is a rack or a block (got #{content.class})"
+               end
+        held = session.racks.unslotted_players(name)
+        if !held.empty? && session.send(:rack_instance_slots, name).empty?
+          # (racks-r3-2: instance slots are opt-in; a swap that couldn't
+          # reach any instance playing changes nothing)
+          return MB::Sound.live_error(ArgumentError.new(
+            "swap #{name.inspect}: its instances in #{held.map(&:inspect).join(', ')} aren't in instance slots, so they can't swap " \
+            "(define it with #{old.constructor} #{name.inspect}, slot: true, then play it again)"
+          ))
+        end
+        context = Session.context
+        last = session.journal.changes.last&.seq || -1
+        session.racks.redefine(rack, label: "swap #{name.inspect}", at: point, fade: fade, ring: ring, start_time: point.given? ? nil : context&.time)
+        session.journal.changes.reverse.find { |c| c.seq > last && c.kind == :rack && c.subject == name } || rack
+      end
+      private :swap_rack_command
+
       # Brings back a named background player that was stopped (see #bg and
       # #stop), unchanged, e.g. to fade a track back in.  With no name,
       # resumes the most recently stopped player.  Like #bg, it starts on the
       # next bar and fades in over half a bar by default (+:on+, +:in+,
       # +:at+, and +:fade+ work the same way).  Returns the change's journal entry (see #bg),
       # or nil if there was nothing to resume.
+      #
+      # With no arguments on a paused transport (see TransportMethods#pause) or
+      # a suspended Session, it plays on from there, as `start` (or `play`,
+      # or pause again) does, and returns start's Status; `resume :pad`
+      # still brings back a stopped player (the maintainer, 2026-11-21:
+      # `pause`, then `resume` said "No background player to resume").
       #
       # Only players with Symbol names are kept after stopping; see
       # #stopped and #forget.  A player a stop is still fading out comes
@@ -741,6 +833,8 @@ module MB
       #     stop :pad      # fades out over four bars
       #     resume :pad    # fades the same graph back in on the next bar
       def resume(name = nil, at: nil, on: nil, in: nil, fade: nil)
+        bare = name.nil? && at.nil? && on.nil? && binding.local_variable_get(:in).nil? && fade.nil?
+        return start if bare && TransportMethods.paused?(Session.current)
         point = LaunchPoint.of(binding) or return nil
         name = player_name(name)
         session_command(name, label: "resume #{name.inspect}", kind: :resume) { |session, time|

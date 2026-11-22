@@ -279,6 +279,13 @@ module MB
               # A library instrument (`track :bass, :dnb_reese`; Arrangement::InstrumentPatch)
               opts[:trigger] = true if tr.trigger
               ["track #{[name.inspect, *clip_text, sym.inspect, *opts.map { |k, v| "#{k}: #{lit(v)}" }].join(', ')}"]
+            elsif tr.patch && !tr.patch.respond_to?(:literal_bindings) && (voice = Arrangement::InstrumentPatch.voice_of(tr.patch))
+              # A sampler instrument playing the track's clips (`track
+              # :drums, sf2(...)`; InstrumentPatch.voice?): printed as given,
+              # a font as the preset it plays (`sf2(path, preset: [0, 0])`)
+              opts[:trigger] = true if tr.trigger
+              voice = voice.instrument if voice.is_a?(Sampler::SF2::Font)
+              graph_statement(["track #{name.inspect}", *clip_text].join(', '), voice, opts.map { |k, v| "#{k}: #{lit(v)}" })
             elsif tr.patch
               opts[:trigger] = true if tr.trigger
               block_statement(:track, [name, *(own ? [own] : [])], opts, tr.patch, [probe_clip(name, tr)], "track #{name.inspect}")

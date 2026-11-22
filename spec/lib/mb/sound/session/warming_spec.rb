@@ -62,6 +62,39 @@ RSpec.describe(MB::Sound::Session::Warming) do
     expect(warm.map(&:to_a)).to eq(cold.map(&:to_a))
   end
 
+  # (racks-r3-2, the maintainer's "fix now": the copy's document says
+  # rack(:dub), which the sandbox didn't know, so every graph using a named
+  # rack failed its warm-up with a LoadError)
+  it 'warms graphs that use named effect and instrument racks without changing the samples' do
+    racks = ->(s) {
+      MB::Sound.arack(:wdub) { |sig| sig.lp4(900) * MB::Sound.knob(:space, 0.5) }
+      MB::Sound.irack(:wkeys) { |n| n.synth(voices: 2) { |v| v.hz.saw * v.amp_env(0.01, 0.1, 0.5, 0.05) * 0.1 } }
+      MB::Sound.bg(:dubbed, 220.hz.saw.at(0.1).then(&MB::Sound.rack(:wdub)))
+      MB::Sound.bg(:played, MB::Sound.seq(MB::Sound::G3, MB::Sound::C4).n8.loop.then(&MB::Sound.rack(:wkeys)))
+    }
+    cold, = song(false, &racks)
+    warm, list = song(true, &racks)
+    # (:known when a warm-up of the same node classes ran before: the
+    # keys track's synth)
+    expect(list.select { |w| %i[dubbed played].include?(w.name) }.map { |w| [w.name, w.result == :known ? :played : w.result, w.reason] }).to contain_exactly([:dubbed, :played, nil], [:played, :played, nil])
+    expect(warm.map(&:to_a)).to eq(cold.map(&:to_a))
+  end
+
+  # (racks-r3-2, found by SessionFuzz's warm-up check, seeds 36 and 78: the
+  # copy printed `knob(:busy)` in its body without the header line that
+  # declares it, which the loader refuses)
+  it 'warms a graph that reads a session knob' do
+    knobbed = ->(s) {
+      MB::Sound.knob(:wbusy, 0.5)
+      MB::Sound.bg(:knobbed, 330.hz.triangle * MB::Sound.knob(:wbusy) * 0.1)
+    }
+    cold, = song(false, &knobbed)
+    warm, list = song(true, &knobbed)
+    w = list.find { |x| x.name == :knobbed }
+    expect([w.result, w.reason]).to eq([:played, nil]).or eq([:known, nil])
+    expect(warm.map(&:to_a)).to eq(cold.map(&:to_a))
+  end
+
   it 'warms a kind and set of node classes once per process' do
     _, list = song(true) { |s| s.bus(:verb2) { |sig| sig.reverb(:room, mix: 1) } }
     expect(list.find { |w| w.name == :verb2 }.result).to eq(:known)

@@ -424,8 +424,10 @@ module GraphSweep
           quick.follow(stretch: { mode: :slice, slices: 4, slot_fade: 2/3r, fade_law: :power })[0] * 0.2 +
           quick.mono.follow(stretch: { mode: :slice, slices: [0, 750, 1500, 2250], positions: [0, 500, 0.03, 1900], slot_fade: 0.5, fill: :even }) * 0.1 +
           # (the spectral stretch of the loop as a loop, as players ask
-          # for it, and with its own ends)
-          smp.follow(stretch: { mode: :spectral, window: 256 }) * 0.2 + smp.follow(stretch: { mode: :spectral, window: 256, wrap: false }) * 0.2 +
+          # for it (shape-locked by default), with identity locking
+          # alone, and with its own ends)
+          smp.follow(stretch: { mode: :spectral, window: 256 }) * 0.2 + smp.follow(stretch: { mode: :spectral, window: 256, lock: :peaks }) * 0.1 +
+          smp.follow(stretch: { mode: :spectral, window: 256, wrap: false }) * 0.2 +
           # (and the vocoder running live, both channels on one stream)
           smp.follow(stretch: { mode: :spectral, window: 256, live: true }) * 0.2 + st.follow(stretch: { mode: :spectral, window: 256, live: true })[0] * 0.2 +
           # (noise kept noise: random phases for the bins that are no partial, cached and live)
@@ -706,6 +708,35 @@ module GraphSweep
         c.s.stereo(c.sig(110).filter(:lowpass, cutoff: c.mod(400, 900)) * 0.5, c.sig(165).filter(:lowpass, cutoff: c.mod(500, 800, 5)) * 0.5)
       }],
 
+      # Rack slots (racks R3): a slot and its content's Feed, and one handing
+      # over by its own frame count (a spill-over with a delay tail, then a
+      # crossfade) as a Session swap does on its landing frame
+      # (the content reads its input twice: its Tee shares the feed's
+      # buffer, which must stay the feed's own; the smoke run's rack_demo)
+      ['slot (Slot, Feed, Output)', ->(c) { c.sig(110).slot(:color) { |x| x.lp4(c.mod(300, 900), resonance: 0.3).softclip(0.3, 0.6) + x * 0.5 } }],
+      ['slot handing over (spill-over)', ->(c) {
+        out = c.s.stereo(c.sig(110), c.sig(165)).slot(:hand) { |x| x.delay(0.003) }
+        slot = out.outputs[0].owner_slot
+        slot.queue(slot.build(->(x) { x.lp4(c.mod(400, 1200)) }), 300, mode: :spill)
+        out
+      }],
+      # (racks-r3-2: a spill-over's ring cap, as an instrument slot's
+      # second or a swap's ring: sets it, fading the tail on its own frame)
+      ['slot handing over (spill-over, ring cap)', ->(c) {
+        out = c.sig(110).slot(:hand) { |x| x.delay(0.003, feedback: 0.9) }
+        slot = out.owner_slot
+        chain = slot.build(->(x) { x * 0.5 })
+        chain.ring = 0.005
+        slot.queue(chain, 300, mode: :spill)
+        out
+      }],
+      ['slot handing over (crossfade)', ->(c) {
+        out = c.sig(110).slot(:hand) { |x| x.softclip(0.2, 0.4) }
+        slot = out.owner_slot
+        slot.queue(slot.build(->(x) { x * c.mod(0.2, 0.6) }), 300, mode: :fade, step: 1.0 / 500)
+        out
+      }],
+
       # Metadata on every node, inner ones too (metadata-2: metadata never
       # acts as data; meta_invariance_spec.rb compares every factory with
       # and without it)
@@ -754,6 +785,9 @@ module GraphSweep
   PERFORMANCE_STATE = {
     'knob moves (Knob, Knob::Reader: a ramp, a jump, a followed node)' => 'knob moves are performance (turns, in a take), not the graph',
     'drums with knob settings (live kit knobs)' => 'knob moves are performance (turns, in a take), not the graph',
+    'slot handing over (spill-over)' => 'slot swaps are performance (swap commands, in a take), not the graph',
+    'slot handing over (crossfade)' => 'slot swaps are performance (swap commands, in a take), not the graph',
+    'slot handing over (spill-over, ring cap)' => 'slot swaps are performance (swap commands, in a take), not the graph',
   }.freeze
 
   # Node classes the sweep doesn't build, with reasons.

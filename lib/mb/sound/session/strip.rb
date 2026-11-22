@@ -511,6 +511,7 @@ module MB
           chains&.each { |c| (waiting ||= []) << c.chain_graph unless c.started || c.bypass? }
           bus_chain_graphs(waiting: true).each { |g| (waiting ||= []) << g }
           undo_waiting_graphs.each { |g| (waiting ||= []) << g } # (cancelled changes undo or redo may issue again: Undo#undo_waiting_graphs)
+          slot_waiting_graphs.each { |g| (waiting ||= []) << g } unless @waiting_slots.empty? # (racks R3; see Slots)
           if waiting.nil?
             @waiting_graphs.clear unless @waiting_graphs.empty?
             return

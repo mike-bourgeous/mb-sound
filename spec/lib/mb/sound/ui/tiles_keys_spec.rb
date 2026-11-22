@@ -407,6 +407,73 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     expect(@term.wait_for(/started at 1:1; flow sp_a/)).to eq(true), @term.text
     expect(seen).to eq(true)
   end
+  # (followups-1: after the merges a resume flashed "starting... (warming
+  # the tracks first)"; the instant flash now follows the state: nothing to
+  # start, a flow to start, playing, paused)
+  it 'flashes at once what NAV Space will do: nothing, the build, nothing on a pause, "resuming" on a resume' do
+    @session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false,
+                                      transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+    MB::Sound::Session.with_context(session: @session) do
+      MB::Sound.track(:sp) { |c| c.tone.sine.at(-30.db) * c.amp_env }
+      MB::Sound.scene(:sp_a, sp: MB::Sound.seq(MB::Sound::C4).loop)
+    end
+    session = @session
+    out = Object.new
+    out.define_singleton_method(:target_session) { session }
+    %i[note_on note_off cc].each { |m| out.define_singleton_method(m) { |*, **| nil } }
+    start(keyboard: MB::Sound::UI::Keyboard.new(out: out))
+
+    # Each Space's line, with the flashes shown before it ran (and, for a
+    # flash expected, the screen showing it while the line still runs)
+    flashes = []
+    allow(@tiles).to receive(:flash).and_wrap_original { |m, text, *rest| flashes << text; m.call(text, *rest) }
+    lines = []
+    expect_on_screen = nil
+    allow(MB::Sound::UI).to receive(:run_line).and_wrap_original { |m, line, *rest|
+      seen = expect_on_screen ? @term.wait_for(expect_on_screen) : nil
+      lines << [line, flashes.dup, seen]
+      flashes.clear
+      m.call(line, *rest)
+    }
+    space = lambda do |want_on_screen = nil|
+      expect_on_screen = want_on_screen
+      flashes.clear
+      n = lines.length
+      unless @tiles.router.mode == :nav # (Space keeps NAV)
+        @term.write("\x1d")
+        expect(wait_mode(@tiles, :nav)).to eq(true), @term.text
+      end
+      @term.write(' ')
+      expect(wait_until { lines.length > n }).to eq(true), @term.text
+      lines.last
+    end
+
+    # Idle, no flow loaded: nothing to start, no flash before the line
+    line, before, = space.call
+    expect([line, before]).to eq(['pause', []])
+    expect(@term.wait_for(/paused at 1:1/)).to eq(true), @term.text
+    # (that paused the transport: the next Space resumes it)
+    line, before, seen = space.call('resuming ...')
+    expect([line, before, seen]).to eq(['start', ['resuming ...'], true])
+    expect(wait_until { !@session.transport_paused? }).to eq(true)
+
+    # A loaded flow from idle: what it builds
+    MB::Sound::Session.with_context(session: @session) { MB::Sound.flow(play: false) { sp_a 2 } }
+    line, before, seen = space.call('starting: building 1 track, landing together ...')
+    expect([line, before, seen]).to eq(['start', ['starting: building 1 track, landing together ...'], true])
+    expect(@term.wait_for(/started at 1:1; flow sp_a/)).to eq(true), @term.text
+
+    # Playing: a pause, no instant flash (its Status says it after)
+    line, before, = space.call
+    expect([line, before]).to eq(['pause', []])
+    expect(@term.wait_for(/paused at 1:1; effects ring out/)).to eq(true), @term.text
+
+    # Paused: a resume says so, nothing about warming
+    line, before, seen = space.call('resuming ...')
+    expect([line, before, seen]).to eq(['start', ['resuming ...'], true])
+    expect(@term.text).not_to include('warming the tracks')
+    expect(wait_until { !@session.transport_paused? }).to eq(true)
+  end
   # Persona panel round 2 (2026-10-18): K16/N7 (NAV K in :studio said "K:
   # not a NAV key"), K17 (no legend for step entry's lengths), M12 (step
   # entry not driven end to end)

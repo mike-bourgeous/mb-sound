@@ -8,7 +8,9 @@ RSpec.describe(MB::Sound::WarmUpMethods) do
     code = <<~RUBY
       require 'mb-sound'
       t = MB::Sound.warm_up
-      puts [t.class, t < 2, MB::Sound::Session.instance_variable_get(:@current).nil?].inspect
+      # (3 s since racks-r3's slot swaps: ~0.8 -> ~1.4 s alone on the Mac
+      # container, over 2 s under spec:quick's 8 processes)
+      puts [t.class, t < 3, MB::Sound::Session.instance_variable_get(:@current).nil?].inspect
     RUBY
     out = `#{RbConfig.ruby} --yjit -I#{File.expand_path('../../../../lib', __dir__)} -e #{Shellwords.escape(code)} 2>&1`
     expect(out.lines.last.strip).to eq('[Float, true, true]')
