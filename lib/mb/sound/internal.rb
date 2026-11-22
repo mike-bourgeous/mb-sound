@@ -40,6 +40,23 @@ module MB
         Thread.current[key] = old
       end
 
+      # Runs the block (work a command does before queueing its change:
+      # a drum kit's playback tables, a generator clip's first cycles)
+      # with the calling thread handing the GVL to +session+'s render
+      # thread whenever that waits for it (UI::Yielding, as the warm-up
+      # and painter threads do), unless it yields already.  Elsewhere
+      # (renders, specs, no fast_ui, the render thread itself) it just
+      # runs the block.  Returns the block's value.
+      def yielding_to_render(session = Session.existing)
+        render = session&.render_thread
+        y = render&.alive? && render != Thread.current && defined?(MB::Sound::UI::Yielding) && MB::Sound::UI::Yielding.available? &&
+            !FastUI::GVLYield.yielders.include?(Thread.current)
+        y &&= MB::Sound::UI::Yielding.join(Thread.current, render: render)
+        yield
+      ensure
+        MB::Sound::UI::Yielding.leave(Thread.current) if y
+      end
+
       # Runs the block with $stdout going nowhere (e.g. a render's second
       # pass, whose blocks print what the first pass printed).  Returns the
       # block's value.

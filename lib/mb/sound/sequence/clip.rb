@@ -168,6 +168,16 @@ module MB
           # or other piece), and where each starts in the cycle
           @units = unit && @length > 0 && unit < @length ? (@length / unit).ceil : 1
           @unit_starts = @units > 1 ? Array.new(@units) { |k| k * unit }.freeze : nil
+          # The Steers deciding this clip's units (one per steered
+          # generator), whose decisions a pregenerated result is checked
+          # against (#pregenerate), or nil
+          steers = steered.filter_map { |v|
+            b = v.block
+            b = b.generator while b.is_a?(Generative::Mapped)
+            b.steer if b.is_a?(Generative::Generator)
+          }.uniq
+          @steers = steers.empty? ? nil : steers.freeze
+          @pregen = nil # (see #pregenerate)
         end
 
         # True if a generator of this clip reads moving options at decision
@@ -221,6 +231,9 @@ module MB
           return cached if cached
 
           @cycle_cache.shift if @cycle_cache.length >= 8
+          if @pregen && (made = pregenerated(@pregen.cycles, key, cycle, 0r))
+            return @cycle_cache[key] = made
+          end
           list = @variations.reduce(@events) { |evs, v| v.block.call(evs, cycle, self) }
           @cycle_cache[key] = list.sort_by(&:start).freeze
         end
@@ -238,6 +251,9 @@ module MB
 
           @cycle_cache.shift if @cycle_cache.length >= 8 * @units
           offset = @unit_starts[k]
+          if @pregen && (made = pregenerated(@pregen.cycles, key, cycle, offset))
+            return @cycle_cache[key] = made
+          end
           list = @variations.reduce(@events) { |evs, v|
             v.block.is_a?(Generative::Producer) ? v.block.call(evs, cycle, self, offset) : v.block.call(evs, cycle, self)
           }.sort_by(&:start)
@@ -1434,7 +1450,112 @@ module MB
           with_events(map.call(@events, 0), length: length, variations: variations, values: values, controls: controls)
         end
 
+        # Pregenerated (bg-latency-2): what a generator clip's first reads
+        # need when it starts or is swapped in at clip position +pos+
+        # (whole notes), made before the change is queued, on the thread
+        # queueing it, so the buffer where it lands only reads: the events
+        # and edge tables of the cycles #edges looks back over (the
+        # generator's reach), of every unit to the end of the landing
+        # cycle, and those the chase reads (#event_at, #event_before).
+        # +origin+ is where clip position 0 will be on the timeline
+        # (Steer.origin; :clocked is not pregenerated), +epoch+ the epoch
+        # of the Session it will play in.
+        #
+        # Steered units are made with the values their params have now
+        # for them (Generative::Steer.pregenerating: nothing decided or
+        # logged).  Each result keeps those values, and the playing clip
+        # takes it only when its own decision for that unit brings the
+        # same values (a cached decision and a Hash comparison); a unit
+        # whose values differ (a knob moved between the command and the
+        # landing) is made where it is read, as without pregenerating.  So
+        # a clip plays exactly what it plays without this, at any buffer
+        # size.  The results are made on a copy of the clip and handed over
+        # in one assignment, so a clip playing elsewhere meanwhile never
+        # sees half of them.  Returns the number of results made.
+        def pregenerate(pos, origin:, epoch:)
+          return 0 unless @loop && @length > 0 && generated? && origin != :clocked
+
+          copy = dup
+          copy.send(:clear_caches)
+          made = nil
+          Generative::Steer.pregenerating(origin, epoch) do
+            copy.edges(pos, (copy.send(:cycle_of, pos) + 1) * @length, early: true)
+            copy.event_at(pos)
+            copy.event_before(pos)
+            made = copy.send(:pregen_results)
+          end
+          @pregen = made
+          made.cycles.length + made.edges.length
+        rescue StandardError
+          # (a generator raising for a cycle raises where the cycle is read,
+          # as without pregenerating: the change is queued as before)
+          0
+        end
+        public :pregenerate
+
+        # What #pregenerate made, still to be taken, keyed like the caches
+        # they go to: [values, result] (values: the decided values each
+        # needs, nil for an unsteered clip).
+        Pregen = Data.define(:cycles, :edges)
+
         private
+
+        # Empties the caches (a copy for #pregenerate).
+        def clear_caches
+          @cycle_cache = {}
+          @edge_tables = {}
+          @cycle_hint = nil
+          @pregen = nil
+        end
+
+        # The results of a #pregenerate pass on this copy (inside
+        # Steer.pregenerating), with the values each was made with.
+        def pregen_results
+          cycles = @cycle_cache.to_h { |key, list| [key, [pregen_values(key), list].freeze] }.freeze
+          edges = @edge_tables.to_h { |key, table| [key, [pregen_values(key), table].freeze] }.freeze
+          Pregen.new(cycles: cycles, edges: edges)
+        end
+
+        # The values the unit or cycle of cache key +key+ was made with in
+        # this #pregenerate pass (one Steer's Hash, an Array of them for
+        # several, nil when unsteered).
+        def pregen_values(key)
+          return nil unless @steers
+          cycle, offset = cache_place(key)
+          return @steers[0].decide(cycle, @length, offset) if @steers.length == 1
+          @steers.map { |s| s.decide(cycle, @length, offset) }.freeze
+        end
+
+        # [cycle, offset into it] of a steered clip's cache key +key+ (see
+        # Steer.key) in the current epoch.
+        def cache_place(key)
+          index = key - (Generative::Steer.epoch << 48)
+          return [index, 0r] if @units == 1
+          cycle, k = index.divmod(@units)
+          [cycle, @unit_starts[k]]
+        end
+
+        # The result #pregenerate made for cache key +key+ (loop +cycle+,
+        # the unit at +offset+) in +results+, if its values are the ones
+        # decided now, else nil.  Called on a cache miss.
+        def pregenerated(results, key, cycle, offset)
+          hit = results[key] or return nil
+          made = hit[1]
+          steers = @steers
+          return made if steers.nil?
+
+          values = hit[0]
+          if steers.length == 1
+            return nil unless steers[0].decide(cycle, @length, offset) == values
+          else
+            i = 0
+            while i < steers.length
+              return nil unless steers[i].decide(cycle, @length, offset) == values[i]
+              i += 1
+            end
+          end
+          made
+        end
 
         # The loop cycle holding clip position +position+ (whole notes):
         # (position / length).floor, with the last answer's bounds kept so
@@ -1460,6 +1581,10 @@ module MB
           table = @edge_tables[key]
           return table if table
 
+          if @pregen && (made = pregenerated(@pregen.edges, key, cycle, unit ? @unit_starts[unit] : 0r))
+            @edge_tables.shift if @edge_tables.length >= 16 * @units
+            return @edge_tables[key] = made
+          end
           offset = cycle * @length
           if unit
             u = unit_events(cycle, unit)
