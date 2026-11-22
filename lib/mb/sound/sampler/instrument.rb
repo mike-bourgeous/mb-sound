@@ -56,11 +56,16 @@ module MB
 
         attr_reader :name, :lineage
 
+        # The Drums::Roles::Map that moved this kit's keys (#remap_keys;
+        # SoundFont drum kits), or nil.
+        attr_reader :drum_map
+
         # Creates an instrument from +regions+ (Regions), then calls the
         # block (if any) with the instrument to add regions (#region) before
         # it is frozen.  +split+: a key (Note or number) for a split
         # keyboard, or nil; +mips+: the voices' default table level spacing.
-        def initialize(regions = [], split: nil, mips: :default, envelope: nil, filter: nil, modulation: nil, name: nil, lineage: nil, layers: nil)
+        def initialize(regions = [], split: nil, mips: :default, envelope: nil, filter: nil, modulation: nil, name: nil, lineage: nil, layers: nil, drum_map: nil)
+          @drum_map = drum_map
           @layers = layers&.dup&.freeze
           raise ArgumentError, 'Layers are Sampler::Instruments' if @layers && !@layers.all?(Instrument)
           regions = @layers.flat_map(&:regions) if @layers
@@ -480,8 +485,59 @@ module MB
         # This instrument with lineage +lineage+ (how it prints; see
         # GraphNode::Recipe::RubyWriter).
         def with_lineage(lineage)
-          return Instrument.new(layers: @layers, mips: @mips, name: @name, lineage: lineage) if @layers
-          Instrument.new(@regions, split: @split, mips: @mips, envelope: @envelope, filter: @filter, modulation: @modulation, name: @name, lineage: lineage)
+          return Instrument.new(layers: @layers, mips: @mips, name: @name, lineage: lineage, drum_map: @drum_map) if @layers
+          Instrument.new(@regions, split: @split, mips: @mips, envelope: @envelope, filter: @filter, modulation: @modulation, name: @name, lineage: lineage,
+                                   drum_map: @drum_map)
+        end
+
+        # This instrument with its keys moved by +map+ ({ key => key it
+        # plays like, or nil for silence }; Drums::Roles::Map#remap): a key
+        # mapped to another plays that key's regions exactly as they play
+        # there (their pitch and every per-key setting, ZoneMaps included),
+        # a key mapped to nil plays nothing, other keys as before.  Layers
+        # are moved each.  +drum_map+ (a Drums::Roles::Map) is remembered
+        # (#drum_map).
+        def remap_keys(map, lineage: @lineage, drum_map: @drum_map)
+          return self if map.empty? && drum_map.equal?(@drum_map)
+          if @layers
+            # (a layer left without regions, every key of it moved away, is dropped)
+            kept = @layers.reject { |l| l.remapped_regions(map).empty? }.map { |l| l.remap_keys(map) }
+            return kept[0].remap_keys({}, lineage: lineage, drum_map: drum_map) if kept.length == 1
+            return Instrument.new(layers: kept, mips: @mips, name: @name, lineage: lineage, drum_map: drum_map)
+          end
+          moved = map.reject { |_, to| to.nil? }
+          remap = ->(v) { Instrument.remap_value(v, moved) }
+          Instrument.new(remapped_regions(map), split: @split, mips: @mips, envelope: remap.(@envelope), filter: remap.(@filter),
+                                                modulation: remap.(@modulation), name: @name, lineage: lineage, drum_map: drum_map)
+        end
+
+        # The regions #remap_keys gives for +map+ (one layer's): copies for
+        # the moved keys first, then the regions left without the moved and
+        # silenced keys.
+        def remapped_regions(map)
+          return @layers.flat_map { |l| l.remapped_regions(map) } if @layers
+          moved = map.reject { |_, to| to.nil? }
+          copies = moved.flat_map { |from, to|
+            @regions.select { |r| to.between?(r.keys[0], r.keys[1]) }.map { |r|
+              root = r.root || r.sample.root
+              r.dup.tap { |c|
+                c.keys = [from, from].freeze
+                c.root = root + (from - to) if root && r.keytrack != 0
+              }.freeze
+            }
+          }
+          copies + @regions.flat_map { |r| without_keys(r, map.keys) }
+        end
+
+        # +value+ (an envelope, filter, or modulation setting) with every
+        # ZoneMap in it moved as #remap_keys moves keys.
+        def self.remap_value(value, moved)
+          case value
+          when ZoneMap then value.remap_keys(moved)
+          when Hash then value.transform_values { |x| remap_value(x, moved) }
+          when Array then value.map { |x| remap_value(x, moved) }
+          else value
+          end
         end
 
         # An instrument playing +instruments+ together: each note plays the
@@ -631,6 +687,22 @@ module MB
           when Array then v.map { |x| deep_freeze(x) }.freeze
           else v
           end
+        end
+
+        # +region+ split around +keys+ (the parts of its key range that
+        # leave them out; none when it covers only them).
+        def without_keys(region, keys)
+          lo, hi = region.keys
+          cut = keys.select { |k| k.between?(lo, hi) }.uniq.sort
+          return [region] if cut.empty?
+          parts = []
+          start = lo
+          cut.each do |k|
+            parts << [start, k - 1] if k - 1 >= start
+            start = k + 1
+          end
+          parts << [start, hi] if hi >= start
+          parts.map { |a, b| region.dup.tap { |c| c.keys = [a, b].freeze }.freeze }
         end
 
         # A ZoneMap of 1 where a region plays and 0 elsewhere (see #voice).

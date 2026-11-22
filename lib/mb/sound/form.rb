@@ -67,6 +67,9 @@ module MB
         # (a knob's short name, :"bass/reso", is its full name here:
         # Session::Knobs#full_knob_name)
         session = Session.current
+        # (a track hash, drums: { energy: 0.8 }, is the track's knob values
+        # spelled out: Arrangement.expand_track_hashes; form-knobs-1)
+        options = Arrangement.expand_track_hashes(name, options.except(*SECTION_OPTIONS), session, section: true).merge(options.slice(*SECTION_OPTIONS))
         options = options.transform_keys { |k| (k.is_a?(Symbol) && !SECTION_OPTIONS.include?(k) && session.full_knob_name(k)) || k }
         unknown = options.keys - SECTION_OPTIONS
         # (knob names, and names standing for a control: a trigger track's
@@ -76,10 +79,27 @@ module MB
         unknown -= knob_names
         raise ArgumentError, Arrangement.bpm_value_message(name, options[:bpm]) if unknown.include?(:bpm)
         unless unknown.empty?
+          # (a track's knob it doesn't have: the track's own knobs suggested)
+          u = unknown.find { |x| x.is_a?(Symbol) && (nm = Session::Name[x]).parts.length == 2 && session.names.kind(nm.owner) == :track }
+          raise ArgumentError, session.track_knob_message(name.to_s, Session::Name[u].owner, Session::Name[u].leaf) if u
           hint = suggest(unknown.first, SECTION_OPTIONS + knob_names)
           raise ArgumentError, "#{name}: unknown options #{unknown.map(&:inspect).join(', ')} (use #{SECTION_OPTIONS.map { |o| "#{o}:" }.join(', ')}, or knob names)#{hint}"
         end
         [options.slice(*SECTION_OPTIONS), knobs]
+      end
+
+      # A section's +knobs+ as they print (form-knobs-1): a track's knob
+      # values as its track hash (`a: { fill: 0.7 }`; tracks of the current
+      # Session, Arrangement.track_hash_pairs), others as they are.
+      def self.knob_options(knobs, session = Session.existing)
+        return knobs if session.nil? || knobs.empty?
+        Arrangement.track_hash_pairs(knobs, session, scene: false) { |o| session.names.kind(o) == :track }.to_h
+      end
+
+      # The text of a section option +key+ and +value+ (`fill: [:roll]`,
+      # `"odd/name": 1`; values through .ruby_value).
+      def self.option_text(key, value)
+        "#{RubyValue.key(key)} #{ruby_value(value)}"
       end
 
       # A section: its +name+, +length+ (a Duration, or a number of bars),
@@ -98,14 +118,16 @@ module MB
           super(name: name, length: length, times: times, fill: fill, scene: scene, fade: fade, knobs: knobs.dup.freeze)
         end
 
-        # The keyword options that rebuild this section (for #to_ruby).
-        def options
+        # The keyword options that rebuild this section (for #to_ruby),
+        # knob values of +session+'s tracks as track hashes (see
+        # Form.knob_options).
+        def options(session = Session.existing)
           opts = {}
           opts[:times] = times if times != 1
           opts[:fill] = fill.to_option if fill
           opts[:scene] = scene unless scene.nil?
           opts[:fade] = fade unless fade.nil?
-          opts.merge(knobs)
+          opts.merge(Form.knob_options(knobs, session))
         end
       end
 
@@ -649,7 +671,7 @@ module MB
               declared[e.name] = len
               opts = s.options
               opts[:times] = e.times if e.times
-              parts = [Form.ruby_value(len), *opts.map { |k, v| "#{k}: #{Form.ruby_value(v)}" }]
+              parts = [Form.ruby_value(len), *opts.map { |k, v| Form.option_text(k, v) }]
               lines << "#{indent}#{e.name} #{parts.join(', ')}"
             end
           end

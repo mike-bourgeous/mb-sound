@@ -169,10 +169,12 @@ module MB
 
         class << self
           # The Font for +path+ (cached while it's in use; a changed file is
-          # read again).
+          # read again): a path, or a font's name on the search path
+          # (GraphIO::FileGuard.soundfont, Sampler::FontPath); the Font keeps
+          # +path+ as given, so it prints and saves as the name.
           def open(path)
+            real = defined?(GraphIO::FileGuard) ? GraphIO::FileGuard.soundfont(path) : path.to_s
             path = path.to_s
-            real = defined?(GraphIO::FileGuard) ? GraphIO::FileGuard.resolve(path, 'reading a SoundFont') : path
             st = File.stat(real.to_s)
             key = [File.expand_path(real.to_s), st.mtime.to_r, st.size]
             @mutex ||= Mutex.new
@@ -326,7 +328,14 @@ module MB
           # vibrato from the mod wheel and aftertouch unless +wheel+ is false
           # (the specification's default modulators; a triangle LFO per
           # voice).
-          def instrument(selector = nil, name: nil, mips: :octave, attenuation: EMU_ATTENUATION, wheel: true, path: @path)
+          #
+          # A drum kit preset (bank 128, or a kit Drums::Roles recognises by
+          # its name or keys) plays drum roles (drum-gen-1): its keys are
+          # moved by the kit's Drums::Roles::Map, so a generator's
+          # half-open hat or high tom plays what this kit has for it
+          # (Instrument#drum_map); +roles+ false plays the keys as the font
+          # maps them.
+          def instrument(selector = nil, name: nil, mips: :octave, attenuation: EMU_ATTENUATION, wheel: true, roles: true, path: @path)
             p = preset(selector)
             sel = selector.nil? || selector.is_a?(Preset) ? [p.bank, p.program] : selector
             kw = { preset: sel }
@@ -334,12 +343,27 @@ module MB
             kw[:mips] = mips unless mips == :octave
             kw[:attenuation] = attenuation unless attenuation == EMU_ATTENUATION
             kw[:wheel] = false unless wheel
+            kw[:roles] = false unless roles
             lineage = [:sf2, :sf2, [path], kw].freeze
-            key = [p.index, name, mips, attenuation, !!wheel]
-            inst = @mutex.synchronize { @instrument_cache[key] } || build(p, name: name || p.name, mips: mips, attenuation: attenuation, wheel: wheel).tap { |i|
+            key = [p.index, name, mips, attenuation, !!wheel, !!roles]
+            inst = @mutex.synchronize { @instrument_cache[key] } || build(p, name: name || p.name, mips: mips, attenuation: attenuation, wheel: wheel).then { |i|
+              roles ? drum_roles(i, p) : i
+            }.tap { |i|
               @mutex.synchronize { @instrument_cache[key] ||= i }
             }
             inst.with_lineage(lineage)
+          end
+
+          # +inst+ (preset +p+'s instrument) with its keys moved by its kit's
+          # drum map when it is a drum kit (see #instrument), else +inst+.
+          def drum_roles(inst, p)
+            single = inst.regions.select { |r| r.keys[0] == r.keys[1] }.map { |r| r.keys[0] }.uniq
+            layout = Drums::Roles.layout_for(name: p.name) || Drums::Roles.layout_for(name: File.basename(@path))
+            layout ||= Drums::Roles.layout_for(keys: single) if single.length >= Drums::Roles::KIT_KEYS
+            return inst unless layout || p.bank == 128
+            keys = inst.regions.flat_map { |r| (r.keys[0]..r.keys[1]).to_a }.uniq
+            map = Drums::Roles.map(keys: keys, layout: layout)
+            inst.remap_keys(map.remap, drum_map: map)
           end
 
           # The default preset's instrument plays (see Instrument#play), so

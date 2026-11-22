@@ -450,6 +450,15 @@ module MB
 
         Grids join two ways: bars with `|` in one grid (`bd: 'x...x... |
         x.x.x...'`), or whole grids in turn with `seq(verse, fill)`.
+
+        Kits by kind: `kit(:acoustic)` (also `:jazz`, `:hand_percussion`,
+        `:gm`) is the first installed SoundFont kit of its list, else a
+        drum machine (one line in the console names the package:
+        avldrums.lv2-soundfont).  Every kit plays drum roles: GM names
+        plus `half_open_hat`, `hat_swish`, `ride_shank`, `crash3`, chokes,
+        and tom rims, each kit playing what it has for them (a 909's open
+        hat for a half-open one; the acoustic kits' rack tom for GM's high
+        tom).
       TEXT
       commands :tr808, :tr909, :kit, :drum_kit, :grid, :euclid
       note :drums
@@ -714,6 +723,12 @@ module MB
         specification's).
         `mips: :default` reads smoother tables (more memory) than the
         `:octave` default.
+
+        A name without a slash finds an installed font: `sf2('Black_Pearl')`
+        (on $MB_SOUND_SOUNDFONTS, /usr/share/sounds/sf2 and the other
+        SoundFont folders, ~/Library/Audio/Sounds/Banks on a Mac; Tab
+        offers the names), saved as the name.  Drum kit presets map drum
+        roles to their keys (`roles: false` plays the font's own keys).
       TEXT
       commands :sf2, :soundfont
       see :sampler, :sequences
@@ -954,11 +969,16 @@ module MB
         fills phrase ends (`energy: true` grows the fill with the
         energy); `rhythm(field, [1, 0, 0.5, 0] * 4)` is one
         melodic row.  Steer them live: options like `density:`, `mutate:`,
-        `energy:`, `chance:` take knobs (`knob(:busy)`, `cc(1)`,
-        `knob(:reg).choose(A2..A4, A3..A5)` for `range:`), read once per
-        cycle a `lead:` (one beat) before it starts, so a `turn` steers the
-        next cycle and takes replay it; `generate(1.bar, busy: knob(:busy))
-        { |cycle, dice, busy:| }` hands them to your block.  They follow
+        `energy:`, `chance:` take knobs (`knob(:busy)`, `cc(1)`, tempo LFOs,
+        `knob(:reg).choose(A2..A4, A3..A5)` for `range:`), read for the
+        start of what they steer.  `beats` reads every beat (`decide:
+        :step`, `:bar`, `:cycle`, or a length), so a turn lands on the next
+        beat and `turn :energy, 2.bars.lfo.square.at(0.1..1)` plays a busy
+        bar, then a sparse one.  The melodic generators read once a cycle,
+        a `lead:` (one beat) before it starts: a turn steers the next cycle,
+        an LFO or a ramp gives its value at the cycle's start.  Takes replay
+        it all; `generate(1.bar, busy: knob(:busy)) { |cycle, dice, busy:|
+        }` hands them to your block.  They follow
         the session key live: `motifs(scale(:phrygian), 8)` (a scale
         without a root) plays phrygian on whatever root `key` sets, cycle by
         cycle; no source at all (`motifs(8)`, `melody(8, vary: true)`,
@@ -966,9 +986,16 @@ module MB
         :VII)` is a chord a bar on degrees of the key, so the lines re-voice
         into each chord and move when the key does.  The demo
         songs' and genre templates' generators are in the library:
-        `L.gen` (`L.gen.koto_motif(seed: 3)`, `play L.gen.techno_beat`)
+        `L.gen` (`L.gen.koto_motif(seed: 3)`, `play L.gen.beat.techno`)
         and `L.flow` for their section chains (`help :library`);
-        `lesson :generative` puts them on tracks step by step.
+        `lesson :generative` puts them on tracks step by step.  Drum beats
+        are the family `L.gen.beat`: `rock`, `pop`, `halftime`, `funk`,
+        `house`, `dnb`, `techno` (`L.gen.rock` finds `L.gen.beat.rock`),
+        each with the knobs energy and swing on its track:
+        `track :drums, kit(:acoustic); bg :drums, L.gen.beat.rock;
+        turn :"drums/energy", 2.bars.lfo.square.at(0.2..1)` (a busy bar, then
+        a sparse one, counted from where the turn lands: add `on: :bar`
+        when the song is already playing).
       TEXT
       commands :tones, :chord, :weights, :harmony, :progression, :generate, :strikes, :dice, :melody, :motifs, :beats, :rhythm
       note :generative
@@ -999,6 +1026,11 @@ module MB
         end
         bg :try, tr909(groove).at(-18.db)
         turn :energy, 0.9, over: 4
+      end
+      example 'a beat that alternates busy and sparse bars (a square LFO on its energy)' do
+        knob :energy, 0.5
+        bg :try, tr909(beats(16, energy: knob(:energy)) { kick [1, 0, 0, 0] * 4, keep: [0, 8]; hat [0.8] * 16 }).at(-18.db)
+        turn :energy, 2.bars.lfo.square.at(0.05..1)
       end
       example 'sparse bells over a drone' do
         bells = strikes(scale(:minor_pentatonic, :a).weights.over(A4..A6), every: 1.n8, chance: 0.5, gap: 2)
@@ -1111,6 +1143,19 @@ module MB
         `fx :drums, -> { it.softclip(0.1, 0.9).limiter(ceiling: -6.db) }`.
         In `ui :sound` the library picker's Enter on an effect does this
         for the inspected track.
+
+        A scene sets a track's knobs with a track hash, one key saying
+        everything about the track: `scene :intro, drums: { clip: beat,
+        energy: 0.2 }`, `scene :build, drums: { energy: [0.8, over:
+        :section], fill: 0.7 }`, `scene :drop, drums: { energy:
+        2.bars.lfo.square.at(0.2..1) }`.  Values are what `turn` takes (a
+        number, `[value, over:, curve:, from:]`, an LFO or knob name);
+        `level:` is the track's fader.  Without `clip:` the track plays on
+        what it plays, even in a full scene (`clip: :off` stops it).  It is
+        the same as the quoted keys (`drums: beat, "drums/energy": 0.2`),
+        which still work; saved sets print the hash.  `over: :section`
+        ramps to the end of the form section playing where the scene
+        lands (`help :flow`).
       TEXT
       commands :track, :tracks, :untrack, :clear_set, :fx, :scene, :scenes, :go, :launch, :tweak, :quant, :undo, :redo!, :changes, :swap
       note :arrangement
@@ -1126,6 +1171,14 @@ module MB
         track :try_bass, :dnb_sub, q: 1
         bg :try_bass, seq(A1, rest, A1, A2).n8.loop
         turn :"try_bass/cutoff", 80.0, over: 2
+      end
+      example 'a track hash: the clip and a knob in one key, then a ramp (at the library\'s level: loud)', sound: false do
+        track :try_bass, :dnb_sub, q: 1
+        bg :try_bass, seq(A1, rest, A1, A2).n8.loop
+        scene :try_low, try_bass: { clip: seq(A1, rest, A1, A2).n8.loop, cutoff: 60.0 }
+        scene :try_open, try_bass: { cutoff: [120.0, over: 2] }
+        go :try_low
+        go :try_open, in: 1.bar
       end
       example 'an effect insert on a library instrument, swapped at the next bar', sound: false do
         track :try_keys, :funk_keys, q: 1, fx: L.fx.hall
@@ -1162,6 +1215,16 @@ module MB
         nearest behind;
         `go :drop, section: :drop2` picks one; a scene no section plays
         ends the flow: you're driving).
+
+        Sections turn knobs as each pass starts: `drop 8, cut: 8000`, and a
+        track's knobs as its track hash, `build 16, drums: { energy: [0.8,
+        over: :section], fill: 0.7 }` (clips come from the section's
+        scene).  `over: :section` ramps from where the change lands to the
+        end of that section pass: a whole 16-bar build, the rest of the
+        section for a `turn` or `go` while the flow plays.  Each pass turns
+        again from where the knob is, so a `times: 2` or `loop!` section
+        ramps on its first pass and holds the value after (`from:` starts
+        each pass over).  With no flow playing it says so; write `over: 4`.
       TEXT
       commands :flow, :start, :pause, :play_form, :section, :sections, :loop!, :onward, :goto, :skip, :finish, :practice, :seek, :marker, :meter, :suspend
       note :arrangement
@@ -1316,6 +1379,14 @@ module MB
         line (Up), put the cursor on the number (Alt-Shift-Left/Right jump
         between numbers), and Alt-Up/Alt-Down step it and run the line
         again, landing where the line lands (`help :ui` has the keys).
+
+        A track's knobs turn together by their short names: `turn :drums,
+        energy: 0.8, fill: 0.3` (one undo step), and `over:`, `curve:`,
+        `from:` apply to each (`turn :drums, energy: 1, fill: 1, over:
+        :section` ramps to the end of the playing section).  Scenes and
+        sections write the same as track hashes: `scene :build, drums: {
+        energy: [0.8, over: 4] }`.  A name the track doesn't have suggests
+        its knobs.
       TEXT
       commands :knob, :knobs, :turn, :snap, :snaps, :recall, :xfade, :learn, :smooth_gesture
       note :arrangement
@@ -1871,17 +1942,19 @@ module MB
         (note effects), `L.analyze` (audio to notes or control), `L.mod`,
         `L.all`.
 
-        Generators are entries too: `L.gen.techno_beat(seed: 3, energy:
+        Generators are entries too: `L.gen.beat.techno(seed: 3, energy:
         knob(:energy))` is the demo songs' evolving beat as a clip (a word
-        given keywords builds; `L.gen.techno_beat.()` at the defaults,
-        printed back with its seed: `L.gen.techno_beat(seed: 5)`),
-        `track :drums, L.gen.techno_beat` plays it on its kit, `track :lead,
+        given keywords builds; `L.gen.beat.techno.()` at the defaults,
+        printed back with its seed: `L.gen.beat.techno(seed: 5)`),
+        `track :drums, L.gen.beat.techno` plays it on its kit, `track :lead,
         L.gen.phrygian_motif, :tine_piano` on another instrument.  On a
         track, the params the call leaves out that steer it (energy,
         density, mutate, ...) are the track's knobs: `turn :"drums/energy",
         0.9, over: 4.bars`, read once a bar (scenes, MIDI learn, and the
-        inspector's notes row too); `L.gen.techno_beat(energy: 0.8)` keeps
-        its number.
+        inspector's notes row too); `L.gen.beat.techno(energy: 0.8)` keeps
+        its number.  `L.gen.beat` is a family (the drum beats): its entries
+        print with it, and under `L.gen` alone their names narrow like
+        tags (`L.gen.rock` is `L.gen.beat.rock`).
         `L.flow.techno_chain(seed: 4)` is a genre template's section chain;
         `flow L.flow.techno_chain` plays it over the session's scenes, and
         the templates read theirs from here.  Saved graphs print them back

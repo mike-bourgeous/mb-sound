@@ -28,11 +28,29 @@ module UIScreenGuard
     list << "a band is still up (UI.band #{ui.band.layout.name.inspect})" if ui.band&.active?
     d = ui::Design
     list << "sound design is still open on #{d.last.inspect} (UI::Design.close)" if d.instance_variable_get(:@open)
+    # (yielders following a thread that ended: the GVLYield hook and its
+    # kicker thread keep running for the next examples, and fast_ui_spec's
+    # GVLYield example found it active; Session#close lets its render
+    # thread go, merge train 2026-11-22)
+    gy = ui::Yielding.available? && MB::Sound::FastUI::GVLYield
+    list << "GVLYield still follows a thread that ended (#{gy.priority.inspect}; UI::Yielding.unfollow or .leave)" if gy && gy.priority && !gy.priority.alive?
     STDS.each do |name, io|
       id = (io.stat.then { |st| [st.dev, st.ino] } rescue nil)
       list << "#{name} was left reopened elsewhere (a screen adopted it and never gave it back)" unless id == ORIGINAL[name][0]
     end
     list
+  end
+
+  # Panes publish their cursor's pick for a detail pane in per-process
+  # state (Clips.selected for :clip, Racks.selected for :rack), which an
+  # example drawing those panes leaves set.  Cleared before each example:
+  # a fresh screen's first frame draws :clip before :clips republishes,
+  # so tiles_property_spec's fresh screen showed a clip an earlier example
+  # in the same process had picked (merge train 2026-11-22, seed 33918).
+  def self.reset_selections
+    panes = MB::Sound::UI::Panes
+    panes::Clips.selected = nil if defined?(panes::Clips)
+    panes::Racks.selected = nil if defined?(panes::Racks)
   end
 
   def self.clean_up
@@ -43,6 +61,7 @@ module UIScreenGuard
     ui.instance_variable_set(:@band, nil)
     %i[@open @last @before].each { |v| ui::Design.instance_variable_set(v, nil) }
     ui::Inspect.target = nil
+    ui::Yielding.unfollow(MB::Sound::FastUI::GVLYield.priority) if ui::Yielding.available? && !MB::Sound::FastUI::GVLYield.priority&.alive?
     STDS.each do |name, io|
       id = (io.stat.then { |st| [st.dev, st.ino] } rescue nil)
       io.reopen(ORIGINAL[name][1]) unless id == ORIGINAL[name][0]
@@ -54,6 +73,7 @@ RSpec.configure do |config|
   # (An around hook, outside the examples' own: specs that stop their
   # screens in an around hook after example.run are clean)
   config.around(:each) do |example|
+    UIScreenGuard.reset_selections if defined?(MB::Sound::UI::Panes)
     example.run
     problems = UIScreenGuard.problems
     unless problems.empty?

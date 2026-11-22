@@ -32,6 +32,7 @@ require_relative 'sampler/zone_map'
 require_relative 'sampler/choke_map'
 require_relative 'sampler/instrument'
 require_relative 'sampler/sfz'
+require_relative 'sampler/font_path'
 require_relative 'sampler/sf2'
 require_relative 'sampler/capture'
 

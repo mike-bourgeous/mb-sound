@@ -24,6 +24,35 @@ RSpec.describe(MB::Sound::UI::Yielding) do
     worker&.kill&.join
   end
 
+  it 'lets a closed Session\'s render thread go, the hook and kicker stopping with no yielder left (merge train 2026-11-22)' do
+    # (live_threads_spec's order: a screen stops while the scheduler still
+    # yields, then the Session closes; the scheduler leaves through the
+    # hook, which left the dead render thread followed and gy active)
+    out = MB::Sound::NullOutput.new(channels: 2, sleep: :virtual, buffer_size: 256)
+    session = MB::Sound::Session.new(output: out, realtime: true)
+    MB::Sound::Session.with_context(session: session) { MB::Sound.module_eval('bg :hum, 110.hz.at(-30.db)') } # (the render thread)
+    session.schedule(0) {} # (the scheduler thread joins the yielders)
+    pump = Thread.new { loop { out.consume(0.02); sleep 0.01 } }
+    expect(wait_until { session.running? }).to eq(true)
+    expect(wait_until { gy.yielders.any? { |t| t.name == 'MB::Sound::Session scheduler' } }).to eq(true), gy.yielders.map(&:name).inspect
+    painter = Thread.new { sleep }
+    expect(described_class.join(painter, render: session.render_thread)).to eq(true)
+    expect(described_class).to be_active
+    described_class.leave(painter) # (the screen stops; the scheduler still yields)
+    expect(gy.priority).to equal(session.render_thread)
+    render = session.render_thread
+    session.close
+    expect(render).not_to be_alive
+    expect(gy.priority).to be_nil
+    expect(gy).not_to be_active
+    expect(described_class.unfollow(nil)).to be_nil
+  ensure
+    pump&.kill&.join
+    painter&.kill&.join
+    session&.close
+    MB::Sound.rewind
+  end
+
   describe 'the painter (FrameRate#yield_to_render; ui-perf-2)' do
     let(:screen) {
       Class.new {

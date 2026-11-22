@@ -135,7 +135,7 @@ RSpec.describe(MB::Sound::Arrangement::Fx, :aggregate_failures) do
         presets: [{ name: 'Spec Kit', program: 0, zones: [{ instrument: 0 }] }, { name: 'GM Kit', bank: 128, program: 0, zones: [{ instrument: 0 }] }])
     end
 
-    let(:beat) { MB::Sound::L.gen.techno_beat.call(seed: 5) }
+    let(:beat) { MB::Sound::L.gen.beat.techno.call(seed: 5) }
 
     it 'plays clips through an fx insert, bit for bit like the block form with the effect inside' do
       font = MB::Sound.sf2(kit_path)

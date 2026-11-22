@@ -69,7 +69,7 @@ module MB::Sound
     ambient_harp: ['bin/synths/ambient.rb', :harp],
     ambient_drone: ['bin/synths/ambient.rb', :drone, *preset_knob_args(AMBIENT_KNOBS[:drone])],
     ambient_rainstick: ['bin/synths/ambient.rb', :rainstick, *preset_knob_args(AMBIENT_KNOBS[:rainstick])],
-    funk_beat: ['bin/synths/funk.rb', :beat],
+    funk_kit: ['bin/synths/funk.rb', :beat],
     funk_perc: ['bin/synths/funk.rb', :perc],
     funk_bass: ['bin/synths/funk.rb', :bass, *preset_knob_args(FUNK_KNOBS[:bass])],
     funk_keys: ['bin/synths/funk.rb', :keys, *preset_knob_args(FUNK_KNOBS[:keys])],

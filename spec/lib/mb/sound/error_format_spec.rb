@@ -85,13 +85,13 @@ RSpec.describe(MB::Sound::ErrorFormat) do
       expect(sig.blend(0.5) { it.then(&circle) }).to be_a(MB::Sound::GraphNode)
     end
 
-    # (the maintainer's take, 2026-11-21: `bg :drums, L.gen.techno_beat.transpose(4)`)
+    # (the maintainer's take, 2026-11-21: `bg :drums, L.gen.beat.techno.transpose(4)`)
     it 'names .call for a clip method on a generator entry that was not called (ux-friction-2)' do
-      gen = MB::Sound::L.gen.techno_beat
+      gen = MB::Sound::L.gen.beat.techno
       e = (gen.transpose(4) rescue $!)
-      expect(described_class.summary(e)).to include('did you mean L.gen.techno_beat.call.transpose(4) (a library generator gives its clip when called; L.gen.techno_beat(...) takes its params)?')
+      expect(described_class.summary(e)).to include('did you mean L.gen.beat.techno.call.transpose(4) (a library generator gives its clip when called; L.gen.beat.techno(...) takes its params)?')
       e = (gen.echo(3, 1.n32, pitch: 10) rescue $!)
-      expect(described_class.summary(e)).to include('L.gen.techno_beat.call.echo(3, 1.n32, pitch: 10)')
+      expect(described_class.summary(e)).to include('L.gen.beat.techno.call.echo(3, 1.n32, pitch: 10)')
       e = (gen.frobnicate rescue $!)
       expect(described_class.summary(e)).not_to include('.call.')
       e = (MB::Sound::L.fx.reverb.hall.transpose(4) rescue $!)

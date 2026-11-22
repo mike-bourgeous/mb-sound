@@ -31,24 +31,35 @@ module MB
         # The Candidates for +text+ (best first, at most +limit+), or nil
         # when +text+ isn't a head chain (or names one entry exactly: there
         # is nothing left to find).
-        def candidates(text, limit: 12)
+        #
+        # A family that is a sub-namespace of its head (L.gen.beat) shows
+        # as one Candidate for the family under its head while nothing is
+        # typed ("L.gen." lists the melodic generators and `beat`), and its
+        # entries with their family once letters are typed: "L.gen.rock"
+        # offers L.gen.beat.rock (Entry#namespaced?).  +fold+ false lists
+        # the entries even with nothing typed (the picker, which groups
+        # them by family instead).
+        def candidates(text, limit: 12, fold: true)
           m = PATTERN.match(text.to_s) or return nil
           root = m[1]
           chain = m[2].split('.').reject(&:empty?).map(&:to_sym)
           typed = m[3].to_s.downcase
-          pool, path = walk(root, chain)
+          pool, path, chosen = walk(root, chain)
           return nil unless pool
 
           heads = chain.empty? ? head_candidates(root, typed) : []
+          families = chain.empty? ? [] : family_candidates(path, pool, chosen, typed)
+          pool = pool.reject { |e| e.namespaced? && !chosen.include?(e.family) } if fold && typed.empty? && !chain.empty?
           scored = pool.filter_map { |e| (s = score(e, typed)) && [s, e] }
-          scored.sort_by! { |s, e| [-s, e.name.to_s, e.family.to_s] }
+          # (nothing typed: by name, a sub-namespace's entries together)
+          scored.sort_by! { |s, e| [-s, e.namespaced? && !chosen.include?(e.family) ? e.family.to_s : '', e.name.to_s, e.family.to_s] }
           # (names shared under a head or in the pool need their family)
           names = chain.empty? ? pool.group_by { |e| [e.kind, e.name] } : pool.group_by(&:name)
           width = scored.first(limit).map { |_, e| e.name.length }.max.to_i
           found = scored.first(limit).map { |_, e|
-            Candidate.new(chain: chain_for(root, path, e, names, chain.empty?), entry: e, label: label_for(e, width))
+            Candidate.new(chain: chain_for(root, path, e, names, chain.empty?, chosen), entry: e, label: label_for(e, width))
           }
-          list = (heads + found).uniq(&:chain).first(limit)
+          list = (heads + families + found).uniq(&:chain).first(limit)
           return nil if list.empty? || (list.length == 1 && list.first.chain == text.to_s)
           list
         end
@@ -59,7 +70,7 @@ module MB
         # chain's text, or nil when a word doesn't narrow (or reaches an
         # Entry: its methods are Pry's to complete).
         def walk(root, chain)
-          return [index.entries, root] if chain.empty?
+          return [index.entries, root, []] if chain.empty?
           head, *rest = chain
           return nil unless HEADS.key?(head) || head == :all
 
@@ -68,9 +79,18 @@ module MB
             node = node.word(w)
             return nil unless node.is_a?(Heads::Query)
           end
-          [node.entries, "#{root}.#{chain.join('.')}"]
+          [node.entries, "#{root}.#{chain.join('.')}", node.chosen]
         rescue KeyError
           nil
+        end
+
+        # The sub-namespace families of +pool+ not chosen yet whose names
+        # start with +typed+ ("beat  (family: 7 drum beats)").
+        def family_candidates(path, pool, chosen, typed)
+          pool.select { |e| e.namespaced? && !chosen.include?(e.family) }.group_by(&:family).filter_map { |fam, list|
+            next unless fam.to_s.start_with?(typed)
+            Candidate.new(chain: "#{path}.#{fam}", entry: nil, label: "#{fam}  (family: #{list.length} entr#{list.length == 1 ? 'y' : 'ies'}, #{list.first(4).map(&:name).join(' ')}#{list.length > 4 ? ' ...' : ''})")
+          }
         end
 
         # Heads starting with +typed+ at the root ("L.in" -> L.inst).
@@ -97,14 +117,16 @@ module MB
         # The chain reaching +e+: from the root its head path; under a
         # head the chain so far plus its name (with its family when two
         # entries left share the name).
-        def chain_for(root, path, e, names, at_root)
+        def chain_for(root, path, e, names, at_root, chosen = [])
+          ns = e.namespaced?
           if at_root
             # (as Entry#head_path, without its index walk per entry)
             head = HEADS.key(e.kind)
-            fam = names[[e.kind, e.name]].length > 1 && e.family != :preset ? ".#{e.family}" : ''
+            fam = ns || (names[[e.kind, e.name]].length > 1 && e.family != :preset) ? ".#{e.family}" : ''
             return head ? "#{root}.#{head}#{fam}.#{e.name}" : "#{root}.all#{fam}.#{e.name}"
           end
-          names[e.name].length > 1 ? "#{path}.#{e.family}.#{e.name}" : "#{path}.#{e.name}"
+          return "#{path}.#{e.family}.#{e.name}" if ns && !chosen.include?(e.family)
+          names[e.name].length > 1 && !(ns && chosen.include?(e.family)) ? "#{path}.#{e.family}.#{e.name}" : "#{path}.#{e.name}"
         end
 
         def label_for(e, width)

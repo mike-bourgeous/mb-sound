@@ -78,7 +78,7 @@ module MB
         # plays the kit through these; grid rows named after GM drums land
         # on the same voices).  The 808 has fewer voices than GM, so similar
         # sounds share one (e.g. every cymbal plays the cymbal).
-        GM_MAP = {
+        GM_MAP = Roles.extend_gm_map({
           kick: [35, 36],
           rimshot: [37],
           snare: [38, 40],
@@ -95,7 +95,7 @@ module MB
           low_conga: [64],
           maracas: [69, 70],
           claves: [75, 76, 77],
-        }.freeze
+        })
 
         # Voice names by GM note (from GM_MAP).
         GM_NOTES = GM_MAP.flat_map { |v, notes| notes.map { |n| [n, v] } }.to_h.freeze

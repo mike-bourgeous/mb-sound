@@ -37,7 +37,7 @@ RSpec.describe('MB::Sound generator steering (G3)', :aggregate_failures) do
     s&.close
   end
 
-  it 'reads knobs at each cycle\'s decision point, a beat before the cycle, at any buffer size' do
+  it 'reads knobs for each cycle\'s start (at its decision point, a beat before), at any buffer size' do
     setup = ->(seen) {
       MB::Sound.knob :busy, 0.0, range: 0.0..1.0
       MB::Sound.bg(:a, busy_clip(seen).velocity, on: :now)
@@ -45,11 +45,13 @@ RSpec.describe('MB::Sound generator steering (G3)', :aggregate_failures) do
       MB::Sound.turn :busy, 1.0, over: 2, at: MB::Sound.bar(2)
     }
     seen, audio = steer_render(5, &setup)
-    # Decision points 1.75 (3/8 of the ramp) and 2.75 (7/8)
+    # Read for the cycles' starts (beats-timing-1; before, the decision
+    # points 1.75 and 2.75 gave 3/8 and 7/8 of the ramp): the ramp's
+    # first frame, its middle, its end
     expect(seen[0]).to eq(0)
-    expect(seen[1]).to eq(0)
-    expect(seen[2]).to be_within(1e-4).of(0.375)
-    expect(seen[3]).to be_within(1e-4).of(0.875)
+    expect(seen[1]).to be_within(1e-4).of(0)
+    expect(seen[2]).to be_within(1e-4).of(0.5)
+    expect(seen[3]).to eq(1)
     expect(seen[4]).to eq(1)
     expect(audio.abs.max).to be > 0.9
 

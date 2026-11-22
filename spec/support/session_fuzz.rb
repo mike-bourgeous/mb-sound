@@ -836,6 +836,33 @@ module SessionFuzz
       body = "knob :cut, (100.hz..5000.hz).at(#{s.pick(%w[600 3000])}.hz)\\n#{body}" if s.knob
       "GraphIO.load(%(graph \#{GraphIO::FORMAT}, name: \"tempo\", kind: :set\\n#{body}\\n), session: Session.current)"
     },
+    ->(s) {
+      # (beats-timing-1) a beat steered by :busy per beat (or per step,
+      # bar, eighth, with a lead), sometimes humanized, and sometimes :busy
+      # following a square tempo LFO: each unit reads the values for its
+      # start (a followed LFO's value there, exactly), at any buffer size,
+      # planned or not, mid-song launches deciding like an uninterrupted run
+      d = s.pick(['', ', decide: :step', ', decide: :bar', ', decide: 1.n8', ', lead: 1.n16'])
+      beat = "beats(16, energy: knob(:busy), seed: #{s.rng.rand(1..99)}#{d}) { kick [1, 0, 0, 0] * 4, keep: [0, 8]; hat [0.8] * 16, drift: 0.2 }#{s.pick(['', '.humanize(4.ms)'])}"
+      line = "bg :#{s.bg_name}, tr808(#{beat}) * 0.5#{s.on}"
+      s.rng.rand < 0.6 ? "#{line}; turn :busy, #{s.pick(['2.bars', '1.bar', '2.beats'])}.lfo.square.at(0.1..0.9)" : line
+    },
+    # (form-knobs-1) a track hash on an instrument track: a scene setting
+    # the track's knobs (and sometimes its clip) in one key, launched; or
+    # a turn of several of its knobs with one ramp
+    ->(s) {
+      next unless s.instruments
+
+      t = s.pick(s.instruments)
+      release = s.pick([0.02, 0.3])
+      if s.rng.rand < 0.5
+        clip = s.rng.rand < 0.5 ? "clip: #{s.clip_for.(t)}, " : ''
+        level = s.pick(['0.6', '[0.4, over: 1/2r]', '[1, over: 1]'])
+        "scene :th, #{t}: { #{clip}release: #{release}, level: #{level} }, others: :keep; go :th#{s.on}"
+      else
+        "turn :#{t}, release: #{release}, level: #{s.pick([0.4, 1])}, over: #{s.pick(['1/2r', '1'])}#{s.on}"
+      end
+    },
     # (new commands go here, at the end)
   ].freeze
 
