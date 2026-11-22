@@ -995,7 +995,17 @@ module MB
         `track :drums, kit(:acoustic); bg :drums, L.gen.beat.rock;
         turn :"drums/energy", 2.bars.lfo.square.at(0.2..1)` (a busy bar, then
         a sparse one, counted from where the turn lands: add `on: :bar`
-        when the song is already playing).
+        when the song is already playing).  `.morph` blends one generator
+        into another, slot by slot: `bg :drums,
+        L.gen.beat.dnb.morph(L.gen.beat.house)` (or `.morph(:house)`, a
+        name in the same family) plays dnb at 0 and house at 1 of the
+        track knob `:"drums/morph"` (`morph: 0.3` is where it starts;
+        `turn :"drums/morph", 1, over: 8.bars`, an LFO, or a scene's
+        `drums: { morph: 1 }`).  Each drum step (a beat of a melodic line)
+        switches once on the way, notes both play stay, the anchors switch
+        halfway, and the sides keep their own seeds and share knobs of one
+        name.  Two of one kind only: a drum beat doesn't morph into a
+        pitched line.
       TEXT
       commands :tones, :chord, :weights, :harmony, :progression, :generate, :strikes, :dice, :melody, :motifs, :beats, :rhythm
       note :generative
@@ -1031,6 +1041,12 @@ module MB
         knob :energy, 0.5
         bg :try, tr909(beats(16, energy: knob(:energy)) { kick [1, 0, 0, 0] * 4, keep: [0, 8]; hat [0.8] * 16 }).at(-18.db)
         turn :energy, 2.bars.lfo.square.at(0.05..1)
+      end
+      example 'one beat morphing into another (dnb at 0, house at 1 of the knob drums/morph)' do
+        track :try_drums, :tr909, q: 1
+        level :try_drums, -18.db
+        bg :try_drums, L.gen.beat.dnb.morph(L.gen.beat.house)
+        turn :"try_drums/morph", 1, over: 8.bars
       end
       example 'sparse bells over a drone' do
         bells = strikes(scale(:minor_pentatonic, :a).weights.over(A4..A6), every: 1.n8, chance: 0.5, gap: 2)
@@ -1954,7 +1970,11 @@ module MB
         inspector's notes row too); `L.gen.beat.techno(energy: 0.8)` keeps
         its number.  `L.gen.beat` is a family (the drum beats): its entries
         print with it, and under `L.gen` alone their names narrow like
-        tags (`L.gen.rock` is `L.gen.beat.rock`).
+        tags (`L.gen.rock` is `L.gen.beat.rock`).  A generator entry
+        morphs into another: `bg :drums,
+        L.gen.beat.dnb.morph(L.gen.beat.house)` (the knob :"drums/morph",
+        0 dnb, 1 house; `.morph(:house)` names one in the family;
+        `L.gen.morph(:dnb, :house)` is the same; help :generative).
         `L.flow.techno_chain(seed: 4)` is a genre template's section chain;
         `flow L.flow.techno_chain` plays it over the session's scenes, and
         the templates read theirs from here.  Saved graphs print them back

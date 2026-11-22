@@ -226,6 +226,9 @@ module MB
               return value unless value.kind == :generator && value.builder
               [value, {}]
             when Sequence::Clip
+              # (a morph of generators: its sides with the track's knobs,
+              # and the knob :"track/morph"; generator_morph.rb)
+              m = MORPHS[value] and return morph_track_clip(value, m, track, session, reuse)
               b = ORIGINS[value] or return value
               [b.entry, b.kwargs]
             else
@@ -386,6 +389,8 @@ module MB
         # The instrument name a generator clip's entry plays on (see
         # .generator), or nil.
         def instrument(clip)
+          # (a morph plays on its first side's, else the second's)
+          m = morph_of(clip) and return m.sides.lazy.filter_map { |s| instrument(s) }.first
           origin(clip)&.entry&.settings&.[](:instrument)
         end
 

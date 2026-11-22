@@ -654,7 +654,7 @@ module MB
         # with the track's knobs for its params, :"drums/energy", made if
         # missing and left as they are if not: Library::Generators.track_clip)
         values = values.to_h { |k, v|
-          gen = (v.is_a?(Library::Entry) && v.kind == :generator) || (v.is_a?(Sequence::Clip) && Library::Generators.origin(v))
+          gen = (v.is_a?(Library::Entry) && v.kind == :generator) || Library::Generators.generator_clip?(v)
           [k, gen && k.is_a?(Symbol) && @session.names.kind(k) != :knob ? Library::Generators.track_clip(v, k, @session, reuse: true) : v]
         }
 
