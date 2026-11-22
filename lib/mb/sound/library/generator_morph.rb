@@ -171,9 +171,10 @@ module MB
           hit
         end
 
-        # A label for clip +clip+ in morph errors: its entry's path, else
-        # "the clip".
+        # A label for clip +clip+ in morph errors: its entry's path (a
+        # morph's as its chain), else "the clip".
         def side_label(clip)
+          m = morph_of(clip) and return "#{side_label(m.sides[0])}.morph(#{side_label(m.sides[1])})"
           b = clip.is_a?(Sequence::Clip) ? origin(clip) : nil
           b ? head_path(b.entry) : (clip.is_a?(Sequence::Clip) ? 'the clip' : clip.inspect)
         end

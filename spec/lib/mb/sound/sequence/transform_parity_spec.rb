@@ -137,6 +137,7 @@ RSpec.describe('Clip and Kit transform parity', :aggregate_failures) do
       'pitch moves: a kit row is a drum voice, so moving its note moves it to another voice' => %i[transpose ghost_chords],
       'combining and resizing clips (kits combine with Kit#fill, rows by name)' => %i[& | * repeat truncate bake roll],
       'note lengths: drum voices ignore them (Kit#legato is there for gated kits)' => %i[d dd dotted double_dotted t triplet note_length staccato],
+      'generator morphs: a morph blends two looping generator clips (L.gen.beat.rock.morph(:funk)); a kit\'s grid rows are fixed' => %i[morph],
     }
   end
 

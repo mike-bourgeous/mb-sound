@@ -44,7 +44,7 @@ module MB
       #
       # Each side keeps its own seed, params, and decisions: the morph's
       # Steer reads +morph+ and every moving param of both sides (as
-      # "0/energy", "1/energy") for each unit (the shorter of the sides'
+      # "a.energy", "b.energy") for each unit (the shorter of the sides'
       # units: a beat for beats, the cycle for melodic lines; the longer
       # lead), and computes each side's cycle with its values
       # (Generator#events_with).  Each side's events keep their own order
@@ -138,15 +138,24 @@ module MB
         # The sides (Side).
         attr_reader :sides
 
+        # The morph's Steer key of side +i+'s param +name+ (:"a.energy",
+        # :"b.swing"; plain Steer keys, not Session names).
+        def self.key(i, name)
+          :"#{SIDE_NAMES[i]}.#{name}"
+        end
+
+        # Side names in the morph's Steer keys.
+        SIDE_NAMES = %w[a b].freeze
+
         # A morph from Side +a+ to Side +b+ by +morph+ (see .clip).
         def initialize(a, b, morph:)
           @sides = [a, b].freeze
           length = [a.length, b.length].max
           @counts = @sides.map { |s| (length / s.length).to_i }.freeze
           params = { morph: morph }
-          @sides.each_with_index { |s, i| s.keys.each { |k| params[:"#{i}/#{k}"] = s.params[k] } }
+          @sides.each_with_index { |s, i| s.keys.each { |k| params[Morph.key(i, k)] = s.params[k] } }
           @fixed = params.freeze
-          @side_keys = @sides.each_with_index.map { |s, i| s.keys.map { |k| [k, :"#{i}/#{k}"] }.freeze }.freeze
+          @side_keys = @sides.each_with_index.map { |s, i| s.keys.map { |k| [k, Morph.key(i, k)] }.freeze }.freeze
           unit = @sides.map(&:unit).min
           lead = @sides.map(&:lead).max
           name = "morph(#{a.label}, #{b.label})"
@@ -160,7 +169,7 @@ module MB
         end
 
         # The events of morph cycle +cycle+ with the decided +values+
-        # (:morph, and each side's params by "i/name"): each slot's events
+        # (:morph, and each side's params by "a.name", "b.name"): each slot's events
         # from A or from B (see the class comment), A's in A's order, then
         # B's in B's order.
         def cycle_events(cycle, values)

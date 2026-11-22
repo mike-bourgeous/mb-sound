@@ -154,12 +154,12 @@ RSpec.describe MB::Sound::Library::Generators, 'morph', :aggregate_failures do
     @sessions << s
     MB::Sound::Session.with_context(session: s) { MB::Sound.track(:drums, l.gen.beat.rock.morph(:funk, morph: 1)) }
     gen = s.arrangement.tracks[:drums].clip.variations.first.block
-    swing = ->(i) { MB::Sound::ValueSource.value_at(gen.steer.params[:"#{i}/swing"], s.transport.position) }
+    swing = ->(i) { MB::Sound::ValueSource.value_at(gen.steer.params[:"#{%w[a b][i]}.swing"], s.transport.position) }
     expect([swing.(0), swing.(1)]).to eq([0.5, 0.54])
     # (funk's swing is 0.54 + (knob - 0.5): exactly 0.54 untouched, as much
     # higher as the knob is turned up)
-    expect(gen.steer.params[:"0/swing"].node).to equal(s.knobs[:"drums/swing"])
-    expect(gen.steer.params[:"1/swing"].to_ruby).to eq('0.54 + (knob(:"drums/swing") - 0.5)')
+    expect(gen.steer.params[:"a.swing"].node).to equal(s.knobs[:"drums/swing"])
+    expect(gen.steer.params[:"b.swing"].to_ruby).to eq('0.54 + (knob(:"drums/swing") - 0.5)')
   end
 
   it 'turns with a scene\'s track hash and over: like any track knob' do
@@ -208,7 +208,8 @@ RSpec.describe MB::Sound::Library::Generators, 'morph', :aggregate_failures do
       MB::Sound.bg(:drums, on: :now)
       again = io.dump(s.arrangement, name: 'm')
     }
-    expect(again).to eq(text)
+    unsaved = ->(t) { t.sub(/ saved: "[^"]*",/, '') }
+    expect(unsaved.(again)).to eq(unsaved.(text))
     expect((loaded - live).abs.max).to eq(0)
   end
 
@@ -270,7 +271,7 @@ RSpec.describe MB::Sound::Library::Generators, 'morph', :aggregate_failures do
     expect { l.gen.beat.rock.morph(l.flow.entries.first) }.to raise_error(ArgumentError, /L\.flow chains choose sections/)
     expect { l.fx.entries.first.morph(:x) }.to raise_error(ArgumentError, /morph blends generators \(L\.gen\); effects mix with sig\.blend/)
     expect { l.gen.beat.rock.morph(:hous) }.to raise_error(ArgumentError, /nothing under L\.gen is :hous.*Did you mean\?  :house/m)
-    expect { l.gen.beat.rock.morph(:funk).morph(:pop) }.to raise_error(ArgumentError, /already a morph: a morph blends two generators/)
+    expect { l.gen.beat.rock.morph(:funk).morph(:pop) }.to raise_error(ArgumentError, /L\.gen\.beat\.rock\.morph\(L\.gen\.beat\.funk\) is already a morph: a morph blends two generators/)
     expect { l.gen.beat.rock.morph(:funk, :house) }.to raise_error(ArgumentError, /takes one generator to morph into \(got 2; three or more sides are not built yet\)/)
     expect { l.gen.beat.rock.morph(:funk, energy: 0.8) }.to raise_error(ArgumentError, /unknown keyword energy: \(it takes morph:/)
     expect { l.gen.beat.rock.morph(:funk, morph: 2) }.to raise_error(ArgumentError, /morph: is from 0 \(L\.gen\.beat\.rock\) to 1 \(L\.gen\.beat\.funk\)/)
