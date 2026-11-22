@@ -270,6 +270,7 @@ module MB
         # at 128 and 256 frames; bg-latency-2).  +clip+ itself when it
         # isn't one, or +session+ lacks one of the knobs.
         def copy_reading(clip, session)
+          return clip unless clip.is_a?(Sequence::Clip) # (a track's Kit of rows, a Hash)
           lineage = clip.lineage
           idx = lineage.index { |c| KNOBS.key?(c) } or return clip
           root = lineage[idx]
