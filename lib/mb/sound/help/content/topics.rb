@@ -1293,7 +1293,9 @@ module MB
         `demo` loads a whole set into the session, paused at bar 1: Night
         Bus (bin/songs/night_bus_flow.rb), tech house at 126 BPM with 12
         tracks, 12 scenes, 5 knobs, a master chain, and its song form;
-        `demo :tunnel_vision` loads the other set (the list is below).
+        `demo :tunnel_vision` and `demo :n109` load the others (the
+        list is below; in N109, `turn :variant, 0, over: 8.bars` moves the
+        whole song from Kez Volta's second version to his first).
         Nothing plays until you do something: `go :groove` launches a
         scene, `turn :cut, 3000, over: 2` opens the hook's filter, `play_form
         demo.form` plays the whole song (steer it with `loop!`, `onward`,
