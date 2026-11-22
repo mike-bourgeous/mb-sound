@@ -45,6 +45,29 @@ RSpec.describe(MB::Sound::MIDI::SysEx, :aggregate_failures) do
       expect(asm.flush).to eq([[[0xF0, 0x7D, 1].pack('C*'), false]])
       expect(asm.flush).to eq([])
     end
+
+    # A sweep over how input may arrive: seeded random messages (SysEx of
+    # random lengths, notes between them) cut at random points, with
+    # real-time bytes dropped in anywhere, always give back the same SysEx.
+    it 'gives the same messages however the input is cut (seeded sweep)' do
+      rng = Random.new(20261122)
+      40.times do |round|
+        sysex = Array.new(rng.rand(1..5)) { ([0xF0] + Array.new(rng.rand(0..600)) { rng.rand(0..0x7F) } + [0xF7]).pack('C*') }
+        stream = sysex.flat_map { |m| [m, [0x90, rng.rand(0..127), rng.rand(1..127)].pack('C*')] }.join.bytes
+        rng.rand(0..6).times { stream.insert(rng.rand(0..stream.length), [0xF8, 0xFE].sample(random: rng)) }
+
+        got = []
+        a = described_class.new
+        pos = 0
+        while pos < stream.length
+          n = [rng.rand(1..300), stream.length - pos].min
+          got.concat(a.push(stream[pos, n].pack('C*')))
+          pos += n
+        end
+        expect(got).to eq(sysex.map { |m| [m, true] }), "round #{round}"
+        expect(a.receiving?).to eq(false)
+      end
+    end
   end
 
   describe '.describe' do
