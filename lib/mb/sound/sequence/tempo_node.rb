@@ -39,7 +39,7 @@ module MB
         include GraphNode::SampleRateHelper
         include GraphNode::Ports
         include TimelineNode
-        node_traits memory: :none, timeline: true
+        node_traits memory: :none, timeline: true, carry: :adopt
 
         port :jumps, '1 on the first sample after the timeline jumped (start, seek, resume) in :hz mode, else 0; none while freewheeling'
         port :jump_phase, 'On jump samples, the timeline position in cycles of the duration (0...1, double precision); 0 elsewhere'
@@ -147,6 +147,35 @@ module MB
           @moving = nil
           @pending_time = nil
           @first_count = nil
+          @carried_start = false
+        end
+
+        # Session::Carry's adoption (NodeTraits' +carry+ :adopt): true if
+        # +old+ is a tempo-synced length of the same duration and mode.
+        def carry_fits?(old)
+          old.class == self.class && old.mode == @mode && old.duration.whole_notes == @duration.whole_notes && old.count.nil? == @count.nil?
+        end
+
+        # Plays on from +old+'s place in a rebuilt graph (a carrying
+        # rebuild, Session::Carry): the Session starts the rebuilt graph's
+        # timeline nodes from the old graph's start, which in :hz mode would
+        # be a jump placing the oscillators it drives on the timeline grid
+        # again, dropping the phases they carried (their running sum, a
+        # float rounding away from the grid: -133 dB on a preset's
+        # 3.bars.hz.lfo, fixes-17).  The replaced node made its start's jump
+        # when its graph started, so the carried start makes none.  A seek
+        # landing before the rebuilt graph plays still jumps
+        # (#carry_seeked).
+        def carry_adopt(_old)
+          @carried_start = true
+        end
+
+        # Called by Session before a carried node's first start when the
+        # timeline was seeked after the rebuild landed: the start is then a
+        # jump, as the replaced node's seek would have been.
+        def carry_seeked
+          @carried_start = false
+          self
         end
 
         # Makes this node ignore the timeline (see the class description), or
@@ -364,6 +393,13 @@ module MB
         # description): the phase of a cycle of the duration at +time+.
         def timeline_start(time, _origin)
           @start_callbacks&.each { |c| c.call(self) }
+
+          # (a carried graph's start goes on from the replaced graph's
+          # phases: #carry_adopt)
+          if @carried_start
+            @carried_start = false
+            return
+          end
 
           return if freewheel? || @mode != :hz || @ports.nil?
           return @pending_time = time if @count

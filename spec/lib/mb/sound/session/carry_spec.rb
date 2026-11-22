@@ -199,6 +199,20 @@ RSpec.describe(MB::Sound::Session::Carry, :aggregate_failures) do
   # no declick; every node kind declares its memory, NodeTraits, and since
   # carry-1 delays, reverbs, choruses, and formants adopt their partners'
   # state: the cut keeps the echoes)
+  # (fixes-17, from merge train 7's carry sweep on a reese preset: the
+  # rebuilt graph's TempoNode placed its LFO on the timeline grid again at
+  # the carried start, one float ulp from the running phase, -133 dB;
+  # TempoNode#carry_adopt)
+  it 'carries a tempo-synced LFO (3.bars.hz.lfo, .sine) bit for bit' do
+    [->(c) { CARRY_LEAD.(c) * 3.bars.hz.lfo.at(0.5..1) }, ->(c) { CARRY_LEAD.(c) * 1.bar.hz.sine.at(0.25..1) }].each do |patch|
+      plain, = play(patch: patch, frames: 100_000)
+      carried, plan = play(->(s) { CARRY_REBUILD.(s) }, patch: patch, frames: 100_000)
+      expect(plan).to be_full
+      expect(plan.adopts.map { |_, n| n.class }).to include(MB::Sound::Sequence::TempoNode)
+      expect(carried).to eq(plain)
+    end
+  end
+
   it 'carries a multitap or a ping-pong\'s echoes bit for bit' do
     [->(c) { CARRY_LEAD.(c).multitap(0.2, 0.35) }, ->(c) { CARRY_LEAD.(c).ping_pong(0.25, feedback: 0.5) }].each do |patch|
       plain, = play(patch: patch, frames: 100_000)
