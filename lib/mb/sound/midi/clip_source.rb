@@ -112,6 +112,25 @@ module MB
           @carried_sounding = nil
           @content_from = nil # (see #chase_at_position)
           @hold_state = nil # (nil, :pending, :held; see #timeline_hold)
+          @preparers = nil # (see #prepare_with)
+        end
+
+        # Adds +preparer+ (an object with #cover(clip), e.g. a
+        # Sampler::Reach) to be told of every clip #prepare_clip announces,
+        # so it can get ready for the clip off the render thread.
+        def prepare_with(preparer)
+          @preparers ||= []
+          @preparers << preparer unless @preparers.any? { |p| p.equal?(preparer) }
+          self
+        end
+
+        # Gets the preparers (see #prepare_with) ready for +clip+, which a
+        # swap will play here (Session#swap calls this on its own thread
+        # before the swap is queued: a drum kit builds the tables of the
+        # clip's new keys there, not in the buffer where the swap lands).
+        def prepare_clip(clip)
+          @preparers&.each { |p| p.cover(clip) }
+          self
         end
 
         # Holds while the transport is paused (Session::TransportPause): the

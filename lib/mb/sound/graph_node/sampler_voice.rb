@@ -43,6 +43,10 @@ module MB
       # any buffer size.  Never ends (like other voices), except with +once+
       # (Sample#node): one note at the first sample, ending when it does.
       #
+      # +reach+ (a Sampler::Reach: a drum kit built for a clip) builds
+      # tables only for the regions on the keys it covers; others read a
+      # silent stand-in until the Reach covers them (a swap's clip).
+      #
       # A plan boundary for now.
       class SamplerVoice
         include GraphNode
@@ -62,9 +66,10 @@ module MB
         attr_reader :seed
 
         def initialize(instrument, channel: 0, trigger: nil, number: nil, freq: nil, gate: nil, shift: nil, start: nil, transpose: 0, declick: Sampler::DECLICK,
-                       interpolation: nil, mips: nil, seed: nil, once: false, choke: nil, choke_fade: true, choke_time: nil, resume: nil, sample_rate: 48000)
+                       interpolation: nil, mips: nil, seed: nil, once: false, choke: nil, choke_fade: true, choke_time: nil, resume: nil, reach: nil, sample_rate: 48000)
           raise ArgumentError, "A sampler voice plays a Sampler::Instrument (got #{instrument.inspect})" unless instrument.is_a?(Sampler::Instrument)
           @instrument = instrument
+          @reach = once ? nil : reach
           @channel = Integer(channel)
           @once = !!once
           if @once
@@ -220,7 +225,8 @@ module MB
         end
 
         def build_tables
-          @specs, @regions = @instrument.kernel_tables(@channel, @sample_rate, mips: @mips, interpolation: @interpolation)
+          @specs, @regions = @reach ? @reach.tables(@instrument, @channel, @sample_rate, mips: @mips, interpolation: @interpolation) :
+                               @instrument.kernel_tables(@channel, @sample_rate, mips: @mips, interpolation: @interpolation)
           sinc = MB::Sound::Wavetable::INTERPOLATIONS[:sinc]
           @sinc = @regions[true, Sampler::KernelRuby::INTERP].to_a.include?(sinc.to_f)
           @config = nil
