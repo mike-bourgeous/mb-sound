@@ -424,8 +424,10 @@ module GraphSweep
           quick.follow(stretch: { mode: :slice, slices: 4, slot_fade: 2/3r, fade_law: :power })[0] * 0.2 +
           quick.mono.follow(stretch: { mode: :slice, slices: [0, 750, 1500, 2250], positions: [0, 500, 0.03, 1900], slot_fade: 0.5, fill: :even }) * 0.1 +
           # (the spectral stretch of the loop as a loop, as players ask
-          # for it, and with its own ends)
-          smp.follow(stretch: { mode: :spectral, window: 256 }) * 0.2 + smp.follow(stretch: { mode: :spectral, window: 256, wrap: false }) * 0.2 +
+          # for it (shape-locked by default), with identity locking
+          # alone, and with its own ends)
+          smp.follow(stretch: { mode: :spectral, window: 256 }) * 0.2 + smp.follow(stretch: { mode: :spectral, window: 256, lock: :peaks }) * 0.1 +
+          smp.follow(stretch: { mode: :spectral, window: 256, wrap: false }) * 0.2 +
           # (and the vocoder running live, both channels on one stream)
           smp.follow(stretch: { mode: :spectral, window: 256, live: true }) * 0.2 + st.follow(stretch: { mode: :spectral, window: 256, live: true })[0] * 0.2 +
           # (noise kept noise: random phases for the bins that are no partial, cached and live)

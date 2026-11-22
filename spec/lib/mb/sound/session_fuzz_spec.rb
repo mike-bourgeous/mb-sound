@@ -35,7 +35,7 @@ RSpec.describe('session fuzzing') do
   end
 
   it 'generates valid songs that use every kind of command' do
-    songs = (1..40).map { |s| SessionFuzz.generate(Random.new(s)).code }
+    songs = (1..80).map { |s| SessionFuzz.generate(Random.new(s)).code }
     all = songs.join("\n")
     %w[track( scene go swap stop mute unmute solo turn tween .freq tr808( tr909( launch tweak meter L.inst. :dnb_sub bus( feed master flow( markov( seek glide(:length) key_level kept_t].each do |word|
       expect(all).to include(word)

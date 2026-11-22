@@ -741,11 +741,17 @@ module MB
 
         `sample.follow` plays a loop in time with the session: its beats
         fill the same span at any tempo, lined up with bar 1 (`align:
-        :launch` counts from the launch), restretched when `bpm` changes.
+        :launch` counts from the launch), restretched when `bpm` changes
+        (live, on a worker thread: the loop plays its `interim:`
+        meanwhile, `:slice` slices at the new tempo by default, `:hold`
+        the old stretch at the new speed, or `:coarse` a quicker
+        vocoder, then crossfades to the new stretch).
         `follow` keeps the pitch: drums with the slice stretch, notes and
         pads with the phase vocoder (`sample.material` decides from name
         words or how noisy it sounds; `stretch: :slice` or `:spectral`
-        to say); `follow(:resample)` lets the pitch follow
+        to say; the vocoder keeps a tone's waveform, `stretch: { mode:
+        :spectral, lock: :peaks }` for its plain phases, about half
+        the time per restretch); `follow(:resample)` lets the pitch follow
         the tempo like a varispeed.  `.stretch(r, mode: :slice)` cuts at
         the hits (markers, else onsets, else the 16th grid; `slices:
         :transients` cuts only at attacks, the clear ones and the softer
@@ -832,11 +838,16 @@ module MB
         `.looped`, anything `follow` plays) gets a spectral stretch
         that is a loop itself: read round and round, its end flowing
         into its start (`wrap: true` asks for it, `wrap: false` gives a
-        stretch with its own ends).  `lock: :shape` keeps a tone's
+        stretch with its own ends).  A looped stretch keeps a tone's
         waveform as it stretches (its harmonics in step with each
-        other: what a distortion after it hears); a loop's phases close
-        evenly over the loop, or over `closure_length: 0.5` before its
-        end, or with a pitch change of a few cents (`closure: :shift`).
+        other: what a distortion after it hears; `lock: :shape`, the
+        default for loops, about 3x the time to make; `lock: :peaks`
+        for the plain vocoder's phases, also how unlooped stretches
+        run unless they ask for `lock: :shape`); a loop's phases close
+        over its last half second or so, or evenly over the loop with
+        `lock: :peaks`, or over `closure_length: 0.5` before its end,
+        or with a pitch change of a few cents (`closure: :shift`, with
+        `lock: :peaks`).
         `follow(stretch: { mode: :spectral, live: true })` runs
         the vocoder as the loop plays: any tempo, nothing restretched.
         The vocoder finds the attacks it keeps sharp by itself

@@ -45,10 +45,14 @@ module MB
       # or cached and tempo ramps are smooth (about 3% of one core for a
       # stereo loop at 800-sample buffers, 5% at 128; Linux, 2026-11-14).
       #
-      # The stretch for a new tempo is made on the render thread the first
-      # time that tempo plays (the slice stretch of a two-bar loop takes
-      # 3-15 ms; spectral modes much longer: call #prepare for tempos
-      # coming up).  A plan boundary.
+      # The stretch for a new tempo is made the first time that tempo
+      # plays (the slice stretch of a two-bar loop takes 3-15 ms, spectral
+      # modes 0.2-2.5 s; #prepare makes them ahead).  On a realtime
+      # Session's render thread it is made on a worker instead
+      # (LoopPlayer::Restretch; stretch-live-1): the player keeps playing
+      # what +interim+ (among +stretch+'s options; INTERIMS) says until
+      # the new stretch is ready, then crossfades to it over SWAP_FADE.
+      # Offline renders make it at once, as before.  A plan boundary.
       class LoopPlayer
         include GraphNode
         include SampleRateHelper
@@ -67,6 +71,34 @@ module MB
 
         # The most stretches kept per player.
         CACHE = 24
+
+        # What a live player plays while the stretch for a new tempo is
+        # made off the render thread (+interim+ among Sample#follow's
+        # stretch options; see Restretch): :hold, the stretch it was
+        # playing, read at the new speed (its pitch moves with the tempo
+        # until the new one is ready); :slice, a slice stretch at the new
+        # tempo made first (milliseconds; cut at the markers or onsets,
+        # crossfaded like a loop sequencer's slices: SLICE_FASTER,
+        # SLICE_SLOWER), :hold until that is ready; :coarse, the phase
+        # vocoder without the shape lock and with half the overlap made
+        # first.  Followers whose own stretch is quick (:slice, :none,
+        # :cyclic) hold.
+        INTERIMS = [:hold, :slice, :coarse].freeze
+
+        # The interim for spectral followers when none is given.
+        DEFAULT_INTERIM = :slice
+
+        # The :slice interim's options sped up and slowed down: how a
+        # loop sequencer's renders of sliced loops measured (each slice
+        # crossfading at equal power into the next cut's lead-in from a
+        # third of its slot; slowed, each slice repeated with parabolic
+        # crossfades; design/notes/granular.md).
+        SLICE_FASTER = { mode: :slice, slot_fade: 2/3r, fade_law: :power }.freeze
+        SLICE_SLOWER = { mode: :slice, fill: :repeat, fade_law: :parabola }.freeze
+
+        # Seconds a live player crossfades from what it played to a
+        # stretch made off the render thread.
+        SWAP_FADE = 0.05
 
         # Clocked :stretch players restretch when the loop's length on the
         # clock changes by more than this ratio (a speed knob moving), like
@@ -100,7 +132,8 @@ module MB
           @channel = Integer(channel)
           @follow_mode = mode
           @stretch_options = stretch.dup.freeze
-          @loop_stretch = LoopPlayer.loop_stretch(@stretch_options.except(:live))
+          @loop_stretch = LoopPlayer.loop_stretch(@stretch_options.except(:live, :interim))
+          @interim = LoopPlayer.interim_for(@stretch_options)
           raise ArgumentError, 'live: true needs the stream Sample#follow makes (sample.follow(stretch: { mode: :spectral, live: true }))' if stretch[:live] && mode == :stretch && stream.nil?
           @stream = mode == :stretch ? stream : nil
           @as_recorded = Sample::NONE_MODES.include?(stretch[:mode])
@@ -118,6 +151,17 @@ module MB
           @zero = 0r
           @source_data = sample.data(@channel)
           @stretches = {}
+          @frames = 0 # (the player's own time, for Restretch.simulate)
+          @playing = nil # (live: the data played, its ratio key, and a crossfade from the data before)
+          @playing_key = nil
+          @fade_from = nil
+          @fade_from_key = nil
+          @fade_at = 0
+          @full_job = nil # (live: the stretch being made off the render thread, and the interim)
+          @interim_job = nil
+          @interim_data = nil
+          @interim_key = nil
+          @failed_key = nil
           @buf = nil
           @timeline_paused = nil
           @timeline_launch = nil
@@ -174,15 +218,13 @@ module MB
           if @stream
             @buf[true] = @stream.pull(@channel, phase, (step / @whole_notes).to_f)
           elsif @follow_mode == :stretch
-            data = stretched(ratio_for(wnps))
-            n = data.length
-            idx = Numo::Int64.cast((phase * n + 1e-6).floor) % n # (positions on whole samples stay there)
-            @buf[true] = data[idx]
+            play_stretch(ratio_for(wnps), phase)
           else
             @buf[true] = cubic(@source_data, phase * @source_data.length)
           end
 
           @pos += step * count
+          @frames += count
           @buf
         end
 
@@ -218,6 +260,147 @@ module MB
           mode = (options[:mode] || :cyclic).to_sym
           spectral = %i[spectral paul].include?(Sample::Spectral::MODE_ALIASES.fetch(mode, mode))
           spectral && !options.key?(:wrap) ? options.merge(wrap: true).freeze : options
+        end
+
+        # The interim (INTERIMS) for stretch options +options+ (see
+        # INTERIMS: :hold for quick stretch modes).
+        def self.interim_for(options)
+          i = options[:interim]
+          raise ArgumentError, "interim: is one of #{INTERIMS.inspect} (got #{i.inspect})" unless i.nil? || INTERIMS.include?(i)
+          mode = (options[:mode] || :cyclic).to_sym
+          spectral = %i[spectral paul].include?(Sample::Spectral::MODE_ALIASES.fetch(mode, mode))
+          return :hold unless spectral
+          i || DEFAULT_INTERIM
+        end
+
+        # Fills @buf from the stretch for +ratio+ at loop +phase+s (0..1).
+        # Offline: the stretch made at once (#stretched).  Live (on a
+        # realtime render thread, Restretch.background?): a stretch not
+        # made yet goes to a worker, and the player plays the interim
+        # meanwhile, crossfading (SWAP_FADE) whenever what it plays
+        # changes.
+        def play_stretch(ratio, phase)
+          key = ratio.round(12)
+          unless Restretch.background?
+            data = stretched(ratio)
+            @playing = data
+            @playing_key = key
+            @fade_from = nil
+            return read_into(@buf, data, true, phase)
+          end
+
+          target = @stretches[key] || take_full(key)
+          if target.nil? && @failed_key != key
+            want(ratio, key)
+            target = take_full(key)
+          end
+          target_key = key
+          if target.nil?
+            take_interim
+            target = @interim_data if @interim_key == key
+          end
+          if target.nil?
+            # (:hold: what played, at the new speed; nothing yet: silence)
+            target = @playing
+            target_key = @playing_key
+            return BufferHelper.zero(@buf) if target.nil?
+          end
+          unless target.equal?(@playing)
+            if @playing
+              @fade_from = @playing
+              @fade_from_key = @playing_key
+              @fade_at = 0
+            end
+            @playing = target
+          end
+          @playing_key = target_key
+
+          read_into(@buf, @playing, @playing_key == key, phase)
+          return @buf unless @fade_from
+
+          len = (SWAP_FADE * @sample_rate).round
+          g = (Numo::SFloat.new(phase.length).seq(@fade_at + 1) / len).clip(0, 1)
+          g = 0.5 - 0.5 * Numo::NMath.cos(g * Math::PI)
+          old = read_into(Numo::SFloat.zeros(phase.length), @fade_from, @fade_from_key == key, phase)
+          @buf.inplace * g
+          @buf.inplace + old * (1 - g)
+          @fade_at += phase.length
+          @fade_from = nil if @fade_at >= len
+          @buf
+        end
+
+        # Fills +buf+ from +data+ at loop +phase+s: the nearest samples
+        # when +exact+ (the stretch made for this ratio: positions on whole
+        # samples stay there), else linearly interpolated (a stretch made
+        # for another tempo, read at this one's speed).
+        def read_into(buf, data, exact, phase)
+          n = data.length
+          if exact
+            idx = Numo::Int64.cast((phase * n + 1e-6).floor) % n
+            buf[true] = data[idx]
+          else
+            pos = phase * n
+            i0 = pos.floor
+            frac = pos - i0
+            i0 = Numo::Int64.cast(i0) % n
+            a = data[i0]
+            b = data[(i0 + 1) % n]
+            buf[true] = a + (b - a) * frac
+          end
+          buf
+        end
+
+        # Asks the workers for the stretch for +ratio+ (key +key+), and
+        # for the interim's, unless they are making them already;
+        # cancels jobs for other ratios not started yet.
+        def want(ratio, key)
+          return if @full_job && @full_job.ratio.round(12) == key
+          @full_job&.cancel
+          render = Thread.current
+          if (opts = interim_options(ratio)) && @interim_key != key && !(@interim_job && @interim_job.ratio.round(12) == key)
+            @interim_job&.cancel
+            @interim_job = Restretch.submit(Restretch::Job.new(@loop_sample, ratio, opts, render: render), :interim, frame: @frames, rate: @sample_rate)
+          end
+          @full_job = Restretch.submit(Restretch::Job.new(@loop_sample, ratio, @loop_stretch, render: render), :full, frame: @frames, rate: @sample_rate)
+        end
+
+        # The finished stretch for +key+ (cached with the others), or nil;
+        # a finished job for another ratio is cached too.
+        def take_full(key)
+          j = @full_job
+          return nil unless j && j.finished? && (j.ready_frame.nil? || @frames >= j.ready_frame)
+          @full_job = nil
+          jk = j.ratio.round(12)
+          if j.failed?
+            @failed_key = jk
+            MB::Sound.live_error(j.error)
+            return nil
+          end
+          d = j.channels[@channel]
+          @stretches[jk] = d
+          @stretches.delete(@stretches.keys.first) while @stretches.length > CACHE
+          jk == key ? d : nil
+        end
+
+        # Takes a finished interim stretch.
+        def take_interim
+          j = @interim_job
+          return unless j && j.finished? && (j.ready_frame.nil? || @frames >= j.ready_frame)
+          @interim_job = nil
+          return if j.failed?
+          @interim_data = j.channels[@channel]
+          @interim_key = j.ratio.round(12)
+        end
+
+        # The Sample#stretch options of the interim stretch for +ratio+,
+        # or nil (:hold).
+        def interim_options(ratio)
+          case @interim
+          when :slice
+            (ratio - 1).abs < 1e-12 ? nil : (ratio < 1 ? SLICE_FASTER : SLICE_SLOWER)
+          when :coarse
+            @loop_stretch.merge(lock: :peaks, overlap: 2)
+          end
         end
 
         # The channel's data stretched by +ratio+ (cached).
@@ -317,13 +500,11 @@ module MB
           elsif @follow_mode == :stretch
             # The loop's length in seconds at the clock's rate now
             seconds = step0 && step0 > 0 ? len / (step0 * ctx.clock_rate) : @loop_sample.seconds.to_r
-            data = stretched(clock_ratio(seconds))
-            n = data.length
-            idx = Numo::Int64.cast((phase * n + 1e-6).floor) % n
-            @buf[true] = data[idx]
+            play_stretch(clock_ratio(seconds), phase)
           else
             @buf[true] = cubic(@source_data, phase * @source_data.length)
           end
+          @frames += count
           @buf
         end
 
@@ -341,3 +522,5 @@ module MB
     end
   end
 end
+
+require_relative 'loop_player_restretch'
