@@ -13,7 +13,7 @@
 # waiting for a TR-909.
 #
 # Usage:
-#     bin/songs/genre_demo.rb --genre dnb             # plays live (-G dnb; -g is graphviz)
+#     bin/songs/genre_demo.rb --genre dnb             # plays live (-G dnb; -g draws the graph)
 #     bin/songs/genre_demo.rb -G jungle jungle.flac   # renders (-f to overwrite; --stems DIR)
 #     bin/songs/genre_demo.rb -G ambient --full       # the whole form (about 5 minutes)
 #     bin/songs/genre_demo.rb -G funk -s 30 --show    # half a minute, printing the template first

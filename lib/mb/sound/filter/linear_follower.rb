@@ -134,10 +134,6 @@ module MB
         def peek
           @s
         end
-
-        def to_s_graphviz
-          "LinearFollower\nmax_rise: #{@max_rise}\nmax_fall: #{@max_fall}\nabs?: #{@absolute}"
-        end
       end
 
       Kernels.register :slew, on: LinearFollower, as: :process, c: :process_c, ruby: :process_ruby, state: %i[@s], covers: %w[FastControl.slew]

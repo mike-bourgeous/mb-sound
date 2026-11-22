@@ -18,7 +18,7 @@ module MB
       # until one arrives) and stores it in every :bend Event's +bend_range+
       # (see Event#bend_semitones and #bend_range).
       #
-      # Streams take part in graph traversal (#sources, #graph, #graphviz) so
+      # Streams take part in graph traversal (#sources, #graph, #draw) so
       # MIDI nodes show up in graph views and Session finds a ClipSource's
       # timeline, but they are not GraphNodes: they have no audio output and
       # no sample rate (so sample rate changes pass them by), and the audio
@@ -419,10 +419,6 @@ module MB
 
         def to_s
           @source.is_a?(Transform) ? "MIDI #{@source}" : "MIDI Stream"
-        end
-
-        def to_s_graphviz
-          "#{to_s}\n#{name_or_id}"
         end
 
         # Returns +time+ (Rational seconds) plus +count+ samples at

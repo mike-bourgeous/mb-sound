@@ -741,11 +741,17 @@ module MB
 
         `sample.follow` plays a loop in time with the session: its beats
         fill the same span at any tempo, lined up with bar 1 (`align:
-        :launch` counts from the launch), restretched when `bpm` changes.
+        :launch` counts from the launch), restretched when `bpm` changes
+        (live, on a worker thread: the loop plays its `interim:`
+        meanwhile, `:slice` slices at the new tempo by default, `:hold`
+        the old stretch at the new speed, or `:coarse` a quicker
+        vocoder, then crossfades to the new stretch).
         `follow` keeps the pitch: drums with the slice stretch, notes and
         pads with the phase vocoder (`sample.material` decides from name
         words or how noisy it sounds; `stretch: :slice` or `:spectral`
-        to say); `follow(:resample)` lets the pitch follow
+        to say; the vocoder keeps a tone's waveform, `stretch: { mode:
+        :spectral, lock: :peaks }` for its plain phases, about half
+        the time per restretch); `follow(:resample)` lets the pitch follow
         the tempo like a varispeed.  `.stretch(r, mode: :slice)` cuts at
         the hits (markers, else onsets, else the 16th grid; `slices:
         :transients` cuts only at attacks, the clear ones and the softer
@@ -832,11 +838,16 @@ module MB
         `.looped`, anything `follow` plays) gets a spectral stretch
         that is a loop itself: read round and round, its end flowing
         into its start (`wrap: true` asks for it, `wrap: false` gives a
-        stretch with its own ends).  `lock: :shape` keeps a tone's
+        stretch with its own ends).  A looped stretch keeps a tone's
         waveform as it stretches (its harmonics in step with each
-        other: what a distortion after it hears); a loop's phases close
-        evenly over the loop, or over `closure_length: 0.5` before its
-        end, or with a pitch change of a few cents (`closure: :shift`).
+        other: what a distortion after it hears; `lock: :shape`, the
+        default for loops, about 3x the time to make; `lock: :peaks`
+        for the plain vocoder's phases, also how unlooped stretches
+        run unless they ask for `lock: :shape`); a loop's phases close
+        over its last half second or so, or evenly over the loop with
+        `lock: :peaks`, or over `closure_length: 0.5` before its end,
+        or with a pitch change of a few cents (`closure: :shift`, with
+        `lock: :peaks`).
         `follow(stretch: { mode: :spectral, live: true })` runs
         the vocoder as the loop plays: any tempo, nothing restretched.
         The vocoder finds the attacks it keeps sharp by itself
@@ -1499,8 +1510,11 @@ module MB
         (`arack :dub, slot: true do ... end`) swaps its instances, stopped
         ones too, when you define it again (`swap :dub, arack { ... }, fade:
         0` picks the launch point and handover); without it they keep
-        playing as they were built.
-        `help rack(:dub)` shows ports, knobs, slots, and latency.  `save :dub,
+        playing as they were built.  `help rack(:dub)` shows ports, knobs,
+        slots, and latency; `rack(:dub).draw` draws its inside by rank (its
+        ports at the left), and the rack pane (under the racks in `ui
+        :session`, or `ui.show :rack`) shows the instance the racks pane
+        picked, its knobs, and that drawing.  `save :dub,
         rack(:dub)` writes a rack document: `preset :dub` gives the rack
         back, `preset :dub, sig: mic` plays it on an input (try the library
         rack `preset :dub_echo`); a saved rack that differs from the
@@ -1928,12 +1942,18 @@ module MB
         a big scope (`vis spectrum: true`: a spectrum; `graphical: true`:
         inline images).  With the tiled screen up, a plot shows in a plot
         pane beside the console, at the pane's size (the next plot
-        replaces it; q in it, or `ui.plot false`, closes it).
+        replaces it; q in it, or `ui.plot false`, closes it).  `node.draw`
+        draws a graph by rank: boxes from the inputs on the left to the node
+        on the right, typed wires (audio solid, control dotted, notes
+        dashed, feedback double), constants on their inputs.
       TEXT
       commands :plot, :spectrum, :spectrogram, :time_freq, :hist, :density, :mag_phase, :overlay, :overlay_chart, :table, :chart, :figure, :vis
       note :plotting
       example 'one cycle of a pulse', sound: false do
         plot 100.hz.pulse, samples: 480
+      end
+      example 'a graph drawn by rank', sound: false do
+        110.hz.saw.filter(:lowpass, cutoff: 3.hz.lfo.at(300..1200)).draw
       end
     end
 
@@ -2113,7 +2133,7 @@ module MB
         dim ▷ marks the other scenes that would keep it playing if launched,
         ◆ is queued with its countdown in beats), the clip under its cursor
         (`clip`: a piano roll and the Ruby that made it), racks with their
-        knobs, buses with meters.  Focus a pane in NAV (its number, or a
+        knobs and the picked rack drawn below them, buses with meters.  Focus a pane in NAV (its number, or a
         for clips, r racks, o knobs, b buses) and press Enter for its keys: arrows
         move, Enter launches the cell (`launch :bass, 3`), g its scene (`go
         :drop`), x stops the track, Space plays or stops the cell, s m

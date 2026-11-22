@@ -10,7 +10,7 @@ module MB
         module Surface
           # Names never recorded anywhere: Ruby plumbing and hot paths.
           NEVER = [
-            :sample, :sample_rate, :sample_rate=, :sources, :to_s, :inspect, :to_s_graphviz, :graph_node_name,
+            :sample, :sample_rate, :sample_rate=, :sources, :to_s, :inspect, :graph_node_name,
             :hash, :==, :eql?, :<=>, :dup, :clone,
           ].freeze
 

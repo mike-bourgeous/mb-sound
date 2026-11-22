@@ -134,10 +134,6 @@ module MB
             "Limiter #{MB::M.sigfigs(@ceiling.to_db, 3)} dB#{@true_peak ? 'TP' : ''}, #{@lookahead} samples lookahead"
           end
 
-          def to_s_graphviz
-            "#{graph_node_name || 'Limiter'}\n#{MB::M.sigfigs(@ceiling.to_db, 3)} dB#{@true_peak ? 'TP' : ''}"
-          end
-
           private
 
           def process(outs, data, n)

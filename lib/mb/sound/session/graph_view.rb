@@ -13,7 +13,7 @@ module MB
 
           # Creates a box labeled +label+ with +sources+ ({name => node}).
           # With +mix+ (the players' mix box) and +mix_source+ (the master
-          # chain's GraphNode::MixSource), #graphviz also draws the players
+          # chain's GraphNode::MixSource), #draw also draws the players
           # feeding the master chain, which isn't connected to them.
           def initialize(label, sources, mix: nil, mix_source: nil)
             @label = label
@@ -26,22 +26,24 @@ module MB
             @label
           end
 
-          # Returns the GraphViz drawing, with the players' graphs and their
-          # mix feeding the master chain when there is one.
-          def graphviz(**kwargs)
-            dot = super
-            return dot if @mix.nil?
+          # The box's title in drawings.
+          def graph_node_name = @label
+          def named? = true
 
-            # Everything between the header lines and the closing brace
-            players = @mix.graphviz(**kwargs).lines[4...-1].join
-            id = @mix_source.__id__.to_s.inspect
-            extra = "#{players}  #{id} [label=\"master input\"];\n  #{@mix.__id__.to_s.inspect} -> #{id} [label=\"mix\"];\n"
-            dot.sub(/\}\n\z/) { extra + "}\n" }
+          # Every input is a signal mixed in (players, master channels).
+          def port_role(_name) = :main
+
+          # Draws the session by rank (a Plot::Graph; see Traversable#draw),
+          # the players' mix feeding the master chain where it reads its
+          # input when there is one.
+          def draw(**opts)
+            opts = opts.merge(replace: { @mix_source => @mix }) if @mix
+            super(**opts)
           end
         end
 
-        # Returns a Traversable node for drawing the session with
-        # #open_graphviz or #graphviz: every player's graph (current players
+        # Returns a Traversable node for drawing the session with #draw:
+        # every player's graph (current players
         # only, so players started later by #at_bar or #every are missing)
         # mixed together, through the latest master effects chain.
         def graph_view

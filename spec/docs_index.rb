@@ -68,7 +68,7 @@ module DocsIndex
       'cue' => 'CUE and MAIN', 'racks' => 'Racks and typed ports', 'genres' => 'Genre templates',
     },
     'Console, UI, and scripts' => {
-      'method_modules' => 'Method modules', 'help' => 'Console help', 'help_tutorial' => 'Help tutorial (design)', 'plotting' => 'Plotting',
+      'method_modules' => 'Method modules', 'help' => 'Console help', 'help_tutorial' => 'Help tutorial (design)', 'plotting' => 'Plotting', 'drawing' => 'Drawing: graphs, racks, lanes',
       'terminal_ui' => 'Terminal UI', 'sound_design_ui' => 'Sound-design screen', 'scripts' => 'Scripts',
       'release' => 'Releases and installing',
     },

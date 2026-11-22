@@ -394,10 +394,6 @@ module MB
           "#{self.class.name.rpartition('::').last} #{@description}"
         end
 
-        def to_s_graphviz
-          "#{graph_node_name || self.class.name.rpartition('::').last}\n#{@description}"
-        end
-
         # Plan layer: the reason output +output+ can't be a plan op, or nil
         # (see Output#plan_unsupported_reason).
         def plan_unsupported_output(output)

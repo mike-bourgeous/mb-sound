@@ -7,7 +7,7 @@
 # Usage:
 #     bin/songs/stereo_song.rb             # plays live in the background session
 #     bin/songs/stereo_song.rb song.flac   # renders to a file instead (-f to overwrite)
-#     bin/songs/stereo_song.rb --graphviz  # draws the graph at the start of the song
+#     bin/songs/stereo_song.rb --graph     # prints a drawing of the graph at the start of the song
 #     bin/songs/stereo_song.rb --help      # all options
 #
 # Or in bin/sound.rb:
@@ -23,7 +23,7 @@
 #     bg :echo, (seq(C4, E4, G4).n8.loop.then { |c| c.tone.at(0.3) * c.env(0, 0.1, 0, 0.1) }).delay(channels(3.n16, 1.n4), feedback: -6.db, dry: 1)
 #     master { |mix| mix.reverb(:hall, wet: -8.db).softclip(0.6, 0.98) }     # the whole mix through one stereo reverb
 #     l, r = stereo(1.constant, 2.constant)                                   # bundles destructure like Arrays
-#     (110.hz.ramp.at(1).stereo.filter(:lowpass, cutoff: channels(500, 900)) * 0.5).open_graphviz   # one box per stereo step
+#     (110.hz.ramp.at(1).stereo.filter(:lowpass, cutoff: channels(500, 900)) * 0.5).draw   # a box per channel at each stereo step
 
 require 'bundler/setup'
 require 'mb-sound'

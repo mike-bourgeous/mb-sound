@@ -157,10 +157,6 @@ module MB
             "LR#{@order} crossover at #{@frequencies.map { |f| "#{MB::M.sigfigs(f, 4)} Hz" }.join(', ')}"
           end
 
-          def to_s_graphviz
-            "#{graph_node_name || 'Crossover'}\nLR#{@order} #{@frequencies.map { |f| MB::M.sigfigs(f, 4) }.join(', ')} Hz"
-          end
-
           # Called by the bands: splits a new frame when band +index+ comes
           # back for one.
           def sample_internal(count, index)

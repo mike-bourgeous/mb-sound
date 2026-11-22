@@ -365,13 +365,6 @@ module MB
           s
         end
 
-        # See GraphNode#to_s_graphviz
-        def to_s_graphviz
-          s = "type: svf #{@filter_type}#{' matched' if @response_design == :matched}\n"
-          s << "gain: #{db_gain.round(2)}dB\n" if @gain && GAIN_TYPES.include?(@filter_type)
-          s
-        end
-
         # The kernel's per-change coefficients for a +type_id+, cutoff +fc+
         # (Hz), quality +q+, linear gain +gain+, and +rate+, clamped as in
         # the kernel: [g, k, a1, m0, m1, m2] (k is the peak filter's

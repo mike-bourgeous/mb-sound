@@ -22,6 +22,7 @@ require_relative 'ui/panes'
 require_relative 'ui/tree_text'
 require_relative 'ui/session_panes'
 require_relative 'ui/set_panes'
+require_relative 'ui/rack_pane'
 require_relative 'ui/player_panes'
 require_relative 'ui/buffer_feed'
 require_relative 'ui/sound_panes'
@@ -121,7 +122,7 @@ module MB
         @panes ||= [
           Panes::Transport.new, Panes::Form.new, Panes::Tracks.new, Panes::Queue.new,
           Panes::Knobs.new, Panes::Meters.new, Panes::CPU.new, Panes::Scope.new, Panes::Spectrum.new, Panes::Messages.new, Panes::MessageDetail.new, Panes::Page.new, Panes::PlotView.new, Panes::Keyboard.new,
-          Panes::Buses.new, Panes::Log.new, Panes::Lane.new, Panes::Clips.new, Panes::ClipDetail.new, Panes::Racks.new, Panes::Midi.new,
+          Panes::Buses.new, Panes::Log.new, Panes::Lane.new, Panes::Clips.new, Panes::ClipDetail.new, Panes::Racks.new, Panes::RackDetail.new, Panes::Midi.new,
           Panes::Inspector.new, Panes::Preview.new, Panes::Code.new, Panes::Picker.new, Panes::Audition.new, Panes::SoundKeys.new, Panes::Render.new,
           Panes::Tuner.new, Panes::TuneStrip.new,
         ].to_h { |p| [p.name, p] }
@@ -173,7 +174,7 @@ module MB
         vis_spectrum: ['master meters beside a big spectrum: `vis spectrum: true`', '12 rows'],
         tiles: ['the whole screen: the console beside tracks, queue, meters, scope', '80x24 and up'],
         studio: ['tracks | the console over a scope | tabs of meters, knobs, cpu, buses', '120x40 and up'],
-        session: ['the set: launch lane, the clip matrix and clip detail, racks, landed changes, buses, MIDI, around the console', '160x45 and up'],
+        session: ['the set: launch lane, the clip matrix and clip detail, racks and the picked rack drawn, landed changes, buses, MIDI, around the console', '160x45 and up'],
         mixer: ['the mix: buses with input, output, and send meters, the master meters, CPU, the console over a scope', '120x40 and up'],
         keys: ['the console over the keyboard, starting in KEYS mode', '100x30 and up'],
         sound: ['sound design: the voice in sections or as a front panel (a track\'s knobs and params to turn), the picked row\'s preview, the graph\'s code, a render of one note, the CUE line, the console below, the library picker beside the tracks; fewer panes on smaller screens (80x24: the panel, its preview, the console, NAV l the picker for a while; the keys pane from 160x50)', '80x24 and up'],
@@ -246,12 +247,13 @@ module MB
           # The set at a glance (ux-1 r3 item 32): where it is and what comes,
           # what landed, the clips, buses and sends, MIDI, around the console
           # (ux-r4: the clip matrix and the clip under its cursor below the
-          # console, racks with their knobs at the left)
+          # console, racks with their knobs at the left; racks-v-2: the
+          # picked rack instance drawn below them)
           session: MB::Term::Viewports.layout(:session, focus: :repl) {
             cols(height: 1) { pane :transport; pane :form }
             pane :lane, height: 4
             cols {
-              rows(width: 40) { pane :racks; pane :log, height: 7 }
+              rows(width: 40) { pane :racks; pane :rack; pane :log, height: 7 }
               rows(weight: 3) { repl; cols(height: 10) { pane :clips, weight: 3; pane :clip, weight: 2 } }
               rows(width: 40) { pane :meters, height: 6; pane :buses; pane :midi, height: 8 }
             }

@@ -65,16 +65,47 @@ RSpec.describe('bin/sound.rb number nudge', :aggregate_failures) do
       text.call[/^PROBE#{id} (.*)$/, 1].to_s.strip
     }
 
+    # +get+'s value once it equals +want+ (polled: a landing, a redraw, or
+    # an undo takes as long as the machine's load makes it), else its last
+    # value after +t+ seconds, for the expectation to show
+    settle = lambda { |want, t = 15, &get|
+      d = MB::U.clock_now + t
+      v = get.call
+      until v == want || MB::U.clock_now > d
+        sleep 0.05
+        v = get.call
+      end
+      v
+    }
+
     expect(wait.(/MB::Sound\(0\) >/, 60)).to eq(true), text.call
 
     line = 'track(:t, q: 1) { it.hz.ramp.at(-20.db).filter(:lowpass, cutoff: 1200, quality: 2) }'
-    type.("bpm 960\r")
-    expect(wait.('=> ')).to eq(true), text.call
-    type.("#{line}\r")
+    # A watcher in the console process writes the cutoff the PLAYING :t has
+    # to a file, so the example can wait for each redefinition to land (a
+    # warm-up, then a bar: under load longer than any fixed wait) without
+    # typing on the prompt (a probe would take the nudged line off it).
+    # Each nudge waits for the one before to land: undo steps back to the
+    # definition that was playing when the undone line ran.
+    playing_path = tmp_path('playing')
+    playing = -> { File.read(playing_path).to_s rescue '' }
+    watcher = "Thread.new { loop { (pl = Session.current.instance_variable_get(:@players).values.find { _1.name == :t && _1.current? }; " \
+              "File.write(#{playing_path.inspect}, pl.input.graph.grep(MB::Sound::GraphNode::Constant).map(&:constant).select { _1 > 1000 }.inspect)) rescue nil; sleep 0.02 } }; nil"
+    # (a typed line's result: one more "=> " row than before it)
+    run_line = lambda { |code|
+      n = count.(/^=> /)
+      type.("#{code}\r")
+      d = MB::U.clock_now + 20
+      sleep 0.03 until count.(/^=> /) > n || MB::U.clock_now > d
+      expect(count.(/^=> /)).to be > n, text.call
+    }
+    run_line.(watcher)
+    run_line.('bpm 960')
+    run_line.(line)
     expect(wait.('=> :t')).to eq(true), text.call
-    type.("bg :t, seq(A2).n1.loop\r")
+    run_line.('bg :t, seq(A2).n1.loop')
     expect(wait.('#<bg :t lands')).to eq(true), text.call
-    sleep 0.35 # (a bar at 960 bpm is 0.25 s: :t plays)
+    expect(settle.('[1200]', 20) { playing.call }).to eq('[1200]'), text.call # (:t plays)
 
     # Up twice: the track line; Alt-Shift-Left twice: quality's 2, then the cutoff
     w.write("\e[A")
@@ -84,8 +115,8 @@ RSpec.describe('bin/sound.rb number nudge', :aggregate_failures) do
     w.write("\e[1;4D")
     sleep 0.05
     w.write("\e[1;4D")
-    sleep 0.05
-    expect(prompt_line.call).to eq(["sound.rb [4] MB::Sound(0) > #{line}", '0'])
+    want = ["sound.rb [5] MB::Sound(0) > #{line}", '0']
+    expect(settle.(want, 5) { prompt_line.call }).to eq(want)
 
     ["\e[1;3A", "\e[1;3A", "\e\e[A"].each_with_index do |key, i|
       runs = count.(/=> :t/)
@@ -93,8 +124,11 @@ RSpec.describe('bin/sound.rb number nudge', :aggregate_failures) do
       d = MB::U.clock_now + 10
       sleep 0.03 until count.(/=> :t/) > runs || MB::U.clock_now > d
       expect(count.(/=> :t/)).to eq(runs + 1), text.call
-      sleep 0.35 # (past the next bar: the redefinition lands)
-      expect(prompt_line.call).to eq(["sound.rb [#{5 + i}] MB::Sound(0) > #{line.sub('1200', "120#{i + 1}")}", "#{i + 1}"]), text.call
+      # (the prompt comes back with the nudged line; then its
+      # redefinition lands, on a bar)
+      want = ["sound.rb [#{6 + i}] MB::Sound(0) > #{line.sub('1200', "120#{i + 1}")}", "#{i + 1}"]
+      expect(settle.(want, 10) { prompt_line.call }).to eq(want), text.call
+      expect(settle.("[120#{i + 1}]", 20) { playing.call }).to eq("[120#{i + 1}]"), text.call
     end
 
     pl = 'pl = Session.current.instance_variable_get(:@players).values.find { _1.name == :t && _1.current? }'
@@ -103,13 +137,17 @@ RSpec.describe('bin/sound.rb number nudge', :aggregate_failures) do
     redefs = 'changes.grep(/track :t redefined/).length'
     take = 'Take.current.recent_lines(20).map { |_, c| c[/cutoff: 12\d\d/] }.compact'
     hist = 'Reline::HISTORY.to_a.map { _1[/cutoff: 12\d\d/] }.compact'
-    out = probe.(pl, "[#{consts}, #{redefs}, #{take}, #{hist}]")
     # The graph at 1203; three redefinitions; the take has every step; history the recalled line and the latest
-    expect(out).to eq('[[1203], 3, ["cutoff: 1200", "cutoff: 1201", "cutoff: 1202", "cutoff: 1203"], ["cutoff: 1200", "cutoff: 1203"]]')
+    # (probed until the last redefinition has landed: each lands on a bar,
+    # which under load can be later than any fixed wait)
+    want = '[[1203], 3, ["cutoff: 1200", "cutoff: 1201", "cutoff: 1202", "cutoff: 1203"], ["cutoff: 1200", "cutoff: 1203"]]'
+    out = settle.(want) { probe.(pl, "[#{consts}, #{redefs}, #{take}, #{hist}]") }
+    expect(out).to eq(want)
 
     type.("undo\r")
     expect(wait.(/=> #<undo/)).to eq(true), text.call
-    sleep 0.35
+    # (the undo lands on a bar too)
+    expect(settle.('[1202]', 20) { playing.call }).to eq('[1202]'), text.call
     out = probe.(pl, consts)
     expect(out).to eq('[1202]')
 
@@ -121,8 +159,7 @@ RSpec.describe('bin/sound.rb number nudge', :aggregate_failures) do
     expect(wait.('=> 0.0')).to eq(true), text.call
     w.write("\e[1;3B")
     expect(wait.('Math::DomainError')).to eq(true), text.call
-    sleep 0.2
-    expect(prompt_line.call[0]).to end_with('MB::Sound(0) > Math.sqrt(-1)')
+    expect(settle.(true, 5) { prompt_line.call[0].end_with?('MB::Sound(0) > Math.sqrt(-1)') }).to eq(true), text.call
   ensure
     Process.kill(:KILL, pid) rescue nil
     Process.wait(pid) rescue nil

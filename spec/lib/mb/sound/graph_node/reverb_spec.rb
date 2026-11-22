@@ -41,42 +41,6 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
 
   it 'has no node-graph feedback edges (the network runs in C either way)' do
     expect(100.hz.reverb.graph_edges(feedback: true)).to be_empty
-    expect(100.hz.reverb(show_internals: true).graph_edges(feedback: true)).to be_empty
-  end
-
-  describe 'show_internals (graphviz draws the network from its layout)' do
-    it 'draws inputs, every diffusion stage, the feedback lines, and the outputs, sounding the same' do
-      drawn = MB::Sound::GraphNode::Channels.new([100.hz.saw, 150.hz.saw]).reverb(:hall, show_internals: true, mod: true, lowpass: 3000)
-      plain = MB::Sound::GraphNode::Channels.new([100.hz.saw, 150.hz.saw]).reverb(:hall, mod: true, lowpass: 3000)
-      dot = drawn[0].graphviz
-      rev = drawn[0].graph.find { |n| n.is_a?(MB::Sound::GraphNode::Reverb) }
-      layout = rev.layout
-
-      expect(dot).to include('subgraph "cluster_', "Reverb network: #{layout.lines} lines", 'inputs to lines', 'outputs (lines summed)')
-      expect(dot.scan(/diffusion \d+"?/).grep(/\A[^"]+\z/).uniq.length).to eq(layout.diffusion.length)
-      d1 = layout.diffusion[0][:delays].map { |t| format('%.1f', t * 1000) }.join(' ')
-      expect(dot).to include("delays ms: #{d1}")
-      g = layout.gains.map { |v| MB::M.sigfigs(v, 3) }
-      expect(dot).to include("line 1: #{format('%.1f', (layout.taps[0] + layout.loop_extra) * 1000)} ms, gain #{g[0]}", 'Householder reflection', 'label="feedback"')
-      expect(dot).to include("-> \"#{rev.__id__}/inputs\" [style=dashed, label=\"inside\"")
-      expect(plain[0].graphviz).not_to include('cluster_')
-      if system('which dot > /dev/null 2>&1') # (graphviz parses it)
-        out, status = Open3.capture2e('dot', '-Tsvg', stdin_data: dot)
-        expect(status).to be_success, out
-      end
-
-      2.times do
-        a = drawn.map { |c| c.sample(800) }
-        b = plain.map { |c| c.sample(800) }
-        a.zip(b).each { |x, y| expect(x).to eq(y) }
-      end
-    end
-
-    it 'draws a reverb without a feedback network' do
-      dot = 100.hz.reverb(:room, show_internals: true, feedback_enabled: false).graphviz
-      expect(dot).to include('diffusion 1', 'outputs (lines summed)')
-      expect(dot).not_to include('Householder')
-    end
   end
 
   # The network runs per sample, so its loops are the line delays at every
@@ -458,7 +422,6 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
         MB::Sound::GraphNode::Channels.new([l, r]).reverb(room_size: 0.8, mod: :lush, freeze: 0.constant, stretch: 0.2.hz.lfo.at(0.9..1.1), output_channels: 4)
       },
       'the gated preset' => ->(l, r) { MB::Sound::GraphNode::Channels.new([l, r]).reverb(:gated) },
-      'show_internals' => ->(l, r) { MB::Sound::GraphNode::Channels.new([l, r]).reverb(:hall, show_internals: true) },
       'a dry path mixed with the reverb' => ->(l, r) { b = MB::Sound::GraphNode::Channels.new([l, r]); b + b.reverb(room_size: 0.4, dry: 0) },
       'a mono input shared with the dry path' => ->(l, _r) { l + l.reverb(room_size: 0.4, dry: 0) },
     }.each do |name, build|
@@ -559,12 +522,6 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
           b = render(build.(), 333)
           expect(b.map(&:length)).to eq(a.map(&:length))
           a.zip(b).each { |x, y| expect((x - y).abs.max).to be < 1e-6 }
-        end
-
-        it 'ends a show_internals reverb the same way' do
-          rev = MB::Sound::GraphNode::Channels.new([noise.(5000, 1), noise.(9000, 2)]).reverb(:hall, show_internals: true, extra_time: 0)
-          out = render(rev, 800)
-          expect(out.map(&:length)).to eq([9000, 9000])
         end
       end
     end

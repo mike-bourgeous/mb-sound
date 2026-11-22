@@ -68,10 +68,6 @@ module MB
         "SoftestClip -- threshold: #{@threshold}, limit: #{@limit}"
       end
 
-      def to_s_graphviz
-        "SoftestClip\nthreshold: #{@threshold}\nlimit: #{@limit}"
-      end
-
       private
 
       # Recalculates the hyperbolic curve parameters

@@ -172,10 +172,6 @@ module MB
           "#<LoudnessMeter #{channel_count} channels: #{self}>"
         end
 
-        def to_s_graphviz
-          "#{graph_node_name || 'LoudnessMeter'}\n#{channel_count} channels"
-        end
-
         # Called by the outputs: samples every input when output +index+
         # starts a new frame, measures the frame, and returns the input
         # buffer for +index+ (nil once that input has ended).

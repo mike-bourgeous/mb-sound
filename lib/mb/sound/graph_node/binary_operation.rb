@@ -106,13 +106,6 @@ module MB
           "#{super} -- #{arithmetic_string}"
         end
 
-        def to_s_graphviz
-          <<~EOF
-          #{super}---------------
-          #{arithmetic_string}
-          EOF
-        end
-
         # Plan layer (see MB::Sound::Plan): Value#/ and #**.
         include Plan::Describable
 

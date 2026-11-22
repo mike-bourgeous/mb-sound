@@ -133,10 +133,6 @@ module MB
           [@spec]
         end
 
-        def to_s_graphviz
-          "#{node_type_name}\n#{MB::M.sigfigs(@spec.range.begin, 4)}..#{MB::M.sigfigs(@spec.range.end, 4)}"
-        end
-
         private
 
         def level

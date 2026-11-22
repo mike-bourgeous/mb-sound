@@ -71,7 +71,6 @@ MB::Sound.effect_script(
   shimmer_pitch: [nil, Float, 'Shimmer pitch shift in semitones (default 12)'],
   seed: [nil, Integer, 'Random seed for the reverb generator (default varies by preset, often 0)'],
   extra_time: [nil, Float, 'Seconds of silence to add after an input file'],
-  show_internals: [false, 'Show the insides of the reverb object in --graphviz'],
 ) { |input, p|
   mod = p.mod == :off ? false : p.mod
   mod = { preset: mod.is_a?(Symbol) ? mod : :subtle, **(mod.is_a?(Symbol) ? {} : { depth: mod }), rate: p.mod_rate } if p.mod_rate && mod
@@ -105,6 +104,5 @@ MB::Sound.effect_script(
     shimmer_pitch: p.shimmer_pitch,
     seed: p.seed,
     extra_time: p.extra_time,
-    show_internals: p.show_internals,
   )
 }

@@ -406,10 +406,6 @@ module MB
           "Delay -- interpolation=#{@interpolation} smoothing=#{@smoothing} smooth_limit=#{@smooth_limit} dry=#{level(@dry)} wet=#{level(@wet)}"
         end
 
-        def to_s_graphviz
-          "Delay\ninterpolation: #{@interpolation}\nsmoothing: #{@smoothing}\nsmooth_limit: #{@smooth_limit}\ndry: #{level(@dry)}\nwet: #{level(@wet)}"
-        end
-
         private
 
         # A reused SFloat buffer as long as +data+ (an SFloat), or nil.

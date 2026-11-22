@@ -138,10 +138,6 @@ module MB
             "TransientShaper attack #{describe(@attack)}, sustain #{describe(@sustain)}"
           end
 
-          def to_s_graphviz
-            "#{graph_node_name || 'TransientShaper'}\nattack #{describe(@attack)}, sustain #{describe(@sustain)}"
-          end
-
           private
 
           # A one-pole coefficient for +time+ (a length).

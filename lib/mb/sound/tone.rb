@@ -2249,15 +2249,6 @@ module MB
         "#{super} -- #{wave_name} freq=#{make_source_name(@frequency)} range=#{@range}#{" pwm=#{make_source_name(@width)}" if @width}#{" pivot=#{make_source_name(@pivot)}" if @width && !@pivot.nil?}#{" #{@soft_sync ? 'softsync' : 'sync'}" if @sync_source}"
       end
 
-      def to_s_graphviz
-        <<~EOF
-        #{super}---------------
-        #{wave_name}
-        freq=#{make_source_name(@frequency)}
-        range=#{@range}
-        EOF
-      end
-
       # Allow comparison of tones by frequency for use in Range.
       def <=>(other)
         f1 = @frequency

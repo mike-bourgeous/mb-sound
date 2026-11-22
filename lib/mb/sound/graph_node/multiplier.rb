@@ -237,15 +237,6 @@ module MB
           "#{super} -- #{arithmetic_string}"
         end
 
-        # Includes the arithmetic interpretation of the multiplier after
-        # GraphNode#to_s_graphviz.
-        def to_s_graphviz
-          <<~EOF
-          #{super}---------------
-          #{arithmetic_string("\n")}
-          EOF
-        end
-
         # Returns a String showing the math performed by this Multiplier and
         # any upstream connected arithmetic nodes.
         #
