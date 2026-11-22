@@ -161,8 +161,8 @@ module MB
       # for its main out) route a named player (see BusMethods).
       #
       # On a track (see ArrangementMethods#track), a clip or generator
-      # entry is its clip at the defaults: `bg :drums, L.gen.techno_beat`
-      # plays `L.gen.techno_beat.()` on the track, steered by the track's
+      # entry is its clip at the defaults: `bg :drums, L.gen.beat.techno`
+      # plays `L.gen.beat.techno.()` on the track, steered by the track's
       # knobs (:"drums/energy"; a new player auditions the entry, as #play
       # does).
       #
@@ -187,7 +187,7 @@ module MB
         # A library entry given to a track: a clip or generator entry is its
         # clip at the defaults (as `track :x, entry` takes it), played on
         # the track; instruments and effects say how to change the track's
-        # (lesson-fixes-1: `bg :drums, L.gen.techno_beat` played the 8-bar
+        # (lesson-fixes-1: `bg :drums, L.gen.beat.techno` played the 8-bar
         # audition in place of the track; `play` and new players keep it)
         if sound.is_a?(Library::Entry) && name && Session.current.arrangement.tracks[name]
           sound = Internal.entry_for_track('bg', name, sound)
@@ -552,9 +552,43 @@ module MB
       #     master(:quiet) { |mix| mix.reverb(:hall, wet: -16.db) }
       #     master          # shows the current effects
       #     master nil      # removes them on the next bar
+      #
+      # An effect rack plays as the chain (Session::MasterRack; the
+      # maintainer, 2026-11-22: "Rack, and master takes racks"): a Rack,
+      # its name, or a library effect's name (L.fx; a mastering preset's
+      # name plays the preset).  `master.save_rack :glue` saves the chain
+      # shown as rack document :glue (`.master(:club)` at its end for a
+      # preset; knobs the chain reads become rack knobs at their current
+      # values) and defines rack :glue, for `master :glue` or `fx :drums,
+      # :glue`; `master.save_rack! :glue` replaces it.
+      #
+      #     master.save_rack :glue
+      #     master :glue                              # the saved chain again
+      #     master rack(:glue)                        # the same
+      #     master arack { |sig| sig.hp1(30).softclip }
       def master(effects = :show, at: nil, on: nil, in: nil, fade: nil, **options, &block)
         point = LaunchPoint.of(binding) or return nil
         session = Session.current
+        if effects.equal?(:show) && block.nil? && options.empty?
+          return Session::MasterRack::View.new(session.master_info, session: session, block: session.master_block, preset: session.master_preset)
+        end
+
+        rack = effects.equal?(:show) ? nil : Session::MasterRack.effect(effects, session) # (errors before anything is queued)
+        if rack
+          raise ArgumentError, "master #{Session::MasterRack.label(rack)} takes no block (the rack is the chain; master { |mix| ... } alone sets a block)" if block
+          unless options.empty?
+            raise ArgumentError, "master #{Session::MasterRack.label(rack)} takes no options (#{options.keys.map { "#{_1}:" }.join(', ')} go with a mastering preset, master :club)"
+          end
+          label = "master #{Session::MasterRack.label(rack)}"
+          return session_command(nil, label: label, kind: :master) { |s, time|
+            s.master(rack, at: point, fade: fade, start_time: point.given? ? nil : time)
+          }
+        end
+        if effects.is_a?(Symbol) && session.racks[effects] && MB::Sound.live?
+          # (a rack named like a mastering preset: the preset plays)
+          $stdout.puts "\e[2mmaster #{effects.inspect} plays the mastering preset; master rack(#{effects.inspect}) plays the rack of that name\e[0m"
+        end
+
         preset = effects.is_a?(Mastering::Preset) || (effects.is_a?(Symbol) && effects != :show) || effects.is_a?(String) ? effects : nil
         if preset
           preset = Mastering.from_preset(preset, **options) # (errors before anything is queued)

@@ -580,13 +580,38 @@ module MB
       # the instance prints as the block's body): for rack documents
       # (GraphIO::Writer) and help.  Returns [result, stand-ins by port
       # name ({ sig: node, side: node }), the Application (its knobs)].
-      def build_on_stand_ins
+      #
+      # An audio main input stands in as one channel, or as a bundle of
+      # +channels+ when given (a master chain's capture builds on the
+      # Session's channels, so `mix.mono` and `l, r = mix` print as they
+      # play; see Session::MasterRack).  Without +channels+, a block that
+      # fails on one channel (`sig.width(1.3)`, `sig.right`) is built again
+      # on two, so racks needing a stereo input save, draw, and list
+      # (master-rack-1).  +knobs+ are knob start values by name, as #using
+      # gives an application: its knobs print at them.
+      def build_on_stand_ins(channels: nil, knobs: {})
         raise ArgumentError, "#{label} is composed; save or inspect its parts" if @parts
 
-        stand = { @input.name => Rack.stand_in(@input.type) }
+        begin
+          build_on(channels || 1, knobs)
+        rescue StandardError => e
+          raise unless channels.nil? && @input.type == :audio
+
+          begin
+            build_on(2, knobs)
+          rescue StandardError
+            raise e # (the one-channel build's error)
+          end
+        end
+      end
+
+      # #build_on_stand_ins with the main input standing in as +channels+
+      # channels.
+      def build_on(channels, knobs)
+        stand = { @input.name => Rack.stand_in(@input.type, channels: channels) }
         @ports.each_value { |p| stand[p.name] = Rack.stand_in(p.type) }
         kw = @ports.keys.to_h { |k| [k, stand[k]] }
-        app = Application.new(self)
+        app = Application.new(self, start: knobs.dup)
         # (seed 0, restored after, so inspecting or saving a rack never moves
         # the random seeds graphs draw)
         result = MB::Sound.with_seed(0) {
@@ -594,6 +619,7 @@ module MB
         }
         [result, stand, app]
       end
+      private :build_on
 
       # The knobs of the rack (KnobInfo-backed Knob Specs by knob name),
       # from a stand-in build (see #build_on_stand_ins): what `help
@@ -869,10 +895,16 @@ module MB
 
         # A stand-in value for a port of +type+ (see
         # Rack#build_on_stand_ins): a silent node for audio and control, an
-        # empty note stream (as Notes) for notes.
-        def stand_in(type)
+        # empty note stream (as Notes) for notes.  +channels+ above 1 makes
+        # an audio stand-in a bundle of that many silent nodes, its channels
+        # noted as bundle[i] (Recipe.note_input_channels).
+        def stand_in(type, channels: 1)
           case type
-          when :audio, :control then GraphNode::Constant.new(0, sample_rate: 48000)
+          when :audio
+            return GraphNode::Constant.new(0, sample_rate: 48000) if channels == 1
+            # (its channels print as sig[0], sig[1])
+            GraphNode::Channels.new(Array.new(channels) { GraphNode::Constant.new(0, sample_rate: 48000) }).tap { GraphNode::Recipe.note_input_channels(_1) }
+          when :control then GraphNode::Constant.new(0, sample_rate: 48000)
           when :notes then MB::Sound::Notes.new(MIDI::Stream.new(MIDI::ClipSource.new(Sequence::Clip.new([], length: 1))))
           end
         end

@@ -138,6 +138,43 @@ RSpec.describe('set documents', :aggregate_failures) do
     RUBY
   end
 
+  # form-knobs-1: a track's knob values print as its track hash, load
+  # back to the same scenes and sections, and older quoted keys still load
+  it 'saves scenes and sections with track hashes and loads quoted keys too' do
+    a = session
+    within(a) {
+      MB::Sound.knob(:"t/energy", 0, range: 0..1)
+      MB::Sound.knob(:"t/fill", 0, range: 0..1)
+      MB::Sound.track(:t) { |c| c.synth { |n| n.hz.saw * MB::Sound.knob(:"t/energy") * MB::Sound.knob(:"t/fill") } }
+      beat = MB::Sound.seq(MB::Sound::C3).loop.named(:beat)
+      MB::Sound.scene(:one, t: { clip: beat, energy: 0.2, fill: [0.5, over: :section] })
+      MB::Sound.scene(:two, t: { energy: 0.7 })
+      MB::Sound.scene(:three, t: :off, "t/energy": 0.1)
+      MB::Sound.flow(play: false) { one 2; two 4, t: { fill: [1, over: :section] } }
+    }
+    text = io.dump(a.arrangement, name: 'hashes')
+    expect(text).to include(<<~RUBY)
+      scene :one, t: { clip: beat, energy: 0.2, fill: [0.5, { over: :section }] }
+      scene :two, t: { energy: 0.7 }
+      scene :three, t: { clip: :off, energy: 0.1 }
+    RUBY
+    expect(text).to include("  two 4, t: { fill: [1, { over: :section }] }\n")
+
+    b = session
+    io.load(text, session: b)
+    plain = ->(s) { s.arrangement.scenes.transform_values { |sc| sc.values.transform_values { |v| v.respond_to?(:events) ? :clip : v } } }
+    expect(plain.(b)).to eq(plain.(a))
+    expect(plain.(b)[:two]).to eq({ t: :keep, "t/energy": 0.7 })
+    expect(io.dump(b.arrangement, name: 'hashes').sub(/saved: "[^"]*"/, '')).to eq(text.sub(/saved: "[^"]*"/, ''))
+
+    # Quoted keys (documents before track hashes) load to the same scene
+    c = session
+    old = text.sub("scene :two, t: { energy: 0.7 }", 'scene :two, t: :keep, "t/energy": 0.7')
+    expect(old).not_to eq(text)
+    io.load(old, session: c)
+    expect(plain.(c)).to eq(plain.(a))
+  end
+
   it 'saves and loads a post-chain master gain' do
     a = session
     within(a) { MB::Sound.master_gain(-3.db, post: true) }
@@ -191,6 +228,37 @@ RSpec.describe('set documents', :aggregate_failures) do
     io.load(doc.('(150.hz..8000.hz).at(2400.hz)', '(-30.db..6.db).at(-12.db)', '(10.ms..2.seconds).at(500.ms)'), session: s)
     s.process_buffer(800)
     expect(s.knobs[:cut].value).to eq(2400.0)
+  end
+
+  # fix-knob-reload (batch 42's soak seed 789008): scheduled blocks run a
+  # lookahead early, and a set document loaded in one set its knob values
+  # (and ran its commands) then, landing on the first frame of the buffer
+  # running the block; its lines land at the block's time, as the same
+  # lines typed in the block do
+  it "lands a set document's knob values and tempo at the time of the scheduled block loading it, at any buffer size" do
+    text = "graph #{io::FORMAT}, name: \"k\", kind: :set\nknob :cut, (100.hz..5000.hz).at(600.hz)\nbpm 150\n"
+    outs = [367, 800].map { |size|
+      s = session
+      within(s) {
+        MB::Sound.knob :cut, 1200.0, range: 200.0..4000.0
+        MB::Sound.bg :k, MB::Sound.knob(:cut) * 0.0001, on: :now
+      }
+      s.schedule(1/2r) { io.load(text, session: s) }
+      out = Array.new((60000.0 / size).ceil) { s.process_buffer(size)[0].dup }
+      out = SpecBuffers.join(out)[0...60000]
+
+      turn = s.journal.changes.find { |e| e.kind == :turn && e.subject == :cut }
+      expect(turn&.lands&.pos).to eq(1/2r), "#{size}-frame buffers"
+      expect(s.journal.changes.find { |e| e.kind == :tempo_base }&.lands&.pos).to eq(1/2r), "#{size}-frame buffers"
+      expect(s.knobs[:cut].spec.range).to eq(100.0..5000.0)
+      expect(s.knobs[:cut].value).to eq(600.0)
+      out
+    }
+    # (bar 1 beat 3 at 120 BPM: frame 48000, where the 5 ms glide starts)
+    expect(outs[0][47999]).to be_within(1e-6).of(0.12)
+    expect(outs[0][48001]).to be < 0.12
+    expect(outs[0][48300]).to be_within(1e-6).of(0.06)
+    expect(RecipeHelpers.max_diff([outs[0]], [outs[1]])).to eq(0)
   end
 
   it 'saves a loaded set again to the same text, playing bit for bit' do
@@ -323,7 +391,7 @@ RSpec.describe('set documents', :aggregate_failures) do
     expect(RecipeHelpers.max_diff(ref, got)).to eq(0)
   end
 
-  # fix-batch-1102b (found by gen-knobs-1): `track :drums, L.gen.techno_beat`
+  # fix-batch-1102b (found by gen-knobs-1): `track :drums, L.gen.beat.techno`
   # saved as `track :drums, :tr909`, so the loaded track had no clip; only
   # scenes carried clips.  Each track's own clip (the one track, bg, swap,
   # or a scene gave it last) is saved with it.
@@ -342,7 +410,7 @@ RSpec.describe('set documents', :aggregate_failures) do
 
     a = session
     within(a) {
-      define.(MB::Sound::L.gen.techno_beat, riff, grid, nil)
+      define.(MB::Sound::L.gen.beat.techno, riff, grid, nil)
       MB::Sound.bg(:lead, riff.transpose(12))
       4.times { a.process_buffer }
       MB::Sound.swap(:lead, riff.transpose(7))
@@ -351,7 +419,7 @@ RSpec.describe('set documents', :aggregate_failures) do
     }
     text = io.dump(a.arrangement, name: 'held')
     expect(text).to include(
-      "drums = L.gen.techno_beat(seed: 5)\n", "bass = events([0r, 1/8r, 45, 0.8], [3/8r, 1/8r, 48, 0.6], length: 1r, loop: true)\n",
+      "drums = L.gen.beat.techno(seed: 5)\n", "bass = events([0r, 1/8r, 45, 0.8], [3/8r, 1/8r, 48, 0.6], length: 1r, loop: true)\n",
       "kit = grid(16, kick: \"x...x...\", hat: \"..x...x.\").loop\n", "lead = bass.transpose(7)\n",
       "track :drums, drums, :tr909\n", 'track(:bass, bass) { |clip|', 'track(:kit, kit) { |k|', 'track(:lead, lead) { |clip|',
       'knob :"drums/energy", (0.0..1.0).at(0.8)'
@@ -369,7 +437,7 @@ RSpec.describe('set documents', :aggregate_failures) do
     # The loaded tracks play the clips: like tracks given them directly
     r = session
     within(r) {
-      define.(MB::Sound::L.gen.techno_beat, riff, grid, riff.transpose(7))
+      define.(MB::Sound::L.gen.beat.techno, riff, grid, riff.transpose(7))
       MB::Sound.turn(:"drums/energy", 0.8)
       r.process_buffer
     }

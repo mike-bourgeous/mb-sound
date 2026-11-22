@@ -239,8 +239,11 @@ module MB
         # values, or nil to clamp it to the range.  +timeline_nodes+ are
         # Sequence::TimelineNodes in the source's graph (see #follow), and
         # +time+ the landing position in whole notes.  +label+ describes
-        # it.
-        Follow = Struct.new(:start, :source, :map, :timeline_nodes, :label, :time)
+        # it.  +pure+ is the followed node when its value is a function of
+        # the timeline position alone (tempo LFOs, constants, their sums
+        # and products: MIDI::Param::Graph), counted from +time+, so
+        # #value_at can answer any position exactly (beats-timing-1).
+        Follow = Struct.new(:start, :source, :map, :timeline_nodes, :label, :time, :pure)
 
         # A MIDI controller move landing on frame +start+: +position+ (0..1)
         # from controller +cc+.
@@ -720,7 +723,27 @@ module MB
           if transport
             nodes.each { |n| n.start_at(0r, origin: 0r, launch: 0r, transport: transport) }
           end
-          add_segment(Follow.new(frame, source, map, nodes, label || Knob.label_of(node), time))
+          pure = transport && time && map.nil? && Knob.timeline_pure?(node) ? node : nil
+          add_segment(Follow.new(frame, source, map, nodes, label || Knob.label_of(node), time, pure))
+        end
+
+        # True if +node+'s value is a function of the timeline position
+        # alone, counted from where a follow starts it (see Follow):
+        # tempo LFOs with fixed lengths, constants, and sums and products of
+        # them (MIDI::Param::Graph's trees, without knobs).
+        def self.timeline_pure?(node)
+          MIDI::Param::Graph.check(node, 'A follow')
+          MIDI::Param::Graph.nodes(node).all? { |n|
+            case n
+            when Knob, Reader then false
+            when MB::Sound::Tone
+              f = MIDI::Param::Graph.unwrap(n.frequency)
+              f.respond_to?(:count) && f.count.nil? && f.respond_to?(:duration) && !f.duration.nil?
+            else true
+            end
+          }
+        rescue MIDI::Param::NotAParam
+          false
         end
 
         # Follows again what +state+ (a Follow from #state_at) followed,

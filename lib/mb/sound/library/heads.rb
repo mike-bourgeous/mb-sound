@@ -48,7 +48,10 @@ module MB
           # name words, sorted.
           def words
             w = @pool.flat_map { |e| [e.name, *e.words, *e.name_words] }
-            (w.uniq - @chosen).select { |x| x.to_s.match?(/\A[a-z_][a-z0-9_]*\z/) }.sort
+            # (a sub-namespace's names stay once its family is chosen, even
+            # when the same word narrowed before: L.gen.techno.beat.techno)
+            named = @pool.filter_map { |e| e.name if e.namespaced? && @chosen.include?(e.family) }
+            ((w.uniq - @chosen) | named).select { |x| x.to_s.match?(/\A[a-z_][a-z0-9_]*\z/) }.sort
           end
 
           # The result of narrowing by +word+: an Entry when +word+ names one
@@ -56,12 +59,15 @@ module MB
           # when nothing matches.
           def word(word)
             w = word.to_sym
-            exact = @pool.select { |e| e.name == w }
+            # (a sub-namespace's entry is named exactly once its family is
+            # chosen, L.gen.beat.rock; under the head alone its name
+            # narrows like a tag: L.gen.rock, L.gen.techno; Entry#namespaced?)
+            exact = @pool.select { |e| e.name == w && (!e.namespaced? || @chosen.include?(e.family)) }
             return exact.first if exact.length == 1
-            narrowed = exact.length > 1 ? exact : @pool.select { |e| e.words.include?(w) }
+            narrowed = exact.length > 1 ? exact : @pool.select { |e| e.words.include?(w) || (e.name == w && e.namespaced?) }
             narrowed = @pool.select { |e| e.name_words.include?(w) } if narrowed.empty?
             if narrowed.empty?
-              raise KeyError, "nothing under #{@path} is #{w.inspect}#{Library.suggest(w, words)}"
+              raise KeyError, "nothing under #{@path} is #{w.inspect}#{Heads.renamed_hint(@kind, w)}#{Library.suggest(w, words)}"
             end
             return narrowed.first if narrowed.length == 1 && narrowed.first.family != w && !narrowed.first.tags.include?(w)
             Query.new(@kind, @chosen + [w], path: "#{@path}.#{w}", pool: narrowed)
@@ -113,7 +119,7 @@ module MB
           def method_missing(name, *args, **kwargs, &block)
             return super unless name.match?(/\A[a-z_][a-z0-9_]*\z/) && !@pool.empty?
             left = @pool.length > 6 ? "#{@pool.length} entries: `#{@path}` lists them" : "#{@pool.length} entr#{@pool.length == 1 ? 'y' : 'ies'}: #{Heads.some_names(self)}"
-            raise NoMethodError.new("nothing under #{@path} is #{name.inspect} (#{left})#{Library.suggest(name, words)}", name)
+            raise NoMethodError.new("nothing under #{@path} is #{name.inspect}#{Heads.renamed_hint(@kind, name)} (#{left})#{Library.suggest(name, words)}", name)
           end
 
           def respond_to_missing?(_name, _include_private = false) = false
@@ -139,11 +145,37 @@ module MB
           def inspect = to_s
         end
 
+        # Entries renamed by a branch, by kind and old name => the path
+        # that names them now, so a saved line or a habit gets the new
+        # spelling in its error (the maintainer's rule: superseded names
+        # are replaced, callers migrated, no alias; drum-gen-1).
+        RENAMED = {
+          generator: { techno_beat: 'L.gen.beat.techno' },
+          instrument: { funk_beat: 'L.inst.funk_kit' },
+        }.freeze
+
         module_function
 
+        # ": now L.gen.beat.techno" for an old name of RENAMED (+kind+ nil
+        # looks in every kind), else "".
+        def renamed_hint(kind, name)
+          to = kind ? RENAMED.dig(kind, name.to_sym) : RENAMED.each_value.filter_map { |h| h[name.to_sym] }.first
+          to ? " (renamed: it is #{to} now)" : ''
+        end
+
+        # [receiver, word] standing for word +name+ of +query+ when RENAMED
+        # moved it ([L.gen.beat, :techno] for L.gen's :techno_beat), or nil
+        # (documents before format 14 load through it: GraphIO::Loader).
+        def renamed_word(query, name)
+          to = RENAMED.dig(query.kind, name.to_sym) or return nil
+          return nil unless query.chosen.empty? && query.path.end_with?(".#{HEADS.key(query.kind)}")
+          *mid, word = to.split('.').drop(2).map(&:to_sym)
+          [mid.reduce(query) { |q, w| q.word(w) }, word]
+        end
+
         # Defines the words of +query+ as its singleton methods.  Given
-        # arguments, a word naming an entry calls it: `L.gen.techno_beat(seed:
-        # 3)` is `L.gen.techno_beat.(seed: 3)`, `L.fx.hall(sig)` is
+        # arguments, a word naming an entry calls it: `L.gen.beat.techno(seed:
+        # 3)` is `L.gen.beat.techno.(seed: 3)`, `L.fx.hall(sig)` is
         # `L.fx.hall.(sig)` (lib-gen-1).
         def define_words(query, words)
           words.each do |w|
@@ -205,9 +237,28 @@ module MB
                   when Query then node.words.reject { |w| Query::OWN.include?(w) } + %i[entries names find bench]
                   else %i[call to_ruby about tags params head_path audition auditions bench]
                   end
-          words.map(&:to_s).select { |w| w.start_with?(prefix) }.sort.map { |w| "#{path}.#{w}" }
+          # (a sub-namespace's names complete with their family:
+          # "L.gen.ro" offers L.gen.beat.rock; a name that is also a tag
+          # there offers both, "L.gen.techno" then L.gen.beat.techno)
+          spelled = node.is_a?(Query) ? namespaced_words(node) : {}
+          words.map(&:to_s).select { |w| w.start_with?(prefix) }.sort.flat_map { |w|
+            fam, also = spelled[w.to_sym]
+            next ["#{path}.#{w}"] unless fam
+            also ? ["#{path}.#{w}", "#{path}.#{fam}.#{w}"] : ["#{path}.#{fam}.#{w}"]
+          }.uniq
         rescue KeyError, StandardError
           nil
+        end
+
+        # { name => [family, also a word] } for the entries of +query+ in a
+        # sub-namespace whose family isn't chosen yet (one entry per name);
+        # +also a word+ is true when the name is also another entry's name,
+        # tag, or family there (then the bare word narrows to several).
+        def namespaced_words(query)
+          ns = query.entries.select { |e| e.namespaced? && !query.chosen.include?(e.family) }
+          return {} if ns.empty?
+          others = query.entries.reject(&:namespaced?).flat_map { |e| [e.name, *e.words] }.to_set
+          ns.group_by(&:name).select { |_, l| l.length == 1 }.to_h { |n, l| [n, [l.first.family, others.include?(n)]] }
         end
       end
     end

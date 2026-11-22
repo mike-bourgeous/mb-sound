@@ -95,6 +95,29 @@ module MB
           k
         end
 
+        # Defines knob +name+ (see #knob) and, if the Session had it, moves
+        # it to the new +default+ (a set document's `knob` line over a knob
+        # the session has; GraphIO::Loader#session_knob): the new options
+        # and the value land together as one :turn change (journaled,
+        # undoable) at the issuing context's time (a scheduled block's: its
+        # exact frame at any buffer size; fix-knob-reload, batch 42's soak
+        # seed 789008, where the value landed on the first frame of the
+        # buffer running the block, ahead of its time), else now.  Options
+        # are checked here, before the change lands.  Returns the knob
+        # (nil if the name is taken, as #knob).
+        def redefine_knob(name, default, **spec)
+          k = @knob_lock.synchronize { @knobs[name] }
+          return knob(name, default, **spec) unless k
+
+          value = k.spec.respec(default: default, **spec).default
+          time = Session.context&.time_for(self)
+          knob_change(k, time, { value: value }) { |kn, frame, _t|
+            knob(name, default, **spec)
+            kn.set(value, frame: frame) if kn.target != value
+          }
+          k
+        end
+
         # The default of a knob read before it was defined (live; see
         # #implicit_knob).
         IMPLICIT_DEFAULT = 0.5
@@ -151,6 +174,62 @@ module MB
           return false unless name.is_a?(Symbol)
           nm = Name[name]
           (nm.level? || nm.key?) && @names.kind(nm.owner) == :track
+        end
+
+        # The knob name a track's knob +param+ has in a track hash (scene
+        # and section values `drums: { energy: 0.8 }`) and in `turn :drums,
+        # energy: 0.8` (form-knobs-1, 2026-11-22): :level and :key are the
+        # track's strip knobs (:"drums/level", as `drums: -6.db` and `turn
+        # :drums, -6.db` are), anything else its param knob by the one rule
+        # (Name.param: :"drums/energy"; a patch param named level is
+        # :"drums/patch_level", written patch_level:).
+        def track_knob_name(track, param)
+          return Name.level(track) if param == :level
+          return Name.key(track) if param == :key
+          Name.param(track, param)
+        end
+
+        # The knob param names of track +track+ (short: [:energy, :fill,
+        # :level]) as track hashes and `turn :drums, energy:` write them
+        # (see #track_knob_name), for listings and suggestions.
+        def track_knob_params(track)
+          prefix = "#{track}/"
+          own = @knob_lock.synchronize { @knobs.keys }.select { |k| k.is_a?(Symbol) && k.name.start_with?(prefix) && Name[k].parts.length == 2 }
+          own.map { |k| Name[k].leaf }
+        end
+
+        # Why knob +param+ of track +track+ isn't there, with a
+        # did-you-mean from the track's own knobs (short names), for
+        # +what+ (the command or scene that named it).
+        def track_knob_message(what, track, param)
+          params = track_knob_params(track).map(&:to_s)
+          hint = DidYouMean::SpellChecker.new(dictionary: params).correct(param.to_s).first
+          "#{what}: #{track.inspect} has no knob #{param}#{hint ? " (did you mean #{hint}:?)" : ''}" \
+            "#{params.empty? ? ' (it has no knobs yet: a generator or preset makes them when the track plays it)' : " (its knobs: #{params.join(', ')})"}"
+        end
+
+        # The length (a Duration) of `over: :section` for a change landing
+        # at timeline position +time+ (form-knobs-1): from there to the end
+        # of the form section pass playing at +time+ (a pass that is
+        # starting, Form::Playback#begin_pass, gives its end through the
+        # Context's +section_end+; a manual turn or `go` while a form plays
+        # ramps to the end of the current pass).  Raises an ArgumentError
+        # naming the spellings that work when no section plays there.
+        def section_over(time)
+          ending = section_end_at(time)
+          return Sequence::Duration.new(ending - time) if ending && ending > time
+          raise ArgumentError, 'over: :section ramps to the end of the form section playing where it lands, and no section is playing there ' \
+                               '(over: 4 for four bars, or over: 2.bars)'
+        end
+
+        # Where the form section playing at +time+ ends (see #section_over),
+        # or nil.
+        private def section_end_at(time)
+          ctx = Session.context&.section_end
+          return ctx[1].call if ctx && ctx[0].equal?(self)
+          pb = @arrangement&.playback
+          return nil unless pb && !pb.ended? && pb.pass_start && pb.boundary
+          pb.pass_start <= time && time < pb.boundary ? pb.boundary : nil
         end
 
         # The knob name of the primary control of +name+'s owner (see
@@ -431,6 +510,15 @@ module MB
           warn_clamp(k, value) if value.is_a?(Numeric)
 
           time = start_time ? start_time.to_r : launch_time(point, [], default: nil)
+          if over == :section
+            # (to the end of the form section playing where it lands:
+            # form-knobs-1; #section_over)
+            over = begin
+              section_over(time || self.now) # (self: turn has a local named now)
+            rescue ArgumentError => e
+              return MB::Sound.live_error(ArgumentError.new("turn #{k.name.inspect}: #{e.message}"))
+            end
+          end
           data = turn_data(value, over, curve).merge(from ? { from: from } : {}).merge(smooth.nil? ? {} : { smooth: smooth })
           knob_change(k, time, data) { |kn, frame, t|
             # (a take replaying a level gesture's line, `level :drums,

@@ -808,6 +808,62 @@ module SessionFuzz
       s.rng.rand < 0.5 ? "#{kit}; #{play}; #{insert}" : "#{kit}; #{play}; after(in: 2.beats) { #{insert} }; after(in: 1.bar) { fx :#{name}, :off }"
     },
     ->(s) {
+      # (master-rack-1) effect racks on the master: a named rack with a
+      # rack knob, an anonymous one, or the master chain kept as a rack (its
+      # rack document text loaded back, as master.save_rack writes it, and
+      # defined), landing at a launch point; or a rack as a track's insert
+      case s.rng.rand(4)
+      when 0 then "arack(:mfx) { |sig| sig.hp1(40).softclip(0, 0.9) * knob(:mix, #{s.pick([0.5, 0.8])}) }; master :mfx#{s.on}"
+      when 1 then "master arack { |sig| sig.lp4(#{s.pick([900, 3000])}).softclip }#{s.on}"
+      when 2
+        chain = s.pick(['{ |m| m.hp1(30).softclip(0, 0.9) }', '{ |l, r| [l, r.delay(0.004)] }', '{ |m| m.width(1.2).softclip }'])
+        "master #{chain}; Session.current.racks.define(Session::MasterRack.rack(Session.current, :mcap)); master :mcap#{s.on}"
+      else
+        next unless s.instruments
+
+        "arack(:tfx) { |sig| sig.lp4(1200) * knob(:mix, 0.7) }; fx :#{s.pick(s.instruments)}, :tfx#{s.on}"
+      end
+    },
+    ->(s) {
+      # (fix-knob-reload, batch 42's soak seed 789008) a set document
+      # loaded in a scheduled block lands its lines at the block's time,
+      # as the same lines typed in the block do: a base tempo, and the
+      # song's knob :cut declared again with a new range and value (they
+      # landed on the first frame of the buffer running the block, a
+      # lookahead early)
+      # (knob lines are the header: before the body's bpm)
+      body = "bpm #{s.pick([120, 132, 140])}"
+      body = "knob :cut, (100.hz..5000.hz).at(#{s.pick(%w[600 3000])}.hz)\\n#{body}" if s.knob
+      "GraphIO.load(%(graph \#{GraphIO::FORMAT}, name: \"tempo\", kind: :set\\n#{body}\\n), session: Session.current)"
+    },
+    ->(s) {
+      # (beats-timing-1) a beat steered by :busy per beat (or per step,
+      # bar, eighth, with a lead), sometimes humanized, and sometimes :busy
+      # following a square tempo LFO: each unit reads the values for its
+      # start (a followed LFO's value there, exactly), at any buffer size,
+      # planned or not, mid-song launches deciding like an uninterrupted run
+      d = s.pick(['', ', decide: :step', ', decide: :bar', ', decide: 1.n8', ', lead: 1.n16'])
+      beat = "beats(16, energy: knob(:busy), seed: #{s.rng.rand(1..99)}#{d}) { kick [1, 0, 0, 0] * 4, keep: [0, 8]; hat [0.8] * 16, drift: 0.2 }#{s.pick(['', '.humanize(4.ms)'])}"
+      line = "bg :#{s.bg_name}, tr808(#{beat}) * 0.5#{s.on}"
+      s.rng.rand < 0.6 ? "#{line}; turn :busy, #{s.pick(['2.bars', '1.bar', '2.beats'])}.lfo.square.at(0.1..0.9)" : line
+    },
+    # (form-knobs-1) a track hash on an instrument track: a scene setting
+    # the track's knobs (and sometimes its clip) in one key, launched; or
+    # a turn of several of its knobs with one ramp
+    ->(s) {
+      next unless s.instruments
+
+      t = s.pick(s.instruments)
+      release = s.pick([0.02, 0.3])
+      if s.rng.rand < 0.5
+        clip = s.rng.rand < 0.5 ? "clip: #{s.clip_for.(t)}, " : ''
+        level = s.pick(['0.6', '[0.4, over: 1/2r]', '[1, over: 1]'])
+        "scene :th, #{t}: { #{clip}release: #{release}, level: #{level} }, others: :keep; go :th#{s.on}"
+      else
+        "turn :#{t}, release: #{release}, level: #{s.pick([0.4, 1])}, over: #{s.pick(['1/2r', '1'])}#{s.on}"
+      end
+    },
+    ->(s) {
       # (undo-one-step-1, the maintainer's "Having undo step back only one
       # step seems ideal") a playing synth track redefined two or three
       # times within a bar, each a scheduled block of its own (an undo

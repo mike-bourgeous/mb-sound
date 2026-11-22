@@ -42,6 +42,17 @@ module MB
           @mutex = Mutex.new
         end
 
+        # This map with keys moved ({ key => key it takes the values of };
+        # Instrument#remap_keys): each moved key gets the zones of the key
+        # it plays like, ahead of the zones it had.
+        def remap_keys(moved)
+          extra = moved.flat_map { |from, to|
+            @zones.select { |k0, k1, _, _, _| to.between?(k0, k1) }.map { |_, _, v0, v1, value| [[from, from], [v0, v1], value] }
+          }
+          return self if extra.empty?
+          ZoneMap.new(extra + @zones.map { |k0, k1, v0, v1, value| [[k0, k1], [v0, v1], value] }, default: @default)
+        end
+
         # The value for MIDI +key+ and +velocity+.
         def [](key, velocity)
           z = @zones.find { |k0, k1, v0, v1, _| key.between?(k0, k1) && velocity.between?(v0, v1) }

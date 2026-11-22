@@ -166,6 +166,10 @@ module MB
           # (documents before format 12, whose rootless scales didn't follow
           # the session key; see GraphIO::FORMAT)
           @old_scales = false
+          # Whether library words renamed since are followed to their new
+          # names (documents before format 14, which named
+          # L.gen.techno_beat; Library::Heads::RENAMED)
+          @old_names = false
           @path = path
           @label = path || '(graph document)'
           @given_inputs = inputs.transform_keys(&:to_sym)
@@ -385,7 +389,7 @@ module MB
             raise LoadError.new("#{@label}: set documents have no inputs", path: @path)
           end
           @inputs = {}
-          Session.with_context(session: @session) do
+          Session.with_context(session: @session, **issuing_context) do
             bind_params
             # The header's clocks (after its knobs, which speeds may name)
             @document.clocks.each { |n, spec| @session.define_clock(n, spec[:base], speed: spec[:speed] || 1) }
@@ -411,6 +415,18 @@ module MB
           @document.session = @session
           @loaded = true
           @document
+        end
+
+        # The time, batch, and source of the context a set document loads
+        # in when it issues commands to the set's Session (a scheduled
+        # block's, or a scene's: its commands and knob lines land at that
+        # time, as the same lines typed in the block do; fix-knob-reload,
+        # batch 42's soak seed 789008), else none (a load into another
+        # Session, or from the console: now).
+        def issuing_context
+          c = Session.context
+          return {} unless c&.time && Session.current.equal?(@session)
+          { time: c.time, batch: c.batch, source: c.source }
         end
 
         # Reads only the header (no graph is built).  Returns a Document.
@@ -555,6 +571,7 @@ module MB
               @old_shift = !GraphIO.since?(version, :clip_shift)
               @old_tempo = !GraphIO.since?(version, :tempo_live)
               @old_scales = !GraphIO.since?(version, :following_scales)
+              @old_names = !GraphIO.since?(version, :beat_family)
               @comment_notes = GraphIO.since?(version, :metadata)
               @document.read_graph_line(kwargs, offsets: @header_offsets || {})
             when :inputs
@@ -807,12 +824,13 @@ module MB
         # The value is the redeclared knob's default, read through its
         # Spec as a fresh declaration reads it (a typed value like
         # 2400.hz, the document's own, as the knob's number; fixes-15:
-        # a second demo declaring :cut in Hz raised a NoMethodError).
+        # a second demo declaring :cut in Hz raised a NoMethodError).  The
+        # options and value of a knob the session has land as one change
+        # at the load's time (a scheduled block's exact frame; see
+        # Session::Knobs#redefine_knob).
         def session_knob(name, value, opts)
-          existing = @session.knobs[name]
-          k = @session.knob(name, value, **opts)
+          k = @session.redefine_knob(name, value, **opts)
           raise LoadError.new("#{@label}: knob #{name} can't be made (its name is taken in the session)", path: @path) unless k
-          k.set(k.spec.default, frame: k.next_frame) if existing && k.target != k.spec.default
           k
         end
 
@@ -1189,9 +1207,13 @@ module MB
             if @header && !receiver.is_a?(Numeric) && !(receiver.is_a?(Range) && name == :at)
               raise error(node, "the header holds values only (#{name} isn't one)")
             end
+            if @old_names && receiver.is_a?(Library::Heads::Query) && (moved = Library::Heads.renamed_word(receiver, name))
+              receiver, name = moved
+            end
             unless Registry.allowed?(receiver, name)
               names = Registry.names_for(receiver)
               hint = GraphIO.suggest(name, names.to_a)
+              hint = "#{Library::Heads.renamed_hint(receiver.kind, name)}#{hint}" if receiver.is_a?(Library::Heads::Query)
               raise error(node, "#{name} isn't a graph method of #{describe(receiver)}#{hint}")
             end
           end

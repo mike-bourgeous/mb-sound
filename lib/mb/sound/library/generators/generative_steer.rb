@@ -4,8 +4,8 @@ module MB
       module Generators
         # The generators of bin/songs/generative_steer.rb (G3: knob
         # steering and evolving rhythms; D phrygian at 124 BPM), the song's
-        # one source: `L.gen.techno_beat`, `L.gen.acid_rhythm`,
-        # `L.gen.phrygian_motif`.
+        # one source: `L.gen.beat.techno` (in drum_beats.rb, tagged
+        # generative_steer), `L.gen.acid_rhythm`, `L.gen.phrygian_motif`.
         module GenerativeSteer
           extend NoteNames # (D3, A3)
 
@@ -21,21 +21,6 @@ module MB
           def harmony
             ch = MB::Sound.harmony(chords.each_with_index.to_h { |c, i| [(2 * i).bars, c] }, curve: :step, loop: 8.bars)
             MB::Sound.scale(:phrygian, :d).weights + ch * 1.5
-          end
-        end
-
-        generator :techno_beat, instrument: :tr909, tags: %i[techno drums beat generative_steer],
-          about: 'An evolving techno beat: anchored kick and clap, drifting snare ghosts, mutating Euclidean hats and ride, a fill every 8 bars; ' \
-                 'energy thins and fills it',
-          params: -> { { seed: 5, energy: (0.0..1.0).at(0.5) } } do |seed:, energy:|
-          beats(16, hold: 2, swing: 0.53, energy: energy, over: 4, seed: seed) do
-            kick [1, 0, 0, 0] * 4, keep: [0, 4, 8, 12], drift: 0.1
-            clap [0, 0, 0, 0, 1, 0, 0, 0] * 2, keep: [4, 12], level: 0.85
-            snare [0, 0, 0, 0.1, 0, 0, 0.15, 0, 0, 0.1, 0, 0, 0, 0.2, 0, 0.25], drift: 0.2, level: 0.5
-            hat euclid(10, 16), mutate: 0.5, drift: 0.15, level: 0.7
-            open_hat [0, 0, 0.8, 0] * 4, drift: 0.25, level: 0.6
-            ride euclid(5, 16), mutate: 0.3, level: 0.45
-            fill every: 8, snare: 0.7, low_tom: 0.35, mid_tom: 0.35
           end
         end
 

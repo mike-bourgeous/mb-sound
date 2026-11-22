@@ -14,6 +14,7 @@ require_relative 'session/holds'
 require_relative 'session/faders'
 require_relative 'session/handover'
 require_relative 'session/master'
+require_relative 'session/master_rack'
 require_relative 'session/tails'
 require_relative 'session/markers'
 require_relative 'session/seeks'
@@ -1485,6 +1486,7 @@ module MB
         ExitClose.unregister(self)
         @output.release_writer if @output.respond_to?(:release_writer) # (a virtual clock's; NullOutput)
         @thread&.join(5)
+        MB::Sound::UI::Yielding.unfollow(@thread) if @thread && defined?(MB::Sound::UI::Yielding) # (yielders stop following it)
         @output.end_stream if @output.respond_to?(:end_stream) # (DeviceOutput: no concealment of the end)
         close_recordings
         midi_inputs.each_value { |m| m.input = nil unless m.replaying? }

@@ -12,11 +12,11 @@ One note per subsystem: the design decisions with their dates, measurements, res
 
 ### [Graph I/O (recipes and Ruby export)](graph_io.md)
 
-Every graph remembers the DSL calls that built it (`GraphNode::Recipe`, `lib/mb/sound/graph_node/recipe.rb`), so `node.to_ruby` prints it back as Ruby, and graph documents (`.mbg.rb`, `lib/mb/sound/graph_io.rb` + `graph_io/`: `save`, `preset`, `GraphIO.load`/`.dump`) save graphs, clips, bundles with assets, racks, and whole sets.  Documents load by walking the Prism tree through `GraphIO::Registry`, never eval; file reads go through `GraphIO::FileGuard`.  Every plain value prints through one printer, `MB::Sound::RubyValue` (Rationals as `3/4r` and `3r`; formats in `GraphIO::FORMATS`, 8 calls library generators, `L.gen.techno_beat(seed: 3)`).  A new DSL method taking a build block goes in `BUILD_BLOCKS`; one that reads files or allocates by an argument goes in `Registry::FILE_METHODS` or `Loader#check_limits`.  Float settings take params or are in `GraphIO::NumberOnly` (fit-patch-2).
+Every graph remembers the DSL calls that built it (`GraphNode::Recipe`, `lib/mb/sound/graph_node/recipe.rb`), so `node.to_ruby` prints it back as Ruby, and graph documents (`.mbg.rb`, `lib/mb/sound/graph_io.rb` + `graph_io/`: `save`, `preset`, `GraphIO.load`/`.dump`) save graphs, clips, bundles with assets, racks, and whole sets.  Documents load by walking the Prism tree through `GraphIO::Registry`, never eval; file reads go through `GraphIO::FileGuard`.  Every plain value prints through one printer, `MB::Sound::RubyValue` (Rationals as `3/4r` and `3r`; formats in `GraphIO::FORMATS`, 8 calls library generators, `L.gen.beat.techno(seed: 3)`).  A new DSL method taking a build block goes in `BUILD_BLOCKS`; one that reads files or allocates by an argument goes in `Registry::FILE_METHODS` or `Loader#check_limits`.  Float settings take params or are in `GraphIO::NumberOnly` (fit-patch-2).
 
 ### [The library: entries, index, shelves, heads](library.md)
 
-Every named thing (presets at every scale: effects, instruments, kits, clips, generators, masters, sets) is a frozen `Library::Entry` in one `Library.index` (`lib/mb/sound/library.rb` + `library/`), found by name, by `find 'dark bass'`, or through heads (`L.fx`, `L.inst`, `L.kit`; `L.gen` clip generators and `L.flow` section chains, recorded as their call, seed written out: `L.gen.techno_beat(seed: 5)`; on tracks their params are knobs).  Presettable classes have one `preset` line each; shelves are searched session racks, project, user (a git repository), gems, then built-ins, the first match winning.  `save` never replaces (`save!`, `bump: true`); library files load through `Library::FileLoader`, never eval.  `Library::Bench` (`L.fx.reverb.bench`, `bin/preset_bench.rb`) renders presets as loudness-matched Listening Bench sets.  `audition x` plays one (CUE, else MAIN).
+Every named thing (presets at every scale: effects, instruments, kits, clips, generators, masters, sets) is a frozen `Library::Entry` in one `Library.index` (`lib/mb/sound/library.rb` + `library/`), found by name, by `find 'dark bass'`, or through heads (`L.fx`, `L.inst`, `L.kit`; `L.gen` clip generators and `L.flow` section chains, recorded as their call, seed written out: `L.gen.beat.techno(seed: 5)`; on tracks their params are knobs).  Presettable classes have one `preset` line each; shelves are searched session racks, project, user (a git repository), gems, then built-ins, the first match winning.  `save` never replaces (`save!`, `bump: true`); library files load through `Library::FileLoader`, never eval.  `Library::Bench` (`L.fx.reverb.bench`, `bin/preset_bench.rb`) renders presets as loudness-matched Listening Bench sets.  `audition x` plays one (CUE, else MAIN).
 
 ### [Importers: finding foreign files (`MB::Sound::MediaIndex`)](importers.md)
 
@@ -152,7 +152,7 @@ Texture nodes in `fast_texture` and `fast_resonator` (exact Ruby mirrors, the sa
 
 ### [Generative music](generative.md)
 
-A generator is a looping Clip whose events per cycle are a pure function of (seed, cycle): every draw is counter-based (`Generative::Dice`, splitmix64 over the seed and a key path, C `fast_generative` with an exact Ruby mirror), so cycles come out the same cold or in order (seeks, takes, documents, any buffer size).  Probability scales (`Weights`, `Chord`, `Field`, `Harmony`) are printable values with operators; `generate`, `strikes`, `melody`, `motifs` (phrase memory), and `beats` (evolving drum rows) make generator clips, steered by knobs read once per cycle at a decision point, following the key live (a rootless scale, no source, `progression(:i, :VI)`); `markov` and `lsystem` write long forms that `flow { generate ... }` plays and `Form::Plan` works out ahead.  The shipped ones are library entries under `L.gen` and `L.flow`.  Help `help :generative`, `help :long_form`.
+A generator is a looping Clip whose events per cycle are a pure function of (seed, cycle): every draw is counter-based (`Generative::Dice`, splitmix64 over the seed and a key path, C `fast_generative` with an exact Ruby mirror), so cycles come out the same cold or in order (seeks, takes, documents, any buffer size).  Probability scales (`Weights`, `Chord`, `Field`, `Harmony`) are printable values with operators; `generate`, `strikes`, `melody`, `motifs` (phrase memory), and `beats` (evolving drum rows) make generator clips, steered by knobs and LFOs read for each beat's or cycle's start, following the key live (a rootless scale, no source, `progression(:i, :VI)`); `markov` and `lsystem` write long forms that `flow { generate ... }` plays and `Form::Plan` works out ahead.  The shipped ones are library entries under `L.gen` and `L.flow`.  Help `help :generative`, `help :long_form`.
 
 ### [MIDI](midi.md)
 
@@ -190,9 +190,10 @@ Rules: changes go through `Session#change`; scene graphs build ahead of their la
 
 ### [Master effects](master_effects.md)
 
-`Session#master` / console `master { |mix| mix.softclip }` runs the mix through a chain of `GraphNode::MixSource` channels; new chains start at launch points with the old one spilling over (`fade:` crossfades), `master nil` bypasses, and the master gain applies before the chain (`post: true` after it).
-Without a chain, realtime live output ends in a transparent -1 dBFS `Session::SafetyLimiter` (never in renders, stems, takes, taps).
-Mastering presets (`master :club`, `:streaming`, `:quiet`, `:vinyl`, `:hot`, `:match, reference:`; `mix.master(:club)` anywhere; `masters`) are frozen `Mastering::Preset` values: renders reach their loudness target exactly in two passes (`Mastering::Targeting`), live uses the preset's drive or `ride: true`; `:match` takes a reference track's loudness (`measure: :integrated | :loudest | :histogram`, read in both alike), true peak, and (renders) spectral tilt.
+`master { |mix| mix.softclip }` (`Session#master`) runs the mix through a chain on `GraphNode::MixSource` channels, starting at launch points while the old one spills over (`fade:` crossfades); `master nil` bypasses; the master gain applies before it (`post: true` after).
+Without a chain, live output ends in a transparent -1 dBFS `Session::SafetyLimiter` (not in renders, stems, takes).
+Mastering presets (`master :club`, `:streaming`, `:quiet`, `:vinyl`, `:hot`, `:match, reference:`; `mix.master(:club)`; `masters`) are frozen `Mastering::Preset`s: renders hit their loudness target exactly in two passes (`Mastering::Targeting`), live uses the drive or `ride: true`; `:match` takes a reference's loudness, true peak, and tilt.
+Effect racks play as the chain (`master :glue`); `master.save_rack :glue` keeps the chain as a rack document (`Session::MasterRack`).
 
 ### [Buses, sends, and bus sidechains](buses.md)
 
@@ -207,10 +208,11 @@ CUE is dry (pre-bus, pre-master) and never reaches renders, stems, or taps; phon
 
 ### [Racks, typed ports, and the inspection protocol](racks.md)
 
-A `MB::Sound::Rack` (`lib/mb/sound/rack.rb`, console `RackMethods`) is a frozen, Proc-like reusable graph with typed ports (`:notes`, `:audio`, `:control`): `mrack`, `irack`, `arack`, `lrack`, `modrack`, `rack(name, in:, out:, **ports)`; apply with `src.then(&r)`, `r.(src)`, `stream.through(r)`.
+A `MB::Sound::Rack` (`rack.rb`, console `RackMethods`) is a frozen, Proc-like graph with typed ports (`:notes`, `:audio`, `:control`): `mrack`, `irack`, `arack`, `lrack`, `modrack`, `rack(name, in:, out:)`; apply with `src.then(&r)`, `r.(src)`, `stream.through(r)`.
 Named racks join `Session::Names`; `knob :space, 0.3` in a rack block is a rack knob (`:"dub/space"`, per player once two instances play).
-Slots (R3): `sig.slot(:color) { }` / `midi.slot(:keys) { }` are swappable holes; `swap :"dub/color", arack { }, fade:` hands over on an exact frame like master chains (`Session::Handover`; instruments keep held notes); named racks made with `slot: true` swap their instances when redefined.
-Rack documents (`save :dub, rack(:dub)`) and graph documents reload bit for bit; every Traversable answers `port_info`, `params`, and frozen `param_info`/`param_snapshot`.
+Slots (R3): `sig.slot(:color) { }` / `midi.slot(:keys) { }` are swappable holes; `swap :"dub/color", arack { }, fade:` hands over on an exact frame like master chains (`Session::Handover`); named racks made with `slot: true` swap their instances when redefined.
+Rack and graph documents reload bit for bit; Traversables answer `port_info`, `params`, frozen `param_info`/`param_snapshot`.
+Effect racks play on the master (`master :dub`) and on tracks (`fx :keys, :dub`).
 
 ### [Genre templates (`lib/mb/sound/genre.rb`, `genre/`, console `GenreMethods`)](genres.md)
 

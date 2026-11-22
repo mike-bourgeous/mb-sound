@@ -69,7 +69,7 @@ module MB
       # as before (`3r/4` and `3/4r` are the same Rational, and their
       # Integers stay Integers).  Format 8 (lib-gen-1, 2026-10-31) calls
       # the library's generators: a clip or chain an L.gen or L.flow entry
-      # built prints as that call (`L.gen.techno_beat(seed: 3)`,
+      # built prints as that call (`L.gen.beat.techno(seed: 3)`,
       # `L.flow.techno_chain.()`), which older mb-sound can't read (it
       # stops at the format line instead of an unknown name `L`).  Format
       # 9 (tempo-3, 2026-11-01; "bpm = base, tempo = live") writes a
@@ -84,7 +84,13 @@ module MB
       # the bump) carries descriptive metadata: a `meta: { ... }` keyword
       # on the `graph` line, `.note(...)` calls, and inline comments read
       # as notes (GraphIO::Comments); older documents' comments stay
-      # comments.
+      # comments.  Format 15 (form-knobs-1, 2026-11-22) prints a scene's
+      # or section's knob values of a track as its track hash (`drums: {
+      # clip: beat, energy: 0.8 }` for `drums: beat, "drums/energy": 0.8`),
+      # and `over: :section` ramps, which older mb-sound reads as a track
+      # given a Hash (it stops at the format line instead); older
+      # documents' quoted keys load as before.  (Numbered 15 after
+      # drum-gen-1's 14, :beat_family, by the 2026-11-22 merge train.)
       #
       # FORMATS names the change each version made, so loaders gate on a
       # name (GraphIO.since?) and branches adding versions touch only this
@@ -102,6 +108,8 @@ module MB
         11 => :metadata,
         12 => :following_scales,
         13 => :rack_slots,
+        14 => :beat_family,
+        15 => :track_hashes,
       }.freeze
       FORMAT = FORMATS.keys.max
 
@@ -236,16 +244,19 @@ module MB
         #
         # +assets+ (an Assets) names files for tables and sound or MIDI
         # files the graph reads (bundles; see .save); without it they raise
-        # DumpError (tables) or keep their paths (file names).
-        def dump(graph, name: nil, kind: nil, inputs: {}, params: {}, options: {}, from: nil, meta: {}, assets: nil)
+        # DumpError (tables) or keep their paths (file names).  +stand_ins+
+        # (racks only) are options for the rack's stand-in build (see
+        # Rack#build_on_stand_ins and Session::MasterRack).
+        def dump(graph, name: nil, kind: nil, inputs: {}, params: {}, options: {}, from: nil, meta: {}, assets: nil, stand_ins: nil)
           # (values that set a set up save as that set: Tracker::Set)
           graph = graph.to_arrangement if graph.respond_to?(:to_arrangement)
           if graph.is_a?(Rack)
             unless inputs.empty? && params.empty? && options.empty? && kind.nil?
               raise ArgumentError, 'rack documents take their inputs from the rack\'s ports (no inputs, params, options, or kind)'
             end
-            return RackWriter.new(graph, name: name, from: from, meta: meta, assets: assets).to_s
+            return RackWriter.new(graph, name: name, from: from, meta: meta, assets: assets, stand_ins: stand_ins || {}).to_s
           end
+          raise ArgumentError, 'stand_ins: goes with racks (how a rack document builds its body)' if stand_ins
           if graph.is_a?(Arrangement)
             unless inputs.empty? && params.empty? && options.empty? && kind.nil?
               raise ArgumentError, 'set documents take no inputs, params, options, or kind'
@@ -720,7 +731,7 @@ module MB
             # family, not a document; omnibus15, from the take)
             raise GraphIO::LoadError, "no preset #{name}: #{hint}"
           end
-          raise GraphIO::LoadError, "no preset #{name}#{GraphIO.suggest(name, names)} (looked in #{GraphIO.preset_dirs.join(', ')})"
+          raise GraphIO::LoadError, "no preset #{name}#{Library::Heads.renamed_hint(nil, name)}#{GraphIO.suggest(name, names)} (looked in #{GraphIO.preset_dirs.join(', ')})"
         end
         Library.index.note_path(path)
 

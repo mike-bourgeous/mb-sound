@@ -120,10 +120,10 @@ settings, and the same way every time for the same seed:
 <!-- check: bars=2 -->
 ```ruby
 stop :bells, fade: 0
-bg :drums, tr909(L.gen.techno_beat(seed: 3, energy: 0.4)).at(-18.db)
+bg :drums, tr909(L.gen.beat.techno(seed: 3, energy: 0.4)).at(-18.db)
 ```
 
-`L.gen.techno_beat(seed: 4)` is another take of it.  On a track, `energy`
+`L.gen.beat.techno(seed: 4)` is another take of it.  On a track, `energy`
 and the other settings become knobs (chapter 7).
 
 ## Samples

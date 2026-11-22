@@ -70,6 +70,71 @@ RSpec.describe(MB::Sound::GraphNode::Knob::ValueAt) do
     expect(session.decision_log.map(&:pos)).to include(3r, 4r, 5r, 6r)
   end
 
+  describe 'a follow of a tempo LFO (timeline-pure, beats-timing-1)' do
+    # 124 BPM: bar lines fall between samples (a bar is 92903.2 frames)
+    let(:session) {
+      out = MB::Sound::NullOutput.new(channels: 1, sleep: false, buffer_size: 367)
+      MB::Sound::Session.new(master_gain: 1, output: out, transport: MB::Sound::Sequence::Transport.new(bpm: 124), channels: 1, buffer_size: 367, realtime: false, raise_errors: true)
+    }
+
+    it 'answers the LFO\'s value at any position, rendered or ahead, from where the follow landed' do
+      k = session.knob(:e, 0.5, range: 0.0..1.0)
+      session.add(k * 1, name: :x, on: :now)
+      render(session, 37 * 367, 367)
+      lfo = 3.beats.lfo.sine.with_phase(0.1).at(0.2..0.9)
+      session.turn(:e, follow: lfo)
+      render(session, 367, 367)
+      seg = k.instance_variable_get(:@segment)
+      expect(seg.pure).to equal(lfo)
+      t = seg.time
+      expect(t).to be > 0
+
+      # Ahead: the LFO counted from the landing position
+      ahead = [t + 1r / 3, t + 5r / 4, t + 3]
+      want = ahead.map { |p| MB::Sound::MIDI::Param::Graph.eval(lfo, p - t) }
+      expect(ahead.map { |p| k.value_at(p) }).to eq(want)
+      expect(session.decision_log_length).to eq(0) # (pure answers aren't decisions)
+
+      # Rendered: the samples (float32) the knob plays
+      per = session.transport.whole_notes_per_frame(48000)
+      worst = 0.0
+      60.times {
+        pos0 = session.transport.position
+        render(session, 367, 367)
+        out = k.instance_variable_get(:@span_out)
+        367.times { |i| worst = [worst, (k.value_at(pos0 + per * i) - out[i]).abs].max }
+      }
+      expect(worst).to be < 1e-6
+    end
+
+    it 'answers a square\'s new half on a bar line that falls between samples' do
+      k = session.knob(:e, 0.5, range: 0.0..1.0)
+      session.add(k * 1, name: :x, on: :now)
+      session.turn(:e, follow: 2.bars.lfo.square.at(0.0..1.0))
+      render(session, 367, 367)
+      expect(k.instance_variable_get(:@segment).time).to eq(0)
+      # The frame before bar 2's line still plays the first half...
+      d = render(session, 100_000, 367)
+      frame = (1r / session.transport.whole_notes_per_frame(48000)).floor
+      expect(d[frame - 367]).to eq(1)
+      # ...but the knob answers the second half for the bar line itself
+      expect(k.value_at(1r)).to eq(0)
+      expect(k.value_at(1r - 1r / 1000)).to eq(1)
+    end
+
+    it 'leaves follows of other nodes as before (the latest value)' do
+      session.knob(:b, 0.75)
+      k = session.knob(:a, 0.25)
+      session.add(k * 1, name: :x, on: :now)
+      session.turn(:a, follow: :b)
+      render(session, 800)
+      expect(k.instance_variable_get(:@segment).pure).to be_nil
+      expect(MB::Sound::GraphNode::Knob.timeline_pure?(2.bars.lfo * 0.5 + 0.25)).to eq(true)
+      expect(MB::Sound::GraphNode::Knob.timeline_pure?(session.knob(:b) * 0.5)).to eq(false)
+      expect(MB::Sound::GraphNode::Knob.timeline_pure?(0.5.hz.lfo)).to eq(false)
+    end
+  end
+
   it 'answers recorded decisions while replaying' do
     k = session.knob(:a, 0.25)
     session.replay_decisions!([[:a, 0, 8r, 0.875]])

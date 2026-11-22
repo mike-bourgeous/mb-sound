@@ -7,9 +7,11 @@ module MB
       # (transpose, legato, reverse, ...) wraps producers with its event map
       # (#mapped), so a transposed generator clip plays transposed notes.
       module Producer
-        # The Clip::Variation protocol: the events of +cycle+.
-        def call(_events, cycle, clip)
-          events(cycle, clip.length)
+        # The Clip::Variation protocol: the events of +cycle+ (+offset+:
+        # whole notes into the cycle, for the unit a steered generator
+        # decides; see Generator#events).
+        def call(_events, cycle, clip, offset = 0r)
+          events(cycle, clip.length, offset)
         end
 
         # This producer with +map+ (an Event => Event Proc) applied to every
@@ -46,8 +48,8 @@ module MB
           @extra_cycles = extra_cycles
         end
 
-        def events(cycle, clip_length = nil)
-          list = @inner.events(cycle, clip_length)
+        def events(cycle, clip_length = nil, offset = 0r)
+          list = @inner.events(cycle, clip_length, offset)
           list = @cycle ? @cycle.call(list, cycle) : list.map(&@map)
           list.sort_by(&:start).freeze
         end
@@ -60,6 +62,11 @@ module MB
         # The decision lead of a steered generator (see Steer), or nil.
         def lead
           @inner.lead
+        end
+
+        # The unit length of a steered generator (see Steer), or nil.
+        def unit
+          @inner.unit
         end
 
         # The events +cycle+ would have if decided now (Generator#preview).

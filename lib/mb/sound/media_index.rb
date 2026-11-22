@@ -128,6 +128,11 @@ module MB
         @files.fetch(self.class.key(File.basename(name.to_s.tr('\\', '/'))), [].freeze)
       end
 
+      # Every file indexed (paths, in path order).
+      def paths
+        @files.values.flatten.sort
+      end
+
       # The names (lookup forms) of which several files exist: { name =>
       # paths }.
       def ambiguous
