@@ -43,6 +43,10 @@ module MB
       # any buffer size.  Never ends (like other voices), except with +once+
       # (Sample#node): one note at the first sample, ending when it does.
       #
+      # +reach+ (a Sampler::Reach: a drum kit built for a clip) builds
+      # tables only for the regions on the keys it covers; others read a
+      # silent stand-in until the Reach covers them (a swap's clip).
+      #
       # A plan boundary for now.
       class SamplerVoice
         include GraphNode
@@ -62,9 +66,11 @@ module MB
         attr_reader :seed
 
         def initialize(instrument, channel: 0, trigger: nil, number: nil, freq: nil, gate: nil, shift: nil, start: nil, transpose: 0, declick: Sampler::DECLICK,
-                       interpolation: nil, mips: nil, seed: nil, once: false, choke: nil, choke_fade: true, choke_time: nil, resume: nil, sample_rate: 48000)
+                       interpolation: nil, mips: nil, seed: nil, once: false, choke: nil, choke_fade: true, choke_time: nil, resume: nil, reach: nil, sample_rate: 48000)
           raise ArgumentError, "A sampler voice plays a Sampler::Instrument (got #{instrument.inspect})" unless instrument.is_a?(Sampler::Instrument)
           @instrument = instrument
+          @reach = once ? nil : reach
+          @holes = nil # (regions reading the Reach's stand-in table; see #check_reach)
           @channel = Integer(channel)
           @once = !!once
           if @once
@@ -193,7 +199,9 @@ module MB
           inputs[4] = start
           inputs[5] = shift
           inputs[6] = choke
-          Kernels.sampler_play(@buf, @specs, @regions, @state, @counters, @rng, inputs, config)
+          out = Kernels.sampler_play(@buf, @specs, @regions, @state, @counters, @rng, inputs, config)
+          check_reach if @holes
+          out
         end
 
         def sources
@@ -232,8 +240,21 @@ module MB
           @config = [a4, @declick, @instrument.split || -1, code, sinc, @transpose, choke, @choke_fade ? 1 : 0].freeze
         end
 
+        # Tells the Reach when the sounding note plays a region whose table
+        # is still its stand-in (Sampler::Reach#missed: the rest of the kit
+        # is built off the render thread, so the next hit sounds).
+        def check_reach
+          return if @state[0] == 0
+          r = @state[1].to_i
+          @reach.missed(@instrument, r) if r >= 0 && @holes[r]
+        end
+
         def build_tables
-          @specs, @regions = @instrument.kernel_tables(@channel, @sample_rate, mips: @mips, interpolation: @interpolation)
+          if @reach
+            @specs, @regions, @holes = @reach.tables(@instrument, @channel, @sample_rate, mips: @mips, interpolation: @interpolation)
+          else
+            @specs, @regions = @instrument.kernel_tables(@channel, @sample_rate, mips: @mips, interpolation: @interpolation)
+          end
           sinc = MB::Sound::Wavetable::INTERPOLATIONS[:sinc]
           @sinc = @regions[true, Sampler::KernelRuby::INTERP].to_a.include?(sinc.to_f)
           @config = nil

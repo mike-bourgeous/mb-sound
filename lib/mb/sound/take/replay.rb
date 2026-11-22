@@ -57,8 +57,13 @@ module MB
         # transport's tempo map as rows (Sequence::TempoMap#rows) when it
         # wasn't one constant tempo (takes saved before tempo-2 don't give
         # it, and replay from the tempo alone).
-        def initialize(bpm:, bar_length:, master_gain:, master_gain_post: true, fade_in:, fade_out:, rng:, replace_declick: false, meters: [], key: nil, ends: nil, ends_epoch: 0, seconds: nil, run_frame: 0, odometer: 0, tempo_map: nil, meta: nil)
+        def initialize(bpm:, bar_length:, master_gain:, master_gain_post: true, fade_in:, fade_out:, rng:, replace_declick: false, meters: [], key: nil, ends: nil, ends_epoch: 0, seconds: nil, run_frame: 0, odometer: 0, tempo_map: nil, meta: nil, midi_one_based: false)
           @meta = MB::Sound::Meta::Value.of(meta) # (Take#meta, saved; never read to replay)
+          # Takes saved before midi-one-based-1 typed MIDI channels and
+          # programs counted from 0 (`cc(1, channel: 0)`); their lines run
+          # inside MIDI::Channel.zero_based (graphs built later from their
+          # blocks are not covered: a known limit)
+          @midi_one_based = midi_one_based
           @start = { bpm: bpm, tempo_map: tempo_map, bar_length: bar_length, meters: meters, key: key, master_gain: master_gain, master_gain_post: master_gain_post, fade_in: fade_in, fade_out: fade_out, replace_declick: replace_declick, rng: rng, run_frame: run_frame, odometer: odometer }
           @ends = ends&.to_r
           @ends_epoch = ends_epoch
@@ -326,7 +331,11 @@ module MB
           Session.with_context(session: session, time: line.issued, source: :replay) do
             Session.with_perform(session: session, forced: line.lands.dup, now: line.issued, source: :replay) do
               Session.with_context_fields(choices: line.choices) do
-                binding.eval(line.code, "take line #{index + 1}")
+                if @midi_one_based
+                  binding.eval(line.code, "take line #{index + 1}")
+                else
+                  MIDI::Channel.zero_based { binding.eval(line.code, "take line #{index + 1}") }
+                end
               end
             end
           end

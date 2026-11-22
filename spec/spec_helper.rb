@@ -155,6 +155,9 @@ RSpec.configure do |config|
   # node-set caches of Session::Strip trust it; omnibus10): checked every
   # span in specs
   MB::Sound::Session::Strip.structure_check = true
+  # A thread holding a realtime Session's render lock never waits for a
+  # song form's lock (the deadlock of fixes-17): checked in specs
+  MB::Sound::Form::Playback::Lock.check = true
 
   # Examples tagged :check_shared raise if a node modifies a buffer that a
   # Tee shares among its branches (see MB::Sound::GraphNode::Tee)
@@ -198,6 +201,10 @@ RSpec.configure do |config|
     # example that left it).
     default = MB::Sound::Session.existing
     default.close if default && (default.running? || SessionGuard.leftovers(default))
+    # (and the default Session itself left paused, suspended, or with its
+    # output opened, when an around hook's context comes first: fixes-16)
+    raw = SessionGuard.default_session
+    raw.close if raw && !raw.equal?(default) && (raw.running? || SessionGuard.leftovers(raw))
     MB::Sound::Tuning.default.reset
     # The default transport starts every example at 0, 120 BPM, 4/4: a
     # Session made without its own transport moves it, and an example that

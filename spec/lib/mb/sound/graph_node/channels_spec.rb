@@ -181,6 +181,7 @@ RSpec.describe(MB::Sound::GraphNode::Channels) do
     ENV['OUTPUT_TYPE'] = 'null'
     expect { MB::Sound.play(bundle.map { |c| c.until(0.01) }.channels, quiet: true) }.not_to raise_error
   ensure
+    MB::Sound::Session.existing&.close # (play opened the default Session's output: support/session_guard.rb)
     ENV.delete('OUTPUT_TYPE')
     MB::Sound.rewind
   end

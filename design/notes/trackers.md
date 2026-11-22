@@ -105,7 +105,7 @@ Reference: openmpt123 0.7.13 (libopenmpt), apt package, run only as an outside p
 | XM, 22 ch | 166.667 vs 166.599 s | 0.992 | -0.4 | 91% / 79% |
 | IT, 24 ch (20 used + 6 background) | 360.750 vs 360.689 s | 0.997 | +0.1 | 64% / 52% |
 
-Lengths differ only because openmpt rounds each tick to whole frames.  Per-channel levels against xmp solos agreed within ~0.7 dB once the pan laws matched.  Renders: 45 s of the 32-channel XM in 19 s, the IT in 17 s, the MOD in 4 s (i9-9880H container, 800-frame buffers).  Bench set (private): `/app/workbench/data/local-only/trackers/bench-sets/tracker-1/` (`render.rb` regenerates it).
+Lengths differ only because openmpt rounds each tick to whole frames.  Per-channel levels against xmp solos agreed within ~0.7 dB once the pan laws matched.  Renders: 45 s of the 32-channel XM in 19 s, the IT in 17 s, the MOD in 4 s (i9-9880H container, 800-frame buffers).  Bench set (private): a private, local-only folder (`render.rb` regenerates it).
 
 ## Found on the way
 

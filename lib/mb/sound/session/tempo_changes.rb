@@ -93,6 +93,63 @@ module MB
           raise ArgumentError, "#{e.message}; for a tempo, make a knob follow it and follow the knob: knob :pace, 120, range: 60..200; turn :pace, follow: node; tempo :pace"
         end
 
+        # The frames from the next one until the timeline would reach
+        # +target+ (whole notes) if it kept moving from where it is: the
+        # first frame at or past it, as #process_buffer's +until_pos:+ finds
+        # it, stepping through the tempo map's cells as rendering does (see
+        # #tempo_cell), without rendering anything.  A render that stopped
+        # early caps its tail at its end bar with this, so the cap is one
+        # frame at any buffer size while a ramp moves the tempo (fixes-16,
+        # session fuzz seed 794890: estimated at the tempo where the render
+        # stopped, 800-frame buffers ended 18 frames before 367-frame ones).
+        # A followed tempo source can't be read ahead: from its segment on,
+        # the tempo read last holds.  Not for the render thread (it
+        # allocates); call it under the render lock or between buffers.
+        def frames_to_position(target)
+          map = @transport.tempo_map
+          pos = @transport.position
+          return 0 if target <= pos
+          rate = Rational(output.sample_rate)
+          return @transport.frames_of(target - pos, rate).ceil unless @transport.tempo_moves?
+
+          wnps = @transport.whole_notes_per_second # (the tempo read for the next frame)
+          cell_size = Sequence::TempoMap::CELL
+          run = @run_frame
+          key = @tempo_cell_key
+          key_cell = key && key[3] == @transport.generation ? key[0] : nil
+          key_seg = key && key[1].equal?(map) ? key[2] : nil
+          frames = 0
+          while true # (not loop do: an imemo each)
+            limit = nil
+            if map.quiet_after?(pos)
+              wnps = Sequence::TempoMap.whole_notes_per_second(map.bpm_at(pos))
+            elsif map.varying_at?(pos)
+              seg = map.segment_at(pos)
+              cell = run / cell_size
+              unless cell == key_cell && seg.equal?(key_seg)
+                wnps = Sequence::TempoMap.whole_notes_per_second(map.bpm_at(pos)) unless seg.is_a?(Sequence::TempoMap::Follow)
+                key_cell = cell
+                key_seg = seg
+              end
+              limit = cell_size - (run % cell_size)
+            else
+              wnps = Sequence::TempoMap.whole_notes_per_second(map.bpm_at(pos))
+            end
+            per_sample = Sequence::TempoMap.whole_notes_for(1 / rate, wnps) # (exact: Rationals, as Transport#whole_notes_per_frame)
+            if (nb = map.next_break(pos))
+              k = ((nb - pos) / per_sample).ceil
+              k = 1 if k < 1
+              limit = k if limit.nil? || k < limit
+            end
+            k = ((target - pos) / per_sample).ceil
+            return frames + k if limit.nil? || k <= limit
+
+            pos = Sequence::Transport.position_at(pos, limit, per_sample)
+            run += limit
+            frames += limit
+          end
+        end
+
         private
 
         # Where a form pass that a seek entered mid-way began, for its tempo

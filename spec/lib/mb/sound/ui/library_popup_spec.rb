@@ -13,7 +13,7 @@ RSpec.describe(MB::Sound::UI::LibraryPopup, :aggregate_failures) do
   describe MB::Sound::Library::Finder do
     it 'finds entries anywhere in their names, ranked, with the chain that reaches each' do
       expect(chains('L.inst.ree')).to include('L.inst.dnb_reese', 'L.inst.jungle_reese')
-      expect(chains('L.reese')).to eq(%w[L.inst.dnb_reese L.inst.jungle_reese]) # (from the root: any head)
+      expect(chains('L.reese')).to eq(%w[L.inst.dnb_reese L.inst.jungle_reese L.inst.notch_reese]) # (from the root: any head)
       expect(chains('L.inst.eese')).to include('L.inst.dnb_reese') # (inside a name, not only a prefix)
       expect(chains('L.inst.dnb_r').first).to eq('L.inst.dnb_reese')
       expect(chains('L.fx.reverb.').first(3)).to all(start_with('L.fx.reverb.'))

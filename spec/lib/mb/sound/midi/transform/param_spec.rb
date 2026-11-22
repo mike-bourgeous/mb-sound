@@ -53,6 +53,17 @@ RSpec.describe('MIDI transforms with moving parameters (MIDI::Param)', :midi_tra
       expect(out.map { |e| e[2] }).to eq((4...16).map { |i| i / 8r })
     end
 
+    it 'listen to one channel, counted from 1 (channel: 2 is the wire channel 1)' do
+      s = run_stream(ev.cc(1, 1.0, channel: 1, time: 0r), ev.cc(1, 0.0, channel: 0, time: 0r))
+      # (the notes after the first: the controllers share its time 0)
+      expect(ons(read_all(s.chance(MB::Sound.cc(1, channel: 2), seed: 1))).count { |e| e[2] > 0 }).to eq(15)
+      s = run_stream(ev.cc(1, 1.0, channel: 1, time: 0r), ev.cc(1, 0.0, channel: 0, time: 0r))
+      expect(ons(read_all(s.chance(MB::Sound.cc(1, channel: 1), seed: 1))).count { |e| e[2] > 0 }).to eq(0)
+      expect(MB::Sound.cc(1, channel: 2).channel).to eq(2)
+      expect { MB::Sound.cc(1, channel: 0) }.to raise_error(ArgumentError, /channels count from 1/)
+      expect { MB::Sound.cc(1, channel: 17) }.to raise_error(ArgumentError, /1 to 16/)
+    end
+
     it 'fall back to the default without a controller' do
       expect(ons(read_all(run_stream.chance(MB::Sound.cc(1, default: 127), seed: 1))).length).to eq(16)
       expect(ons(read_all(run_stream.chance(MB::Sound.cc(1), seed: 1))).length).to eq(0)

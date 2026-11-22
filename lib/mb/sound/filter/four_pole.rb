@@ -62,7 +62,7 @@ module MB
       #   resonance clips and buzzes (the Korg MS-20's diode-clipper idea on
       #   this 4-pole; not an MS-20 filter emulation).  :stages and
       #   :feedback default to drive 1.  Measurements and renders:
-      #   /app/workbench/data/bench/sets/four_pole/README.md (round 2).
+      #   `README.md` in the private Bench set four_pole (round 2).
       # - +mode:+ picks an output tap mix (Oberheim Xpander style): :lp4
       #   (default), :lp2, :bp2, :bp4, :hp2, :hp4.  Compensation only
       #   applies to the lowpass modes.

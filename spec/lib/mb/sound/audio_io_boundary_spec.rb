@@ -35,6 +35,9 @@ module AudioIOBoundary
     'small value and buffer types the gem would take along or replace' => [
       'mb/sound/input_buffer_wrapper.rb: CircularBuffer', 'mb/sound/output_buffer_wrapper.rb: CircularBuffer',
       'mb/sound/concealment.rb: Length::Samples', 'mb/sound/midi/live_source.rb: Length',
+      # (midi-one-based-1: the 1-based channel and program edge, plain Ruby)
+      'mb/sound/midi/event.rb: Channel', 'mb/sound/midi/event.rb: Program',
+      'mb/sound/midi/file_source.rb: Channel', 'mb/sound/midi/midi_file.rb: Channel',
     ],
     'process starts through the process starter (spawner-1): the gem would take Starter along (plain Ruby, no mb-sound in its process)' => [
       'mb/sound/ffmpeg_input.rb: Starter', 'mb/sound/io_base.rb: Starter',

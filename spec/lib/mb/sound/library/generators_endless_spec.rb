@@ -66,9 +66,25 @@ RSpec.describe MB::Sound::Library::Generators, 'generators keep playing', :aggre
     MB::Sound.live = false
   end
 
+  # gen-morph-1: a morph of two generators (a clip, on the first side's
+  # instrument with no track) keeps playing in both spellings, beats and
+  # melodic lines, past bars 9 and 33
+  it 'keeps a morph of two generators playing on a track and with no track', render_budget: { seconds: 120, reason: 'two morphs, two spellings, 40 bars at 960 BPM' } do
+    { 'L.gen.beat.rock.morph(:funk, morph: 0.5)' => true, 'L.gen.koto_motif.morph(:phrygian_motif, morph: 0.5)' => false }.each do |m, drums|
+      { track: "track :x, #{m}; bg :x", no_track: "bg :x, #{m}" }.each do |label, code|
+        per, players, = launch(code, bpm: 960, bars: 40)
+        what = "#{m} #{label}: #{per.inspect}"
+        expect(players).to eq([:x]), what
+        [9, 33].each { |b| expect(per[b - 1, 8].sum).to be > 0, "#{what}: silent from bar #{b}" }
+        expect(per.min).to be > 0, what if drums
+      end
+    end
+  end
+
   # The class: no launch spelling gives a generator an end (the melodic
-  # entries: generators_endless_melodic_spec.rb)
-  describe 'the beat family sweep', render_budget: { seconds: 900, reason: 'each beat for 40 bars (65 in the slow tier), two launch spellings (three in the slow tier); the slow tier renders about 800 s per beat, mostly its 85 BPM run' } do
+  # entries: generators_endless_melodic_spec.rb; the slow tier's longer
+  # runs: generators_endless_slow_spec.rb)
+  describe 'the beat family sweep' do
     MB::Sound::L.gen.beat.entries.each do |entry|
       it("keeps #{entry.head_path} playing on a track and with no track") { expect_keeps_playing(entry) }
     end

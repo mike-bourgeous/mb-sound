@@ -50,7 +50,8 @@ module MB
 
         # Returns the minimum, median, and maximum note number of +notes+
         # (Hashes with :number and :channel, or note numbers), or 64 for each
-        # if there are none.  Only notes on +:channel+ (0-based) if given.
+        # if there are none.  Only notes on +:channel+ (0-based, as on the
+        # wire) if given.
         def self.stats(notes, channel: nil)
           numbers = notes.filter_map { |n|
             next n if n.is_a?(Integer)

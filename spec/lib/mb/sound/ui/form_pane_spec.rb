@@ -119,6 +119,10 @@ RSpec.describe('UI form pane keys', :aggregate_failures) do
       expect(@term.wait_for("practice #{target.inspect}")).to eq(true)
       @term.write(' ') # (Space: the transport, as NAV Space)
       expect(@term.wait_for(/paused/)).to eq(true), @term.lines.last
+      # (the screen's own Session pauses, not the default one: fixes-16,
+      # where a paused default Session held a later example's at_bar block)
+      expect(wait_until { @session.transport_paused? }).to eq(true)
+      expect(MB::Sound::Session.existing&.transport_paused?).to be_falsey
       expect(@tiles.mode_problems).to eq([])
     ensure
       stop = true

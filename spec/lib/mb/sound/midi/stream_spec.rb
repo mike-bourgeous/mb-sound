@@ -147,7 +147,7 @@ RSpec.describe(MB::Sound::MIDI::Stream) do
 
     it 'restarts the root source from a transformed stream' do
       stream = MB::Sound::MIDI::Stream.for(file)
-      view = stream.channel(0)
+      view = stream.channel(1)
       r = view.reader
       first = r.events(0, 1)
       view.restart
@@ -169,11 +169,11 @@ RSpec.describe(MB::Sound::MIDI::Stream) do
 
   describe 'graph traversal' do
     it 'lists its source so a Session can find a clip timeline' do
-      stream = MB::Sound::MIDI::Stream.for(MB::Sound::C4.n4.loop).channel(0).transpose(12)
+      stream = MB::Sound::MIDI::Stream.for(MB::Sound::C4.n4.loop).channel(1).transpose(12)
       graph = stream.graph
       expect(graph.grep(MB::Sound::Sequence::TimelineNode).length).to eq(1)
       expect(graph.grep(MB::Sound::MIDI::Stream).length).to eq(3)
-      expect(stream.draw.to_s(color: :none)).to include('┌ transpose(12) ┐', '┌ channel(0) ┐', '┌ midi clip ┐')
+      expect(stream.draw.to_s(color: :none)).to include('┌ transpose(12) ┐', '┌ channel(1) ┐', '┌ midi clip ┐')
     end
 
     it 'has no sample rate, so sample rate changes pass it by' do

@@ -46,13 +46,14 @@ module MB
         # length; the block then makes the whole cycle with each unit's
         # values and the unit plays the notes starting in it) at its
         # decision point, +lead+ (a length, one beat by default; 0 for none)
-        # before it.
+        # before it.  +slots+ (a Generative::Slots) says how a morph cuts the
+        # events (Generative::Morph; one beat by default).
         #
         #     knob :busy, 0.3
         #     Clip.generate(1.bar, busy: knob(:busy)) { |cycle, dice, busy:|
         #       Array.new(16) { |i| [i * 1/16r, 1/16r, A3, 0.7] if dice.rand(:on, i) < busy }.compact
         #     }
-        def generate(length, values: nil, seed: nil, name: nil, align: :timeline, reach: nil, loop: true, events: nil, lead: nil, decide: :cycle, params: {}, &block)
+        def generate(length, values: nil, seed: nil, name: nil, align: :timeline, reach: nil, loop: true, events: nil, lead: nil, decide: :cycle, params: {}, slots: nil, &block)
           length = Generative.length_of(length, :length, divisions: false)
           seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
           reach = reach && Generative.length_of(reach, :reach, divisions: false)
@@ -64,7 +65,7 @@ module MB
             inner = block
             block = ->(cycle, dice) { inner.call(cycle, dice, **fixed) }
           end
-          gen = Generator.new(length, seed: seed, name: label, reach: reach, steer: steer, &block)
+          gen = Generator.new(length, seed: seed, name: label, reach: reach, steer: steer, slots: slots, &block)
           values = values&.map { |v| v.is_a?(Integer) || !v.respond_to?(:to_midi) ? v : Scale.root_number(v) }
           Sequence::Clip.new(events || gen.preview(0), length: length, loop: loop, seed: seed, align: align,
             variations: [Sequence::Clip::Variation.new(name: gen.name, block: gen)], values: values)

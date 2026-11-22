@@ -54,6 +54,19 @@ module MB
           list.sort_by(&:start).freeze
         end
 
+        # The mapped events of +cycle+ computed with +values+ (see
+        # Generator#events_with).
+        def events_with(cycle, values = nil)
+          list = @inner.events_with(cycle, values)
+          list = @cycle ? @cycle.call(list, cycle) : list.map(&@map)
+          list.sort_by(&:start).freeze
+        end
+
+        # How a morph cuts the events into slots (the generator's Slots).
+        def slots
+          @inner.slots
+        end
+
         # True if the generator reads moving options (see Steer).
         def steered?
           @inner.steered?

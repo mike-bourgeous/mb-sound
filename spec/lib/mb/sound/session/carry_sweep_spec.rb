@@ -20,9 +20,18 @@ RSpec.describe('Session::Carry over the shipped presets', :aggregate_failures) d
   # an adoption.
   CROSSFADE_PRESETS = {}.freeze
 
+  # Known carry gaps: cuts that are not yet bit for bit, with the reason
+  # and the worst residual allowed meanwhile.  An entry fails once its
+  # preset carries exactly (remove it then) or once the residual grows.
+  # (notch_reese was one until fixes-17: a tempo-synced LFO's rebuilt
+  # TempoNode placed it on the grid again at the carried start, a float
+  # ulp from its running phase, -133 dB; TempoNode#carry_adopt)
+  KNOWN_INEXACT = {}.freeze
+
   it 'sweeps the shipped instrument presets' do
     expect(SWEEP_PRESETS).to include(:init, :dnb_reese, :tine_piano)
     expect(CROSSFADE_PRESETS.keys - SWEEP_PRESETS).to eq([])
+    expect(KNOWN_INEXACT.keys - SWEEP_PRESETS).to eq([])
   end
 
   # (dnb_neuro: its squeeze's crossover, hidden from the walk behind its
@@ -36,7 +45,11 @@ RSpec.describe('Session::Carry over the shipped presets', :aggregate_failures) d
       expect(r.plan).not_to be_nil
       expect(r).to be_same_before
       expect(r.plan).to be_full, "#{name}: #{r.plan}" unless CROSSFADE_PRESETS.key?(name)
-      if r.plan.full?
+      if r.plan.full? && KNOWN_INEXACT.key?(name)
+        reason, limit = KNOWN_INEXACT[name]
+        expect(r).not_to be_exact, "#{name} carries bit for bit now: remove its KNOWN_INEXACT entry (#{reason})"
+        expect(r.worst_db).to be < limit, "#{name}: #{r} (known gap: #{reason})"
+      elsif r.plan.full?
         expect(r).to be_exact, "#{name}: #{r}"
       else
         # (crossfaded: what starts fresh is state no carry moves yet, a kit

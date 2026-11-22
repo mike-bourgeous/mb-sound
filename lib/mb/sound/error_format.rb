@@ -184,6 +184,7 @@ module MB
       def entry_guess(e)
         entry = e.receiver
         return nil unless entry.is_a?(Library::Entry)
+        return kit_tune_guess(entry, e) if entry.kind == :kit && KIT_TUNE.include?(e.name)
         return clip_entry_guess(entry, e) unless ENTRY_CHAIN.include?(e.name)
 
         other = e.args.first
@@ -191,6 +192,31 @@ module MB
         Library::Entry.chain_hint(entry.head_path, b)
       rescue StandardError
         nil
+      end
+
+      # Methods people call on a kit entry to pitch it (ux-friction-4, the
+      # maintainer's take of 2026-11-21: `track :drums,
+      # L.kit.jazz.transpose(-3)`, then `.tune(-3)`).
+      KIT_TUNE = %i[tune transpose pitch detune retune semitones shift].freeze
+
+      # How to pitch kit entry +entry+ (NoMethodError +e+ named a KIT_TUNE
+      # method), with the value given: the tune knob of a kit by kind
+      # (Drums::InstalledKits::TUNE), the per-voice tune knobs of a drum
+      # machine; nil for other kits.
+      def kit_tune_guess(entry, e)
+        v = e.args.first
+        v = v.semitones if v.is_a?(Interval)
+        v = v.is_a?(Numeric) ? v : -3
+        text = RubyValue.text(v.is_a?(Float) && v == v.round ? v.round : v)
+        moves = e.name == :transpose ? '; transpose would move the notes, which on a kit changes which drum plays' : ''
+        case entry.family
+        when :installed
+          "track :drums, #{entry.head_path}, then turn :\"drums/tune\", #{text} (the kit's tune knob: every drum #{text} semitones, " \
+            "each key still the same drum#{moves}); in a patch: track(:drums) { |c| #{entry.head_path}.(c, tune: #{text}) }"
+        when :machine
+          "#{entry.name}'s voices have tune knobs of their own, in Hz: #{entry.name}(clip, kick: { tune: 50 }, snare: { tune: 200 }) " \
+            "(the kits by kind, L.kit.acoustic, jazz, hand_percussion, gm, take a tune in semitones: turn :\"drums/tune\", #{text})"
+        end
       end
 
       # A clip method (transpose, echo, ...) on a generator or clip entry
