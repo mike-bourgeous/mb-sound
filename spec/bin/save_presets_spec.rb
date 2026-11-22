@@ -7,7 +7,7 @@ require File.expand_path('../../bin/save_presets.rb', __dir__)
 
 RSpec.describe('bin/save_presets.rb') do
   before(:all) do
-    %w[dnb jungle ambient funk electric_pianos sq80_voice].each { |s| require File.expand_path("../../bin/synths/#{s}.rb", __dir__) }
+    %w[dnb jungle ambient funk electric_pianos sq80_voice halftime].each { |s| require File.expand_path("../../bin/synths/#{s}.rb", __dir__) }
   end
 
   after { MB::Sound.rewind }
@@ -92,6 +92,25 @@ RSpec.describe('bin/save_presets.rb') do
       else
         expect(got).to eq(expected)
       end
+      expect(expected.flatten.compact.map { |b| b.abs.max }.max).to be > 0
+    end
+  end
+
+  MB::Sound::LIBRARY_PRESET_HALFTIME.each do |name|
+    it "loads the #{name} halftime preset and plays it like halftime.rb's #{name}" do
+      s = MB::Sound::HALFTIME_PATCHES.fetch(name)
+      file = MB::Sound.library_preset_file(io.library_presets_dir, name)
+      doc = io.parse(file)
+      expect(doc.inputs).to eq([:midi])
+      expect(doc.kind).to eq(:synth)
+      expect(doc.description).to eq(MB::Sound.halftime_description(name)).and include('n109-1', 'persona panel')
+      expect(doc.header[:tags]).to eq(s[:tags])
+      expect(doc.params.keys).to eq(s[:knobs].keys)
+
+      midi = -> { MB::Sound::Notes.new(s[:drums] ? patch_notes([36, 0, 0.1, 1.0], [38, 0.1, 0.2], [39, 0.2, 0.3], [42, 0.3, 0.4], [51, 0.4, 0.5]) : midi_file) }
+      direct = MB::Sound.with_seed(0) { MB::Sound.halftime_patch(midi.(), name) }
+      expected = render_buffers(direct, 40)
+      expect(render_buffers(io.load(file, inputs: { midi: midi.() }), 40)).to eq(expected)
       expect(expected.flatten.compact.map { |b| b.abs.max }.max).to be > 0
     end
   end

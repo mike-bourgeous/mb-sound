@@ -1864,7 +1864,7 @@ module MB
         drum machines, graph documents, clips) is an entry in one library.
         `find 'dark bass'` lists the best matches with why each matched;
         `L.fx.reverb.hall` reaches one by words, each narrowing the last
-        (`L.inst.reese` lists both Reeses, Tab shows what is left), and
+        (`L.inst.reese` lists the Reeses, Tab shows what is left), and
         `.(sig)` uses it: `sig.then(&L.fx.hall)`.  Heads: `L.inst`,
         `L.fx`, `L.kit`, `L.seq`, `L.gen` (clip generators), `L.flow`
         (section chains), `L.master`, `L.set`, `L.env`, `L.edit`, `L.mfx`

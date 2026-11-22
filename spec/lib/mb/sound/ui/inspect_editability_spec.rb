@@ -55,6 +55,9 @@ RSpec.describe('Inspector editability (Note 15)', :aggregate_failures) do
     [:sync_lead, 'phasor', :phase] => 'sync master internals',
     [:pwm_strings, 'triangle', :frequency] => 'chorus LFO internals', [:pwm_strings, 'triangle', :phase] => 'chorus LFO internals',
     [:supersaw, 'ramp', :phase] => 'unison copy phases',
+    # The halftime tape pads (n109-1): their Juno chorus's triangle LFOs, as pwm_strings'.
+    [:tape_pad, 'triangle', :frequency] => 'chorus LFO internals', [:tape_pad, 'triangle', :phase] => 'chorus LFO internals',
+    [:tape_pad_high, 'triangle', :frequency] => 'chorus LFO internals', [:tape_pad_high, 'triangle', :phase] => 'chorus LFO internals',
     # A lowpass inside a feedback loop whose row's first node has a call
     # recorded without an ordinal (one of the copies; the others have
     # keys): to investigate.

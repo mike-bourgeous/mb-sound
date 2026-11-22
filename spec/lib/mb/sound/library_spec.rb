@@ -387,8 +387,8 @@ RSpec.describe MB::Sound::Library do
       expect(l.fx.reverb.names).to include(:hall, :plate, :default)
       expect(l.fx.reverb.hall).to eq(MB::Sound::GraphNode::Reverb.presets[:hall])
       expect(l.fx.hall.family).to eq(:reverb)
-      expect(l.inst.reese.names).to eq(%i[dnb_reese jungle_reese])
-      expect(l.inst.dnb.reese.name).to eq(:dnb_reese)
+      expect(l.inst.reese.names).to eq(%i[dnb_reese jungle_reese notch_reese])
+      expect(l.inst.jungle.reese.name).to eq(:jungle_reese)
       expect(l.kit.tr909.family).to eq(:machine)
       expect(l.fx.bright.names).to include(:plate, :glass)
       expect(l.fx[:hall].name).to eq(:hall)
@@ -403,17 +403,17 @@ RSpec.describe MB::Sound::Library do
     # sd-ux-fixes-1 (the review's #17)
     it 'say which entries a misspelled or ambiguous path is, wherever one entry goes' do
       expect { l.inst.dnb_reeese }.to raise_error(NoMethodError, /nothing under L\.inst is :dnb_reeese \(\d+ entries: `L\.inst` lists them\)\nDid you mean\?  :dnb_reese/)
-      expect { l.inst.reese.dnb_reeese }.to raise_error(NoMethodError, /nothing under L\.inst\.reese is :dnb_reeese \(2 entries: dnb_reese, jungle_reese\)/)
-      expect(l.inst.reese.inspect).to eq('#<L.inst.reese: 2 entries (dnb_reese, jungle_reese)>')
-      expect(l.inst.reese.pretty_inspect).to start_with('L.inst.reese: 2 entries') # (the console's table)
-      expect { l.inst.reese.(1) }.to raise_error(ArgumentError, /L\.inst\.reese is 2 entries \(dnb_reese, jungle_reese\); name one to call it/)
+      expect { l.inst.reese.dnb_reeese }.to raise_error(NoMethodError, /nothing under L\.inst\.reese is :dnb_reeese \(3 entries: dnb_reese, jungle_reese, notch_reese\)/)
+      expect(l.inst.reese.inspect).to eq('#<L.inst.reese: 3 entries (dnb_reese, jungle_reese, notch_reese)>')
+      expect(l.inst.reese.pretty_inspect).to start_with('L.inst.reese: 3 entries') # (the console's table)
+      expect { l.inst.reese.(1) }.to raise_error(ArgumentError, /L\.inst\.reese is 3 entries \(dnb_reese, jungle_reese, notch_reese\); name one to call it/)
       session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
       MB::Sound::Session.with_context(session: session) do
         # In the session: play reads the session's sample rate before it checks
         # the sound, and the default Session opens the real output device
         # (batch 34: DeviceOutput::Unavailable when no earlier example had set one).
-        expect { MB::Sound.play(l.inst.reese) }.to raise_error(MB::Sound::Playable::Unplayable, /\Aplay: L\.inst\.reese is 2 entries .*name one \(L\.inst\.reese\.dnb_reese\)/)
-        expect { MB::Sound.track(:bass, l.inst.reese) }.to raise_error(ArgumentError, /\Atrack :bass: L\.inst\.reese is 2 entries/)
+        expect { MB::Sound.play(l.inst.reese) }.to raise_error(MB::Sound::Playable::Unplayable, /\Aplay: L\.inst\.reese is 3 entries .*name one \(L\.inst\.reese\.dnb_reese\)/)
+        expect { MB::Sound.track(:bass, l.inst.reese) }.to raise_error(ArgumentError, /\Atrack :bass: L\.inst\.reese is 3 entries/)
       end
     ensure
       session&.close
