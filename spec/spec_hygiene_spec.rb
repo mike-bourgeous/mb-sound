@@ -65,11 +65,12 @@ RSpec.describe('spec hygiene') do
   # before every example)
   it 'names set state a Session holds, for the default Session guard' do
     s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: :virtual), realtime: false)
-    out = 'its output opened (MB::Sound::NullOutput)'
-    expect(SessionGuard.leftovers(s)).to eq(out)
+    expect(SessionGuard.leftovers(s)).to be_nil
     s.arrangement.track(:lead) { |c| c.tone.triangle * c.amp_env }
     s.arrangement.scene(:intro, lead: MB::Sound.seq(MB::Sound::C4).n4)
-    expect(SessionGuard.leftovers(s)).to eq("tracks :lead; scenes :intro; names :lead (track); #{out}")
+    expect(SessionGuard.leftovers(s)).to eq('tracks :lead; scenes :intro; names :lead (track)')
+    # (as the default Session: its output opened too)
+    expect(SessionGuard.leftovers(s, state: true)).to eq('tracks :lead; scenes :intro; names :lead (track); its output opened (MB::Sound::NullOutput)')
     s.close
     expect(SessionGuard.leftovers(s)).to be_nil
   end
@@ -78,10 +79,11 @@ RSpec.describe('spec hygiene') do
   # a later example's at_bar block in that Session never ran
   it 'names a paused transport and an opened output, for the default Session guard' do
     s = MB::Sound::Session.new(realtime: false)
-    expect(SessionGuard.leftovers(s)).to be_nil # (not opened by making it)
+    expect(SessionGuard.leftovers(s, state: true)).to be_nil # (not opened by making it)
     s.pause_transport
     s.process_buffer(16)
-    expect(SessionGuard.leftovers(s)).to eq("the transport paused; its output opened (#{s.output.class})")
+    expect(SessionGuard.leftovers(s, state: true)).to eq("the transport paused; its output opened (#{s.output.class})")
+    expect(SessionGuard.leftovers(s)).to be_nil # (not the default Session)
   ensure
     s&.close
   end
