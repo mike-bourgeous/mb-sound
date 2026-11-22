@@ -158,7 +158,7 @@ A generator is a looping Clip whose events per cycle are a pure function of (see
 
 `lib/mb/sound/midi/` is pull-based (only live input reads a clock): Sources (`FileSource`, `ClipSource`, `LiveSource`) make `MIDI::Event`s, `MIDI::Stream`s share them and make transform views (`echo`, `arp`, `chord`, `lock`, ...), `Notes` (`v`) turns them into signal nodes, `Synth` allocates voices through `MIDI::Allocator` lanes.
 Moving parameters (`MIDI::Param`) are read once per decision; `MIDI::Lock` maps keys into scales; `midi_clip`/`midi_kit` import MIDI files as exact clips.
-Live MIDI uses JACK ports when a server answers, else RtMidi; `sysex.capture` saves hardware SysEx dumps; specs use synthetic MIDI files only.
+Live MIDI uses JACK ports when a server answers, else RtMidi; specs use synthetic MIDI files only.
 MIDI out: `track :kronos, midi_out('KRONOS', channel: 1)` plays a synth or program (on JACK each note on its audio's frame); `MIDI::Ports` finds ports by name (`midi_ports`, `:midi_ports` pane).
 Channels and programs count from 1 for people (`MIDI::Channel`); `Event#channel` and the wire stay 0-based.
 
