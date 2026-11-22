@@ -824,6 +824,22 @@ module SessionFuzz
         "arack(:tfx) { |sig| sig.lp4(1200) * knob(:mix, 0.7) }; fx :#{s.pick(s.instruments)}, :tfx#{s.on}"
       end
     },
+    # (form-knobs-1) a track hash on an instrument track: a scene setting
+    # the track's knobs (and sometimes its clip) in one key, launched; or
+    # a turn of several of its knobs with one ramp
+    ->(s) {
+      next unless s.instruments
+
+      t = s.pick(s.instruments)
+      release = s.pick([0.02, 0.3])
+      if s.rng.rand < 0.5
+        clip = s.rng.rand < 0.5 ? "clip: #{s.clip_for.(t)}, " : ''
+        level = s.pick(['0.6', '[0.4, over: 1/2r]', '[1, over: 1]'])
+        "scene :th, #{t}: { #{clip}release: #{release}, level: #{level} }, others: :keep; go :th#{s.on}"
+      else
+        "turn :#{t}, release: #{release}, level: #{s.pick([0.4, 1])}, over: #{s.pick(['1/2r', '1'])}#{s.on}"
+      end
+    },
     # (new commands go here, at the end)
   ].freeze
 
