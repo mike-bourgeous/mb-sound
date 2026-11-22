@@ -1141,10 +1141,40 @@ RSpec.describe(MB::Sound::Form) do
       end
     end
 
+    # (ux-friction-3, the maintainer: "I'd like seek 0 to still work and
+    # print a gray message instead of an error"; ux-friction-1 had made it
+    # an error)
+    it 'seeks 0 to the start as seek 1 does, with a dim line for a line typed, and replays it from a take' do
+      within { MB::Sound.seek(9) }
+      session.process_buffer
+      expect(transport.position).to eq(8r)
+      allow(MB::Sound).to receive(:live?).and_return(true)
+      allow(MB::Sound::Internal).to receive(:user_call?).and_return(true)
+      e = nil
+      expect { e = within { MB::Sound.seek(0) } }.to output(/\A\e\[2mseek 0: bars count from 1, so seek 0 went to the start \(seek 1; seek 0\.bars is a length from the start\)\e\[0m\n\z/).to_stdout
+      session.process_buffer
+      expect(transport.position).to be_within(1/9600r).of(0r)
+      expect(e.to_s).to start_with('seek 1')
+      expect(e.kind).to eq(:seek)
+      within { MB::Sound.seek(5) }
+      session.process_buffer
+      expect { within { MB::Sound.seek(0.0) } }.to output(/seek 0\.0: bars count from 1/).to_stdout
+      session.process_buffer
+      expect(transport.position).to be_within(1/9600r).of(0r)
+      expect { within { MB::Sound.seek(1) } }.not_to output.to_stdout
+      # (undone as seek 1 is)
+      within { MB::Sound.seek(5) }
+      session.process_buffer
+      within { MB::Sound.seek(0) }
+      session.process_buffer
+      within { MB::Sound.undo }
+      session.process_buffer
+      expect(transport.position).to be > 3r
+    end
+
     it 'lists the spellings for anything else' do
       expect { within { MB::Sound.seek(-2) } }.to raise_error(ArgumentError, /seek takes a bar .*12\.bars = bar 13.*got a plain number \(-2\)/)
-      # (ux-friction-1: the maintainer's `seek 0` for the start)
-      expect { within { MB::Sound.seek(0) } }.to raise_error(ArgumentError, /seek 0: bars count from 1, so the start is seek 1/)
+      expect { within { MB::Sound.seek(0.5) } }.to raise_error(ArgumentError, /seek 0.5: bars count from 1, so the start is seek 1/)
       expect { within { MB::Sound.seek(-1.seconds) } }.to raise_error(ArgumentError, /seek takes a bar/)
       expect { within { MB::Sound.seek(:drop, 2) } }.to raise_error(ArgumentError, /a beat goes with a bar number/)
     end
