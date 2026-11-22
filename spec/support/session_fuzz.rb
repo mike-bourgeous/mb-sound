@@ -824,6 +824,17 @@ module SessionFuzz
         "arack(:tfx) { |sig| sig.lp4(1200) * knob(:mix, 0.7) }; fx :#{s.pick(s.instruments)}, :tfx#{s.on}"
       end
     },
+    ->(s) {
+      # (beats-timing-1) a beat steered by :busy per beat (or per step,
+      # bar, eighth, with a lead), sometimes humanized, and sometimes :busy
+      # following a square tempo LFO: each unit reads the values for its
+      # start (a followed LFO's value there, exactly), at any buffer size,
+      # planned or not, mid-song launches deciding like an uninterrupted run
+      d = s.pick(['', ', decide: :step', ', decide: :bar', ', decide: 1.n8', ', lead: 1.n16'])
+      beat = "beats(16, energy: knob(:busy), seed: #{s.rng.rand(1..99)}#{d}) { kick [1, 0, 0, 0] * 4, keep: [0, 8]; hat [0.8] * 16, drift: 0.2 }#{s.pick(['', '.humanize(4.ms)'])}"
+      line = "bg :#{s.bg_name}, tr808(#{beat}) * 0.5#{s.on}"
+      s.rng.rand < 0.6 ? "#{line}; turn :busy, #{s.pick(['2.bars', '1.bar', '2.beats'])}.lfo.square.at(0.1..0.9)" : line
+    },
     # (new commands go here, at the end)
   ].freeze
 
