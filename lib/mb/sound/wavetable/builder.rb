@@ -304,9 +304,15 @@ module MB
             bins = spectrum || spectrum_of(data, false)
             out = Numo::DComplex.zeros(new_length / 2 + 1)
             m = [bins.length, out.length].min
-            # (only the bins kept: the mask of each is what it was over all)
-            freqs = Numo::DFloat.new(m).seq / n
-            out[0...m] = bins[0...m] * band_mask(freqs, band)
+            if band >= 0.5
+              # (the full band keeps every bin: the mask is all ones, and a
+              # product with 1.0 is the value itself; bg-latency-1)
+              out[0...m] = bins[0...m]
+            else
+              # (only the bins kept: the mask of each is what it was over all)
+              freqs = Numo::DFloat.new(m).seq / n
+              out[0...m] = bins[0...m] * band_mask(freqs, band)
+            end
             # An even-length input's Nyquist bin stands for both of its
             # sides; above the new Nyquist it is an ordinary bin
             out[n / 2] = out[n / 2] * 0.5 if n.even? && new_length > n && n / 2 < m
@@ -364,8 +370,16 @@ module MB
             res = resample_band(padded, band, new_total, complex, emphasis, spectrum: spectrum)
             count = (valid * rate).ceil
             row = res.class.zeros(count + 2 * GUARD)
-            idx = Numo::Int64.new(count + 2 * GUARD).seq - GUARD
-            row[true] = res[idx % new_total]
+            if count + GUARD <= new_total && GUARD <= new_total
+              # (samples -GUARD...count + GUARD, wrapping: the padded end
+              # before the start, then the start; copies, not a gathered
+              # index, bg-latency-1: the same values)
+              row[0...GUARD] = res[(new_total - GUARD)...new_total]
+              row[GUARD..] = res[0...(count + GUARD)]
+            else
+              idx = Numo::Int64.new(count + 2 * GUARD).seq - GUARD
+              row[true] = res[idx % new_total]
+            end
             { data: row.reshape(1, row.length), count: count, rate: rate, bandwidth: band }
           }
 
