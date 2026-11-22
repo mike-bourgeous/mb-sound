@@ -602,6 +602,17 @@ RSpec.describe('session fuzzing') do
     expect(SessionFuzz.check(:form_start, song)).to be_nil
   end
 
+  # (fix-master-rack-fuzz: the Linux long fuzz's seeds 788991, 789083, and
+  # 789085 drew master-rack-1's kept-chain step, which saved the master
+  # chain as a rack in the scheduled block that set it, before that chain
+  # landed: "master is bypass: nothing to save" in every song drawing it.
+  # The step now gives the chain it sets to MasterRack.rack.)
+  it 'runs a song whose step keeps the master chain it sets as a rack (seed 789083)', render_budget: { seconds: 30, reason: 'one random song, one relation' } do
+    song = SessionFuzz.generate(Random.new(789083), commands: 38) # (the 38 commands of fix-master-rack-fuzz)
+    expect(song.code).to include('master { |m| m.hp1(30).softclip(0, 0.9) }; Session.current.racks.define(Session::MasterRack.rack(Session.current, :mcap, block: proc')
+    expect(SessionFuzz.check(:runs, song)).to be_nil
+  end
+
   it 'swaps a kit only where every scene plays it a grid with those rows (seed 773034)', render_budget: { seconds: 60, reason: 'one random song' } do
     song = SessionFuzz.generate(Random.new(773034), commands: 26)
     expect(song.code).to include('t3: beats(16')
@@ -813,6 +824,19 @@ RSpec.describe('session fuzzing') do
         'at_bar(1) { go :s1, on: :now }',
         'at_bar(1, beat: 3) { after(in: 1/16r) { track :t1, :square_bass } }',
       ], 3, false,
+    ],
+    # (fix-master-rack-fuzz, the Linux long fuzz's seed 788988: the rebuilt
+    # synth took the old one's grid as started, so the render's
+    # exact_lanes never reached it; measured per buffer, a lane released
+    # before t2's rebuild was freed at the split there, one note early)
+    'a synth rebuilt before another track rebuilds (seed 788988)' => [
+      ['bpm 137.5', 'knob :busy, 0.5'], [
+        'track(:t1, q: 1/4r) { |clip| clip.synth(voices: 3) { |v| v.hz.saw * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'track(:t2, q: 1/4r) { |kit| tr909(kit) * 0.5 }',
+        'scene :s1, t1: motifs(scale(:dorian, :d).weights, 8, density: knob(:busy), mutate: knob(:busy), evolve: 1, seed: 4).echo([3.n32, 1.n16], 2, pitch: 7.st), ' \
+        't2: beats(16, energy: knob(:busy), seed: 3) { kick [1, 0, 0, 0] * 4, keep: [0, 8]; fill every: 2, energy: true, snare: 0.5, low_tom: 0.3 }, fade: 1/4r',
+        'at_bar(1) { go :s1, on: :now }',
+      ], 1, false,
     ],
   }.each do |name, (header, lines, bars, slow)|
     it "holds carry for #{name}", *(slow ? [:slow] : []), render_budget: { seconds: 90, reason: 'a song rendered twice with and without its rebuilds' } do

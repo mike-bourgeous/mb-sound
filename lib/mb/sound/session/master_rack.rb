@@ -228,7 +228,11 @@ module MB
         # current value.
         def printing_rack(session, name, block, preset)
           if block.nil? && preset.nil?
-            raise ArgumentError, 'master is bypass: nothing to save (set master { |mix| ... } or master :club first)'
+            # (a scheduled block's commands land after it ends, so a master
+            # chain set earlier in the same block isn't there yet;
+            # fix-master-rack-fuzz)
+            later = Session.context&.batch ? '; in a scheduled block, master commands land after the block ends: save the rack in a later block' : ''
+            raise ArgumentError, "master is bypass: nothing to save (set master { |mix| ... } or master :club first)#{later}"
           end
 
           channels = session.channels

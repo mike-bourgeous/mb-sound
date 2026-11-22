@@ -161,6 +161,30 @@ RSpec.describe(MB::Sound::Session::MasterRack, :aggregate_failures) do
         expect(File.read(File.join(tmp_path('presets'), 'first.mbg.rb'))).to end_with("\nsig.softclip(0.4, 0.9)\n")
       }
     end
+
+    # (fix-master-rack-fuzz, the Linux long fuzz's seeds 788991, 789083,
+    # 789085: a scheduled block set a master chain and saved it as a rack
+    # at once; the block's commands land after it ends, so the save saw
+    # bypass.  The error says so, and a later block saves the chain.)
+    it 'says why a save in the scheduled block that sets the chain finds bypass, and saves it from a later block' do
+      errors = []
+      a = play(800) {
+        s.at_bar(1, beat: 2) {
+          s.master { |mix| mix.softclip(0.3, 0.8) }
+          begin
+            s.master.save_rack(:same_block)
+          rescue ArgumentError => e
+            errors << e.message
+          end
+        }
+        s.at_bar(1, beat: 3) { s.master.save_rack(:next_block) }
+      }
+      expect { render(a, 48_000) }.to output(/Saved next_block/).to_stdout
+      expect(errors).to eq(['master is bypass: nothing to save (set master { |mix| ... } or master :club first); ' \
+                            'in a scheduled block, master commands land after the block ends: save the rack in a later block'])
+      expect(File.read(File.join(tmp_path('presets'), 'next_block.mbg.rb'))).to end_with("\nsig.softclip(0.3, 0.8)\n")
+      expect(a.racks[:next_block]).to be_a(MB::Sound::Rack)
+    end
   end
 
   describe 'master with racks' do
