@@ -34,7 +34,7 @@ RSpec.describe('live file access') do
       end
       t.join
       expect(calls).to eq([])
-      wait_until { !index.document_scan? }
+      wait_until!('the document scan') { !index.document_scan? }
       expect(index.instance_variable_get(:@document_list_at)).to be > 0
       expect(index.document_entries.map(&:name)).to eq(first.map(&:name))
     end
@@ -47,8 +47,9 @@ RSpec.describe('live file access') do
       @tiles, @term = ui_tiles(:tiles, rows: 40, cols: 120)
       @term.wait_for('t> ')
       @tiles.show(:picker)
-      wait_until { @tiles.listed_panes.include?(:picker) rescue @tiles.tiler.layout.panes.include?(:picker) }
-      wait_until { @tiles.rates.measured[:picker].to_f > 0 }
+      # (listed_panes are PaneOnScreen values: `include?(:picker)` never held, and this wait ran out its 5 s silently on every run until fixes-17)
+      wait_until!('the picker pane') { @tiles.listed_panes.any? { |pane| pane.name == :picker } }
+      wait_until!('a measured picker draw rate') { @tiles.rates.measured[:picker].to_f > 0 }
       calls = MB::Sound::UI::FileWatch.watch([@tiles.thread]) { sleep 2.5 }
       other = calls.reject { |_, _, loc, _| ALLOWED_PAINTER_FILE_CALLS.any? { |re| loc.to_s.match?(re) } }
       expect(other).to eq([]), other.first(10).map(&:inspect).join("\n")

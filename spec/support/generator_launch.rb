@@ -57,17 +57,21 @@ module GeneratorLaunch
   end
 
   # The family sweep's checks for +entry+ (call from an example in the
-  # spec file, so file times count there): on a track and with no track,
-  # at a fast tempo (the property is in bars: 40 at 960 BPM), plain; the
-  # slow tier adds a steered run, 85 and 170 BPM, bar 65, and the beats on
-  # their kit's track.  Drum beats also play every bar, bars 33-40 about
-  # as busy as bars 1-8.
-  def expect_keeps_playing(entry)
+  # spec file, so file times count there).  +tier+ :everyday: on a track
+  # and with no track, at a fast tempo (the property is in bars: 40 at 960
+  # BPM), plain.  :slow (the *_slow_spec.rb files, tagged :slow; fixes-17
+  # moved them out so the everyday files keep tight time budgets): a
+  # steered run, 85 and 170 BPM, bar 65, and the beats on their kit's
+  # track (also at 960 BPM).  Drum beats also play every bar, bars 33-40
+  # about as busy as bars 1-8.
+  def expect_keeps_playing(entry, tier: :everyday)
     # [BPM, steered, bars]
-    configs = [[960, false, 40], *slow_tier([[960, true, 65], [85, false, 65], [170, true, 65]], keep: 0)]
+    configs = tier == :slow ? [[960, false, 40], [960, true, 65], [85, false, 65], [170, true, 65]] : [[960, false, 40]]
     configs.each do |bpm, steer, bars|
       spellings = { track: "track :x, #{entry.head_path}; bg :x", no_track: "bg :x, #{entry.head_path}" }
-      spellings[:kit] = "track :x, #{entry.settings[:instrument].inspect}; bg :x, #{entry.head_path}" if entry.family == :beat && SPEC_SLOW
+      spellings[:kit] = "track :x, #{entry.settings[:instrument].inspect}; bg :x, #{entry.head_path}" if entry.family == :beat && tier == :slow
+      # (the everyday run's spellings aren't repeated in the slow tier)
+      spellings = spellings.slice(:kit) if tier == :slow && bpm == 960 && !steer
       spellings.each do |label, code|
         next if steer && label == :no_track
         per, players, = launch(code, bpm: bpm, bars: bars, steer: steer)

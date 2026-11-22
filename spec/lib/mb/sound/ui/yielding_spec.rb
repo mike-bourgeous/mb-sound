@@ -119,7 +119,7 @@ RSpec.describe(MB::Sound::UI::Yielding) do
     expect(described_class.join(busy, render: render)).to eq(true)
     expect(wait_until { gy.stats[:kicks] > 0 }).to eq(true)
     s0 = gy.stats[:late_1ms]
-    wait_until(timeout: 10) { gy.stats[:late_1ms] > s0 + 2 }
+    wait_until!('three late handovers', timeout: 10) { gy.stats[:late_1ms] > s0 + 2 }
     log = gy.late_log
     expect(log).not_to be_empty, "#{gy.stats.inspect} #{s0}"
     at, late, thread, frames = log.first

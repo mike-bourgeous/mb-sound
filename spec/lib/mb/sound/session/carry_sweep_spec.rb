@@ -23,10 +23,10 @@ RSpec.describe('Session::Carry over the shipped presets', :aggregate_failures) d
   # Known carry gaps: cuts that are not yet bit for bit, with the reason
   # and the worst residual allowed meanwhile.  An entry fails once its
   # preset carries exactly (remove it then) or once the residual grows.
-  KNOWN_INEXACT = {
-    notch_reese: ['a tempo-synced Tone (3.bars.hz.lfo) is re-placed on the timeline grid when the rebuilt graph starts ' \
-                  '(a TempoNode start jump), so the carried phase is dropped: -133 dB on notch_reese (merge train 7, 2026-11-22)', -120],
-  }.freeze
+  # (notch_reese was one until fixes-17: a tempo-synced LFO's rebuilt
+  # TempoNode placed it on the grid again at the carried start, a float
+  # ulp from its running phase, -133 dB; TempoNode#carry_adopt)
+  KNOWN_INEXACT = {}.freeze
 
   it 'sweeps the shipped instrument presets' do
     expect(SWEEP_PRESETS).to include(:init, :dnb_reese, :tine_piano)

@@ -28,6 +28,18 @@ default:
   file: 20
   example: 8
 files:
+  spec/lib/mb/sound/demo_methods_spec.rb:
+    file: 40
+    example: 16
+    reason: every shipped demo (3) loaded and started as the console does it (fixes-17's guard for warm-up errors and the go-while-playing deadlock) on a realtime Session paced to its scheduler, the warm-up with its rehearsal, 2 bars, then a go to each scene with 1.25 bars each (12 scenes for the N109 demo); the demo examples took 4.7-7.8 s at load 5-9 and up to 10.9 s, the file 28.3 s, under spec:quick at PARALLEL=2 and load about 30 (7950X container, 2026-11-22)
+  spec/lib/mb/sound/library/generators_endless_melodic_slow_spec.rb:
+    file: 300
+    example: 45
+    reason: the slow tier of the melodic generator sweep (tagged :slow, SLOW=1 only), its own file since fixes-17 so the everyday file keeps its budget; every melodic L.gen entry (16) steered at 960 BPM and for 65 bars at 85 and 170 BPM; 229 s for the file, examples up to 37 s, at PARALLEL=2 and load 13-22 on the 7950X container (2026-11-22)
+  spec/lib/mb/sound/library/generators_endless_slow_spec.rb:
+    file: 100
+    example: 20
+    reason: the slow tier of the beat generator sweep (tagged :slow, SLOW=1 only), its own file since fixes-17; every beat entry steered at 960 BPM, for 65 bars at 85 and 170 BPM, and on its kit's track; 68 s for the file, examples up to 12.9 s, at PARALLEL=2 and load 13-22 on the 7950X container (2026-11-22)
   spec/lib/mb/sound/library/generators_endless_melodic_spec.rb:
     file: 30
     reason: every melodic L.gen entry (16) launched on a track and with no track for 40 bars at 960 BPM in non-realtime Sessions, counting note-ons (the guard for generators that end; the dense harp, chime, and koto entries render most of it); 15 s alone at load 12 and 29.7 s at load 30 on the 7950X container against the default 20 (beat-halftime-1, 2026-11-22)

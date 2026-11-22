@@ -82,8 +82,9 @@ RSpec.describe MB::Sound::Library::Generators, 'generators keep playing', :aggre
   end
 
   # The class: no launch spelling gives a generator an end (the melodic
-  # entries: generators_endless_melodic_spec.rb)
-  describe 'the beat family sweep', render_budget: { seconds: 900, reason: 'each beat for 40 bars (65 in the slow tier), two launch spellings (three in the slow tier); the slow tier renders about 800 s per beat, mostly its 85 BPM run' } do
+  # entries: generators_endless_melodic_spec.rb; the slow tier's longer
+  # runs: generators_endless_slow_spec.rb)
+  describe 'the beat family sweep' do
     MB::Sound::L.gen.beat.entries.each do |entry|
       it("keeps #{entry.head_path} playing on a track and with no track") { expect_keeps_playing(entry) }
     end
