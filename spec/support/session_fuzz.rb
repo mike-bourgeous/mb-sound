@@ -807,6 +807,18 @@ module SessionFuzz
       insert = "fx :#{name}, ->(sig) { sig.compress(threshold: #{s.pick(['-30.db', '-18.db'])}) }"
       s.rng.rand < 0.5 ? "#{kit}; #{play}; #{insert}" : "#{kit}; #{play}; after(in: 2.beats) { #{insert} }; after(in: 1.bar) { fx :#{name}, :off }"
     },
+    ->(s) {
+      # (fix-knob-reload, batch 42's soak seed 789008) a set document
+      # loaded in a scheduled block lands its lines at the block's time,
+      # as the same lines typed in the block do: a base tempo, and the
+      # song's knob :cut declared again with a new range and value (they
+      # landed on the first frame of the buffer running the block, a
+      # lookahead early)
+      # (knob lines are the header: before the body's bpm)
+      body = "bpm #{s.pick([120, 132, 140])}"
+      body = "knob :cut, (100.hz..5000.hz).at(#{s.pick(%w[600 3000])}.hz)\\n#{body}" if s.knob
+      "GraphIO.load(%(graph \#{GraphIO::FORMAT}, name: \"tempo\", kind: :set\\n#{body}\\n), session: Session.current)"
+    },
     # (new commands go here, at the end)
   ].freeze
 
