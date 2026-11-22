@@ -26,6 +26,7 @@ RSpec.describe('weak maps in lib/') do
     'notes.rb SHARED' => 'per control stream, keys to WeakRefs of the shared nodes',
     'reference.rb @pairs' => 'per Session, track names to Reference::Pairs: symbols, numbers, and a Sample, none of which hold a Session',
     'graph_node/recipe.rb @block_iseqs' => 'true or false per block iseq',
+    'graph_node/recipe.rb @frozen_bundles' => 'the recorded bundle of a frozen output, which can\'t take @graph_bundle (it may reach its key; none of the library\'s bundles has a frozen output)',
     'library/generators.rb ORIGINS' => "a clip's entry and keyword arguments (a knob passed as an argument would hold its Session, which holds the clip: not done by the library; noted in fixes-18)",
     'library/generators.rb BLOCKS' => "an entry's generator block, defined in its library file, not in the entry's scope",
     'library/generators.rb @steering' => 'an entry to the param names that steer it (symbols)',
@@ -46,7 +47,7 @@ RSpec.describe('weak maps in lib/') do
     'arg_types.rb TAGS', 'graph_node.rb @structure_watch', 'exit_close.rb @registry', 'graph_io.rb @rack_documents',
     'session.rb @file_readers', 'rack.rb LATENCIES', 'rack.rb GRAPHS', 'graph_node/resample.rb PENDING', 'midi/stream.rb @readers',
     'midi/destination.rb @all', 'graph_node/tee.rb made', 'mastering/match.rb @sample_references', 'graph_node/frozen_view.rb VIEWS',
-    'graph_node/recipe.rb @other_bundles', 'session/racks.rb @app_keys', 'ui/sound_panes.rb COLLAPSED', 'ui/sound_panes.rb CHAINS',
+'session/racks.rb @app_keys', 'ui/sound_panes.rb COLLAPSED', 'ui/sound_panes.rb CHAINS',
     'ui/sound_panes.rb TITLES', 'ui/sound_panes.rb TAILS', 'ui/sound_panes.rb PARAM_TEXTS', 'ui/sound_panes.rb MODS',
     'ui/sound_panes.rb SHOWN', 'ui/sound_panes.rb KNOB_LINES', 'ui/sound_panes.rb CODE_LINES', 'ui/sound_panes.rb WRAPS',
     'ui/chrome.rb BADGES', 'ui/chrome.rb TITLES', 'ui/keys.rb HINTS', 'ui/signals.rb OURS', 'ui/picker.rb WORDS',
@@ -112,6 +113,20 @@ RSpec.describe('weak maps in lib/') do
     expect(MB::Sound::GraphNode::Recipe.bundle_of(b.left)).to equal(b)
     expect(MB::Sound::GraphNode::Recipe.bundle_of(b.right)).to equal(b)
     expect(MB::Sound::GraphNode::Recipe.bundle_of(220.hz.saw)).to be_nil
+  end
+
+  # (multi-output nodes, which the inspector climbs to from their outputs,
+  # aren't GraphNodes: a weak map for them lost the bundle at the first GC
+  # once nothing else held it, and the tuner's inspector came up empty)
+  it 'finds the bundle from the multi-output node behind its outputs while the outputs live, after the bundle itself was dropped' do
+    left = nil
+    Thread.new { left = 220.hz.saw.pan(0.3).left }.join
+    3.times { GC.start }
+    owner = MB::Sound::GraphNode.climb_tee_tree(left)
+    expect(owner).to be_a(MB::Sound::GraphNode::MultiOutput)
+    expect(MB::Sound::GraphNode::Recipe.bundle_of(owner)).to be_a(MB::Sound::GraphNode::Channels)
+    expect(MB::Sound::GraphNode::Recipe.bundle_of(left)).to equal(MB::Sound::GraphNode::Recipe.bundle_of(owner))
+    expect(MB::Sound::UI::Inspect.root_of(left)).to equal(owner)
   end
 
   it 'lets a closed Session that played a generator on a track go, with its knobs' do
