@@ -481,7 +481,11 @@ module MB
         def generated_scenes(g)
           return scenes if g.use.empty? && g.scenes.empty?
           scenes.to_h { |n, values|
-            swapped = values.to_h { |k, v| [k, v.is_a?(Symbol) && !SCENE_OPTIONS.include?(k) ? g.use.fetch(v, v) : v] }
+            swapped = values.to_h { |k, v|
+              next [k, v] if SCENE_OPTIONS.include?(k)
+              next [k, v.merge(Arrangement::TRACK_HASH_CLIP => g.use.fetch(v[Arrangement::TRACK_HASH_CLIP], v[Arrangement::TRACK_HASH_CLIP]))] if v.is_a?(Hash) && v[Arrangement::TRACK_HASH_CLIP].is_a?(Symbol)
+              [k, v.is_a?(Symbol) ? g.use.fetch(v, v) : v]
+            }
             [n, swapped.merge(g.scenes.fetch(n, {}))]
           }
         end
@@ -492,10 +496,16 @@ module MB
         # scene options passed on.
         def scene(name)
           values = scenes.fetch(name) { raise ArgumentError, "No scene #{name.inspect} in genre #{self.name.inspect}#{Form.suggest(name, scenes.keys)}" }
+          resolve = ->(k, v) {
+            v = material(v) if v.is_a?(Symbol) && !Genre::SCENE_LITERALS.include?(v)
+            k == sidechain&.first ? keyed_kit(v) : v
+          }
           out = values.to_h { |k, v|
             next [k, v] if Genre::SCENE_OPTIONS.include?(k) || knobs.key?(k)
-            v = material(v) if v.is_a?(Symbol) && !Genre::SCENE_LITERALS.include?(v)
-            [k, k == sidechain&.first ? keyed_kit(v) : v]
+            # (a track hash, drums: { clip: :peak, energy: 0.8 }: its clip:
+            # resolved like a role's value, its knob values passed on)
+            next [k, v.key?(Arrangement::TRACK_HASH_CLIP) ? v.merge(Arrangement::TRACK_HASH_CLIP => resolve.(k, v[Arrangement::TRACK_HASH_CLIP])) : v] if v.is_a?(Hash)
+            [k, resolve.(k, v)]
           }
           # A trigger track (`sidechain :pump, clip`) plays its line under every
           # scene that doesn't name it (a scene stops what it doesn't name)
@@ -1053,6 +1063,8 @@ module MB
               unless t.roles.key?(k) || k == t.trigger_track
                 raise ArgumentError, "#{where}: scene #{s.inspect} names #{k.inspect}, which is neither a role nor a knob#{Form.suggest(k, t.roles.keys + t.knobs.keys)}"
               end
+              # (a track hash's clip: names a kit or clip too: form-knobs-1)
+              v = v[Arrangement::TRACK_HASH_CLIP] if v.is_a?(Hash)
               next unless v.is_a?(Symbol) && !SCENE_LITERALS.include?(v)
               next if t.kits.key?(v) || t.clips.key?(v)
               raise ArgumentError, "#{where}: scene #{s.inspect} plays #{v.inspect} on #{k.inspect}, which is no kit or clip#{Form.suggest(v, t.kits.keys + t.clips.keys)}"

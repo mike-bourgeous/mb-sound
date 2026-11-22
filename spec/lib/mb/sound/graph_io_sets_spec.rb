@@ -138,6 +138,43 @@ RSpec.describe('set documents', :aggregate_failures) do
     RUBY
   end
 
+  # form-knobs-1: a track's knob values print as its track hash, load
+  # back to the same scenes and sections, and older quoted keys still load
+  it 'saves scenes and sections with track hashes and loads quoted keys too' do
+    a = session
+    within(a) {
+      MB::Sound.knob(:"t/energy", 0, range: 0..1)
+      MB::Sound.knob(:"t/fill", 0, range: 0..1)
+      MB::Sound.track(:t) { |c| c.synth { |n| n.hz.saw * MB::Sound.knob(:"t/energy") * MB::Sound.knob(:"t/fill") } }
+      beat = MB::Sound.seq(MB::Sound::C3).loop.named(:beat)
+      MB::Sound.scene(:one, t: { clip: beat, energy: 0.2, fill: [0.5, over: :section] })
+      MB::Sound.scene(:two, t: { energy: 0.7 })
+      MB::Sound.scene(:three, t: :off, "t/energy": 0.1)
+      MB::Sound.flow(play: false) { one 2; two 4, t: { fill: [1, over: :section] } }
+    }
+    text = io.dump(a.arrangement, name: 'hashes')
+    expect(text).to include(<<~RUBY)
+      scene :one, t: { clip: beat, energy: 0.2, fill: [0.5, { over: :section }] }
+      scene :two, t: { energy: 0.7 }
+      scene :three, t: { clip: :off, energy: 0.1 }
+    RUBY
+    expect(text).to include("  two 4, t: { fill: [1, { over: :section }] }\n")
+
+    b = session
+    io.load(text, session: b)
+    plain = ->(s) { s.arrangement.scenes.transform_values { |sc| sc.values.transform_values { |v| v.respond_to?(:events) ? :clip : v } } }
+    expect(plain.(b)).to eq(plain.(a))
+    expect(plain.(b)[:two]).to eq({ t: :keep, "t/energy": 0.7 })
+    expect(io.dump(b.arrangement, name: 'hashes').sub(/saved: "[^"]*"/, '')).to eq(text.sub(/saved: "[^"]*"/, ''))
+
+    # Quoted keys (documents before track hashes) load to the same scene
+    c = session
+    old = text.sub("scene :two, t: { energy: 0.7 }", 'scene :two, t: :keep, "t/energy": 0.7')
+    expect(old).not_to eq(text)
+    io.load(old, session: c)
+    expect(plain.(c)).to eq(plain.(a))
+  end
+
   it 'saves and loads a post-chain master gain' do
     a = session
     within(a) { MB::Sound.master_gain(-3.db, post: true) }

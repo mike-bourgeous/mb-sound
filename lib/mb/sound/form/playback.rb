@@ -719,7 +719,11 @@ module MB
             # bin/play.rb waited for it forever)
             launch_error = nil
             begin
-              Session.with_context_fields(tempo_anchor: time < @transport.position ? [@session, time] : nil) {
+              # (where this pass ends, for knob values ramping over:
+              # :section: Session::Knobs#section_over; counted when asked, so
+              # the section's own values see a meter its scene's block set)
+              section_end = [@session, -> { time + length_from(@length, time) }]
+              Session.with_context_fields(tempo_anchor: time < @transport.position ? [@session, time] : nil, section_end: section_end) {
                 launch(scene, fade: sec.fade) if scene && @arrangement.scenes.key?(scene)
                 # The section's knob values, after its scene's (they win)
                 sec.knobs.each do |k, v|

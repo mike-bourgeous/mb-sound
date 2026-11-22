@@ -1142,6 +1142,19 @@ module MB
         `fx :drums, -> { it.softclip(0.1, 0.9).limiter(ceiling: -6.db) }`.
         In `ui :sound` the library picker's Enter on an effect does this
         for the inspected track.
+
+        A scene sets a track's knobs with a track hash, one key saying
+        everything about the track: `scene :intro, drums: { clip: beat,
+        energy: 0.2 }`, `scene :build, drums: { energy: [0.8, over:
+        :section], fill: 0.7 }`, `scene :drop, drums: { energy:
+        2.bars.lfo.square.at(0.2..1) }`.  Values are what `turn` takes (a
+        number, `[value, over:, curve:, from:]`, an LFO or knob name);
+        `level:` is the track's fader.  Without `clip:` the track plays on
+        what it plays, even in a full scene (`clip: :off` stops it).  It is
+        the same as the quoted keys (`drums: beat, "drums/energy": 0.2`),
+        which still work; saved sets print the hash.  `over: :section`
+        ramps to the end of the form section playing where the scene
+        lands (`help :flow`).
       TEXT
       commands :track, :tracks, :untrack, :clear_set, :fx, :scene, :scenes, :go, :launch, :tweak, :quant, :undo, :redo!, :changes, :swap
       note :arrangement
@@ -1157,6 +1170,14 @@ module MB
         track :try_bass, :dnb_sub, q: 1
         bg :try_bass, seq(A1, rest, A1, A2).n8.loop
         turn :"try_bass/cutoff", 80.0, over: 2
+      end
+      example 'a track hash: the clip and a knob in one key, then a ramp (at the library\'s level: loud)', sound: false do
+        track :try_bass, :dnb_sub, q: 1
+        bg :try_bass, seq(A1, rest, A1, A2).n8.loop
+        scene :try_low, try_bass: { clip: seq(A1, rest, A1, A2).n8.loop, cutoff: 60.0 }
+        scene :try_open, try_bass: { cutoff: [120.0, over: 2] }
+        go :try_low
+        go :try_open, in: 1.bar
       end
       example 'an effect insert on a library instrument, swapped at the next bar', sound: false do
         track :try_keys, :funk_keys, q: 1, fx: L.fx.hall
@@ -1193,6 +1214,16 @@ module MB
         nearest behind;
         `go :drop, section: :drop2` picks one; a scene no section plays
         ends the flow: you're driving).
+
+        Sections turn knobs as each pass starts: `drop 8, cut: 8000`, and a
+        track's knobs as its track hash, `build 16, drums: { energy: [0.8,
+        over: :section], fill: 0.7 }` (clips come from the section's
+        scene).  `over: :section` ramps from where the change lands to the
+        end of that section pass: a whole 16-bar build, the rest of the
+        section for a `turn` or `go` while the flow plays.  Each pass turns
+        again from where the knob is, so a `times: 2` or `loop!` section
+        ramps on its first pass and holds the value after (`from:` starts
+        each pass over).  With no flow playing it says so; write `over: 4`.
       TEXT
       commands :flow, :start, :pause, :play_form, :section, :sections, :loop!, :onward, :goto, :skip, :finish, :practice, :seek, :marker, :meter, :suspend
       note :arrangement
@@ -1347,6 +1378,14 @@ module MB
         line (Up), put the cursor on the number (Alt-Shift-Left/Right jump
         between numbers), and Alt-Up/Alt-Down step it and run the line
         again, landing where the line lands (`help :ui` has the keys).
+
+        A track's knobs turn together by their short names: `turn :drums,
+        energy: 0.8, fill: 0.3` (one undo step), and `over:`, `curve:`,
+        `from:` apply to each (`turn :drums, energy: 1, fill: 1, over:
+        :section` ramps to the end of the playing section).  Scenes and
+        sections write the same as track hashes: `scene :build, drums: {
+        energy: [0.8, over: 4] }`.  A name the track doesn't have suggests
+        its knobs.
       TEXT
       commands :knob, :knobs, :turn, :snap, :snaps, :recall, :xfade, :learn, :smooth_gesture
       note :arrangement
