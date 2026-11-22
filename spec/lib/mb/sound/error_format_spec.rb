@@ -125,6 +125,22 @@ RSpec.describe(MB::Sound::ErrorFormat) do
       expect(described_class.summary(e)).not_to include('.call.')
     end
 
+    # (the maintainer's take, 2026-11-21: `track :drums, L.kit.jazz.transpose(-3)`, then `.tune(-3)`)
+    it "names a kit's tune knob, with the value given, for .tune and .transpose on a kit entry (ux-friction-4)" do
+      jazz = MB::Sound::L.kit.jazz
+      e = (jazz.tune(-3) rescue $!)
+      expect(described_class.summary(e)).to include(
+        'did you mean track :drums, L.kit.jazz, then turn :"drums/tune", -3 (the kit\'s tune knob: every drum -3 semitones, each key still the same drum); ' \
+        'in a patch: track(:drums) { |c| L.kit.jazz.(c, tune: -3) }?'
+      )
+      e = (jazz.transpose(-2.5) rescue $!)
+      expect(described_class.summary(e)).to include('turn :"drums/tune", -2.5', 'transpose would move the notes, which on a kit changes which drum plays')
+      e = (MB::Sound::L.kit.tr909.tune(2) rescue $!)
+      expect(described_class.summary(e)).to include("tr909's voices have tune knobs of their own, in Hz: tr909(clip, kick: { tune: 50 }")
+      e = (jazz.frobnicate rescue $!)
+      expect(described_class.summary(e)).not_to include('drums/tune')
+    end
+
     it "points the maintainer's LFO, scale, and note guesses at what exists (ux-friction-1 round 2)" do
       lfo = 2.bars.lfo.ramp
       expect(described_class.summary((lfo.exp rescue $!))).to include('did you mean at(D3.number..B6.number).freq (an LFO swept in notes')

@@ -134,6 +134,9 @@ RSpec.describe 'SoundFont kits by name and role', :aggregate_failures do
       MB::Sound.live = true
       expect { kits.play(:acoustic, clip) }.to output(/apt install avldrums\.lv2-soundfont/).to_stderr
       expect { kits.play(:acoustic, clip) }.not_to output.to_stderr # (once)
+      # (a tune on the fallback machine: it keeps its pitch, said once)
+      expect { kits.play(:acoustic, clip, tune: -3) }.to output(/kit\(:acoustic\): tune pitches SoundFont kits; the tr909 playing instead keeps its pitch/).to_stderr
+      expect { kits.play(:acoustic, clip, tune: -3) }.not_to output.to_stderr
     ensure
       MB::Sound.live = false
     end
@@ -167,6 +170,80 @@ RSpec.describe 'SoundFont kits by name and role', :aggregate_failures do
       expect(text).to include('track :drums, drums, :acoustic')
       expect(text).to include('L.gen.beat.techno(seed: 5)')
       expect(text).not_to include(dir)
+    ensure
+      s.close
+      MB::Sound.rewind
+    end
+  end
+
+  # The frequency of +buf+ (a sine) from its upward zero crossings, in Hz
+  # at 48 kHz.
+  def sine_hz(buf)
+    a = buf.to_a
+    ups = (1...a.length).select { |i| a[i - 1] < 0 && a[i] >= 0 }
+    return 0.0 if ups.length < 2
+    (ups.length - 1) * 48000.0 / (ups.last - ups.first)
+  end
+
+  it 'tunes a kit by kind: tune: pitches every drum (the same key, the same drum), the track knob :"drums/tune" rebuilds it' do
+    # (a snare that is a 1 kHz sine at its key, so pitch shows)
+    sine = Array.new(96_000) { |i| 0.5 * Math.sin(2 * Math::PI * 1000 * i / 48000.0) }
+    SF2Writer.write(File.join(dir, 'Blonde_Bop_HR_LV2.sf2'), samples: [{ name: 'sn', data: sine, rate: 48000, pitch: 38 }],
+      instruments: [{ name: 'Blonde Bop', zones: [{ key_range: [38, 38], sample_id: 0 }] }],
+      presets: [{ name: 'Blonde Bop', program: 0, zones: [{ instrument: 0 }] }])
+    e = MB::Sound::L.kit.jazz
+    expect(e.params[:tune].default).to eq(0.0)
+    clip = MB::Sound.seq(MB::Sound::Note.new(38)).n1
+    font = MB::Sound.sf2('Blonde_Bop_HR_LV2', preset: [0, 0])
+    plain = e.(clip).sample(9600).dup
+    expect(plain).to eq(font.sampler(clip, voices: 16).sample(9600))
+    low = e.(clip, tune: -3).sample(9600).dup
+    expect(low).to eq(font.sampler(clip, voices: 16, transpose: -3).sample(9600))
+    expect(sine_hz(plain[2400..])).to be_within(5).of(1000)
+    expect(sine_hz(low[2400..])).to be_within(5).of(1000 * 2**(-3 / 12.0)) # (the same key's sample, 3 semitones down)
+    expect { e.(clip, tun: -3) }.to raise_error(ArgumentError, /takes tune: only \(got tun:\).*tune/m)
+    expect { e.(tune: -3) }.to raise_error(ArgumentError, /turn :"drums\/tune", -3/)
+    expect { MB::Sound.kit(:jazz, tune: -3) }.to raise_error(ArgumentError, /takes no settings.*turn :"drums\/tune", -3/)
+
+    MB::Sound.rewind
+    out = MB::Sound::Sampler::CaptureOutput.new(channels: 2, buffer_size: 800)
+    s = MB::Sound::Session.new(output: out, realtime: false)
+    begin
+      MB::Sound::Session.with_context(session: s) {
+        MB::Sound.track(:drums, MB::Sound.kit(:jazz), q: 1)
+        MB::Sound.bg(:drums, MB::Sound.seq(MB::Sound::Note.new(38)).n1.loop)
+      }
+      knob = s.knobs[:"drums/tune"]
+      expect(knob).not_to be_nil
+      expect(knob.value).to eq(0.0)
+      expect(s.arrangement.build_knob?(:"drums/tune")).to eq(true)
+      per_bar = (s.transport.seconds_of(1r) * 48000).round
+      buffers = (per_bar / 800.0).ceil
+      buffers.times { s.process_buffer }
+      MB::Sound::Session.with_context(session: s) { MB::Sound.turn(:"drums/tune", -3) }
+      (buffers * 2).times { s.process_buffer }
+      left = Numo::SFloat.cast(out.captured[0])
+      expect(sine_hz(left[2400...per_bar])).to be_within(5).of(1000)
+      expect(sine_hz(left[(per_bar + 2400)...(2 * per_bar)])).to be_within(5).of(1000 * 2**(-3 / 12.0))
+      expect(s.knobs[:"drums/tune"].value).to eq(-3)
+
+      # (a set saves the knob with the kit's kind, and loads tuned)
+      text = MB::Sound::GraphIO.dump(s.arrangement, name: 'g')
+      expect(text).to include('knob :"drums/tune", (-24.0..24.0).at(-3.0)')
+      expect(text).to include('track :drums, ')
+      expect(text).not_to include(dir)
+      MB::Sound.rewind
+      out2 = MB::Sound::Sampler::CaptureOutput.new(channels: 2, buffer_size: 800)
+      s2 = MB::Sound::Session.new(output: out2, realtime: false)
+      begin
+        MB::Sound::GraphIO.load(text, session: s2)
+        expect(s2.knobs[:"drums/tune"].value).to eq(-3)
+        MB::Sound::Session.with_context(session: s2) { MB::Sound.bg(:drums) }
+        buffers.times { s2.process_buffer }
+        expect(sine_hz(Numo::SFloat.cast(out2.captured[0])[2400...per_bar])).to be_within(5).of(1000 * 2**(-3 / 12.0))
+      ensure
+        s2.close
+      end
     ensure
       s.close
       MB::Sound.rewind

@@ -78,7 +78,10 @@ module MB
       #     bg :drums, L.gen.beat.rock
       def kit(source = nil, name: :kit, **settings, &block)
         if source.is_a?(Symbol) && block.nil?
-          raise ArgumentError, "kit(#{source.inspect}) takes no settings (got #{settings.keys.map { |k| "#{k}:" }.join(', ')})" unless settings.empty?
+          unless settings.empty?
+            hint = Drums::InstalledKits::KINDS.key?(source) ? Drums::InstalledKits.tune_hint(source, settings[:tune]) : ''
+            raise ArgumentError, "kit(#{source.inspect}) takes no settings (got #{settings.keys.map { |k| "#{k}:" }.join(', ')})#{hint}"
+          end
           Drums::InstalledKits.kind(source)
           return Library.index.lookup(:installed, source)
         end

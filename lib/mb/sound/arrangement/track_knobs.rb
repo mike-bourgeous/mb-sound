@@ -39,6 +39,9 @@ module MB
           # patch, reads them: Library::Generators.track_clip; gen-knobs-1)
           generator: ->(entry) { MB::Sound::Library::Generators.knob_params(entry) },
           beat: ->(entry) { MB::Sound::Library::Generators.knob_params(entry) },
+          # (kits by kind: the SoundFont kit's tune, read while the kit
+          # builds, so a turn rebuilds the track; ux-friction-4)
+          installed: ->(_entry) { %i[tune] },
         }.freeze
 
         module_function

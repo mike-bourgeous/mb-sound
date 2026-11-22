@@ -68,6 +68,27 @@ RSpec.describe(MB::Sound::Arrangement::TrackKnobs, :aggregate_failures) do
     expect(self.class.preset_names).to include(:dnb_reese, :digibrass, :sq80_classic, :ambient_gong)
   end
 
+  # (a guard over every family whose params become track knobs: each
+  # entry declares those params as numeric Params, so knob_for can make
+  # the knob; ux-friction-4 added the kits by kind's tune)
+  it 'declares every knob param of the ENTRY_PARAMS families as a numeric Param on each of their entries' do
+    families = described_class::ENTRY_PARAMS.keys
+    expect(families).to include(:installed, :struck, :generator)
+    families.each do |family|
+      entries = MB::Sound::Library.index.entries.select { |e| e.family == family && e.shelf.shipped? }
+      expect(entries).not_to be_empty, family.inspect
+      entries.each do |e|
+        names = described_class.entry_params(e)
+        names.each do |n|
+          param = e.params[n]
+          expect(param).to be_a(MB::Sound::Param), "#{e.head_path} #{n}"
+          expect(param.numeric?).to eq(true), "#{e.head_path} #{n}" if param
+        end
+      end
+    end
+    expect(described_class.entry_params(MB::Sound::L.kit.jazz)).to eq(%i[tune])
+  end
+
   # (a few in the everyday tier, every one under SLOW=1)
   [:dnb_reese, :digibrass, :reed_piano, *SlowTier.slow_tier(preset_names - %i[dnb_reese digibrass reed_piano], keep: 0)].each do |n|
     it "plays #{n} bit for bit like its params given as numbers, with them as the track's knobs" do
