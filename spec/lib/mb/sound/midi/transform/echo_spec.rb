@@ -325,6 +325,35 @@ RSpec.describe(MB::Sound::MIDI::Transform::Echo, :midi_transforms) do
       expect(c.events.map { |e| [e.value.to_i, e.start] }.sort).to eq([[60, 0r], [60, 1/4r], [64, 0r], [64, 1/4r]])
     end
 
+    # (the maintainer's take, 2026-11-21: `echo(3, 1.n32, pitch: 10)`
+    # raised "Echo count must be a non-negative Integer", and his note was
+    # "dwim argument order"; ArgTypes: a typed length is the delay wherever
+    # it is written)
+    it 'takes the count and a typed delay in either order, printing one canonical order everywhere' do
+      fresh = -> { list_stream(ev.note_on(60, time: 0r), ev.note_off(60, time: 1/10r)) }
+      expect(read_all(fresh.().echo(3, 1/8r, pitch: 2))).to eq(read_all(fresh.().echo(1/8r, 3, pitch: 2)))
+      expect(read_all(fresh.().echo(2, [1/8r, 1/4r]))).to eq(read_all(fresh.().echo([1/8r, 1/4r], 2)))
+
+      clip = MB::Sound.seq(MB::Sound::C4).n4
+      swapped = clip.echo(3, 1.n32, pitch: 10)
+      expect(swapped.events).to eq(clip.echo(1.n32, 3, pitch: 10).events)
+      expect(swapped.to_ruby).to eq('seq(C4).n4.echo(1.n32, 3, pitch: 10)')
+      expect(clip.echo(2, [3.n32, 1.n16]).to_ruby).to eq('seq(C4).n4.echo([3.n32, 1.n16], 2)')
+      expect(clip.echo(2, 0.25.seconds).to_ruby).to eq('seq(C4).n4.echo(250.ms, 2)')
+      expect(MB::Sound.echo(3, 1.n16).steps.first[1]).to eq([1.n16, 3])
+
+      # Generator clips (each cycle baked through the transform)
+      gen = MB::Sound::L.gen.techno_beat.call(seed: 5)
+      expect(gen.echo(3, 1.n32).to_ruby).to eq(gen.echo(1.n32, 3).to_ruby)
+      expect(gen.echo(3, 1.n32).to_ruby).to include('echo(1.n32, 3)')
+
+      # Plain numbers keep their order (seconds, then the count); what
+      # can't be told apart is refused with the spelling
+      expect(clip.echo(0.25, 2).to_ruby).to eq('seq(C4).n4.echo(0.25, 2)')
+      expect { clip.echo(3, 0.25) }.to raise_error(ArgumentError, /two plain numbers go in order.*echo\(0\.25, 3\).*echo\(3, 0\.25\.seconds\)/)
+      expect { clip.echo(1.n8, 1.n16) }.to raise_error(ArgumentError, /two delays.*echo\(\[1\.n8, 1\.n16\], 3\)/)
+    end
+
     it 'Stream#synth plays a stream on voices' do
       syn = one_note.echo(1/4r, 1).synth(voices: 2) { |v| v.gate }
       expect(syn).to be_a(MB::Sound::Synth)

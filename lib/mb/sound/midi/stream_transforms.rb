@@ -479,6 +479,20 @@ module MB
           echo: { transpose: :pitch, step: :pitch, steps: :pitch, interval: :pitch, feedback: :velocity, decay: :velocity },
         }.freeze
 
+        # Transforms whose positional arguments may come in either order,
+        # told apart by type (ArgTypes::Signature): name => a Proc giving
+        # the arguments in canonical order.  Streams and unattached chains
+        # (Spec) both reorder, so everything prints canonically.
+        ARGUMENT_ORDER = {
+          echo: ->(args) { Transform::Echo.order(args) },
+        }.freeze
+
+        # +args+ of transform +name+ in canonical order (see
+        # ARGUMENT_ORDER).
+        def self.ordered_args(name, args)
+          (o = ARGUMENT_ORDER[name]) ? o.(args) : args
+        end
+
         # Frames between a transform's method and the error it raised that
         # are its own argument handling (transform class constructors).
         ARGUMENT_FRAMES = /\A(?:initialize|new|\[\])\z/
@@ -525,6 +539,7 @@ module MB
         ARGUMENT_HELP = Module.new do
           TRANSFORMS.each do |name|
             define_method(name) do |*args, **kwargs, &block|
+              args = Stream.ordered_args(name, args)
               out = super(*args, **kwargs, &block)
               out.__send__(:adopt_lineage, self, name, args, kwargs, block) if out.is_a?(Stream) && is_a?(Stream) && !out.equal?(self)
               out
