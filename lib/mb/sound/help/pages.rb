@@ -388,6 +388,32 @@ module MB
         end
       end
 
+      # Another page with lines before it (+lead+, text built with Doc): a
+      # chooser when a word is several things, or a note saying how the
+      # words were read (ux-friction-3; see Help.page_for_text).  Asks
+      # the inner page for its title and anything else (`try`).
+      class LeadPage
+        include Page
+
+        attr_reader :page
+
+        def initialize(lead, page)
+          @lead = lead.to_s
+          @page = page
+        end
+
+        def title = @page.respond_to?(:title) ? @page.title : nil
+
+        def to_s = "#{@lead}#{@lead.end_with?("\n") || @lead.empty? ? '' : "\n"}#{@page}"
+
+        def respond_to_missing?(name, all = false) = @page.respond_to?(name, all) || super
+
+        def method_missing(name, *args, **kw, &block)
+          return super unless @page.respond_to?(name)
+          @page.public_send(name, *args, **kw, &block)
+        end
+      end
+
       # `help Owner#name` for a method the owner doesn't have (see
       # Help.owner_method_page): what was asked, and the names it might be
       # (+spelled+: the owner's methods spelled like it; +others+: [label,

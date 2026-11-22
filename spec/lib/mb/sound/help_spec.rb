@@ -1,3 +1,4 @@
+require_relative "../../../support/sf2_writer"
 # Guard spec for console help (design/notes/help.md): names in topics and on
 # the sheet exist, every example plays in level bounds, every lesson runs,
 # and every console command is covered by a topic, the sheet, or an
@@ -961,6 +962,94 @@ RSpec.describe MB::Sound::Help do
       expect(text(MB::Sound.help(:knobs))).to include("Each one's page (arguments, examples): help :knob")
       expect(text(MB::Sound.help(:unison)).lines.first).to start_with('Unison and supersaws')
       expect(MB::Sound::Help.page_for_text('.no_such_method_here', cb)).to be_a(MB::Sound::Help::SearchPage)
+    end
+
+    # (ux-friction-3, the maintainer's note "getting from help to method
+    # docs needs some improvement": after `sf2(path).sampler(voices: 8)`
+    # failed he tried `help sampler` (the topic), then show-doc of
+    # `sf2(...).sampler`, `Instrument#sampler`, `MB::Sound::Instrument#sampler`,
+    # and `MB::Sound::MIDI::Instrument#sampler`)
+    describe 'from a word to a method page' do
+      let(:font) do
+        SF2Writer.write(tmp_path('kit.sf2'), samples: [{ name: 's', data: SF2Writer.sine(200, 400) }],
+                                             instruments: [{ name: 'I', zones: [{ sample_id: 0 }] }],
+                                             presets: [{ name: 'Standard', bank: 128, program: 0, zones: [{ instrument: 0 }] }])
+      end
+
+      it 'puts a chooser over a topic named like a command and a method: help sampler' do
+        page = MB::Sound::Help.page_for_text('sampler', MB::Sound.module_eval('binding'))
+        lines = text(page).lines.map(&:rstrip)
+        expect(lines[0]).to eq('sampler is also')
+        expect(lines[1]).to match(/\A  help SamplerMethods#sampler +the command: /)
+        expect(lines[2]).to match(/\A  help \.sampler +the method on Sample::Slices, Sampler::Instrument\z/)
+        expect(lines[3]).to start_with('Sampler: bounce, slice, chop')
+        expect(page.title).to eq('sampler')
+        expect(text(MB::Sound::Help.page_for_text('SamplerMethods#sampler', MB::Sound.module_eval('binding'))).lines.first).to start_with('sampler(source, instrument')
+        # (the Symbol is the topic alone; a name that is one thing has no chooser)
+        expect(text(MB::Sound.help(:sampler)).lines.first).to start_with('Sampler: bounce')
+        expect(text(MB::Sound::Help.page_for_text('tr808')).lines.first).to start_with('tr808(source')
+      end
+
+      it "opens the receiver's method for a variable, every documented one for an expression, never running it" do
+        kit = MB::Sound.sf2(font)
+        b = binding
+        page = text(MB::Sound::Help.page_for_text('kit.sampler', b))
+        # (Font's comment is "See Instrument#sampler.": that page follows)
+        expect(page.lines.first).to include('Sampler::SF2::Font')
+        expect(page).to include('Sampler::Instrument method').and include('A synth playing MIDI source')
+        expect(kit).to be_a(MB::Sound::Sampler::SF2::Font)
+        called = false
+        b.local_variable_set(:spy, Object.new.tap { |o| o.define_singleton_method(:boom) { called = true } })
+        expr = text(MB::Sound::Help.page_for_text("sf2('nope.sf2').sampler", b))
+        expect(expr.lines.first(2).join.tr("\n", ' ')).to start_with("help doesn't run sf2('nope.sf2'); every documented .sampler (Sample::Slices, Sampler::Instrument):")
+        expect(text(MB::Sound::Help.page_for_text('spy.boom.sampler', b))).to include("help doesn't run spy.boom")
+        expect(called).to eq(false)
+        expect(text(MB::Sound::Help.page_for_text('kit.no_such_thing', b))).to include('Sampler::SF2::Font has no method no_such_thing')
+        expect(text(MB::Sound::Help.page_for_text('440.hz', b)).lines.first).to start_with('hz  NumericSoundMixins')
+        # (library heads stay the library's pages)
+        expect(text(MB::Sound::Help.page_for_text('L.inst', MB::Sound.module_eval('binding')))).not_to include("help doesn't run")
+      end
+
+      it 'finds the class a wrong or partial path meant: MB::Sound::Instrument#sampler' do
+        cb = MB::Sound.module_eval('binding')
+        %w[Instrument#sampler MB::Sound::Instrument#sampler MB::Sound::MIDI::Instrument#sampler].each do |q|
+          t = text(MB::Sound::Help.page_for_text(q, cb))
+          expect(t).to include('sampler(source, voices:, **options, &block)  Sampler::Instrument method'), q
+        end
+        expect(text(MB::Sound::Help.page_for_text('MB::Sound::Instrument#sampler', cb)).lines.first).to start_with('No class or module is named MB::Sound::Instrument;')
+      end
+
+      it "routes Pry's show-doc to the help page when Pry finds nothing, and says help .name when help knows the name" do
+        MB::Sound::Help.install_pry!
+        out = StringIO.new
+        pry = Pry.new(output: out, target: MB::Sound.module_eval('binding'), color: false, pager: false)
+        pry.eval('show-doc Instrument#sampler')
+        expect(out.string).to include("show-doc: Couldn't locate a definition for Instrument#sampler; mb-sound's help has it (help Instrument#sampler):")
+        expect(out.string).to include('Sampler::Instrument method')
+        out.truncate(0)
+        out.rewind
+        pry.eval('show-doc Nope::Thing#sampler_zz_nothing')
+        expect(out.string).to include("Couldn't locate a definition")
+        expect(out.string).not_to include("mb-sound's help")
+        out.truncate(0)
+        out.rewind
+        pry.eval('show-doc MB::Sound::Decibels#to_f') # (Pry's own, unchanged)
+        expect(out.string).to include('From:')
+        expect(out.string).not_to include("mb-sound's help")
+      end
+
+      it 'lists the rows of a page that name other pages, for the page pane' do
+        drums = text(MB::Sound.help(:drums))
+        links = MB::Sound::Help.page_links(drums).to_h
+        lines = drums.lines.map(&:chomp)
+        expect(links.values).to include(':tr808', ':euclid')
+        expect(lines[links.key(':tr808')]).to start_with('  tr808 ')
+        chooser = MB::Sound::Help.page_links(text(MB::Sound::Help.page_for_text('sampler')))
+        expect(chooser.first(2).map(&:last)).to eq(['SamplerMethods#sampler', '.sampler'])
+        expect(chooser.map(&:last)).to include('SamplerMethods#sampler') # (the Commands row: the command, not the topic)
+        # (no example code)
+        expect(MB::Sound::Help.page_links(text(MB::Sound.help(:unison))).map(&:last)).to eq(['.unison', '.swarm'].select { |n| text(MB::Sound.help(:unison)).include?("  #{n} ") })
+      end
     end
 
     # (fixes-15, the maintainer's `help Clip#ghost_chords`: the # read as
