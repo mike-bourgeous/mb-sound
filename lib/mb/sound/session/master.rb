@@ -144,16 +144,31 @@ module MB
         #     session.master(:streaming) { |mix| mix.reverb(:hall, wet: -14.db) }
         #     session.master # bypass
         #
+        # An effect rack instead of a preset (+preset+: a Rack, its name, or
+        # a library effect; see MasterRack) runs the mix through the rack:
+        #     session.master(:glue)
+        #     session.master(arack { |sig| sig.hp1(30).softclip })
+        #
+        # The chain's knobs join the Session (rack knobs as :"glue/cut"; see
+        # Knobs#adopt_knobs), so `turn` reaches them.
+        #
         # The change goes through the change queue (see Changes), so several
         # master changes can wait for different times.
         def master(preset = nil, at: nil, on: nil, in: nil, fade: nil, start_time: nil, description: nil, **options, &block)
           raise IOError, 'Session is closed' if @closed
           point = LaunchPoint.of(binding) or return nil
+          if (effect = MasterRack.effect(preset, self))
+            raise ArgumentError, "master #{MasterRack.label(effect)} takes no block (the rack is the chain)" if block
+            raise ArgumentError, "master #{MasterRack.label(effect)} takes no options (#{options.keys.map(&:inspect).join(', ')} go with a mastering preset)" unless options.empty?
+            block = MasterRack.block(effect)
+            preset = nil
+          end
           raise ArgumentError, "master options #{options.keys.map(&:inspect).join(', ')} go with a mastering preset (master :club, ...)" if preset.nil? && !options.empty?
           preset = Mastering.from_preset(preset, **options) if preset
           preset = mastering_override_for(preset, block)
 
           chain = build_master(block, description: description, preset: preset)
+          adopt_knobs(chain.nodes) unless chain.bypass? # (rack knobs and documents' knobs join the Session, as a player's do)
           chain.mode, chain.fade = master_mode(fade)
           @master_block = block
           @master_preset = preset
@@ -285,6 +300,7 @@ module MB
         def restore_master_change(_subject, original, time)
           state = original.before
           chain = state.is_a?(Undo::MasterState) ? build_master(state.block, description: state.description, preset: state.preset) : nil
+          adopt_knobs(chain.nodes) if chain && !chain.bypass? # (as #master does)
           change(:restore, :master, time, data: { description: state&.description }, undoes: original.seq, graph: chain&.chain_graph) { |t|
             if chain.nil?
               st = original.before
@@ -381,7 +397,13 @@ module MB
           chain.timeline_nodes = chain.nodes.uniq.flat_map { |n| [n, *n.graph] }.grep(Sequence::TimelineNode).uniq
           bind_bus_taps(chain.nodes, :master) if label == 'master' # readers of buses and players (see Buses)
           chain.description = description || shorten(
-            preset && block.nil? ? "#{label}: #{preset.call_ruby}" : "#{label}: #{[*(preset && preset.call_ruby), *chain.nodes.uniq.map { |n| MB::Sound.send(:playback_info, n) }.uniq].join(', ')}"
+            if block.is_a?(MasterRack::Block)
+              "#{label}: #{[*(preset && preset.call_ruby), block.label].join(', ')}"
+            elsif preset && block.nil?
+              "#{label}: #{preset.call_ruby}"
+            else
+              "#{label}: #{[*(preset && preset.call_ruby), *chain.nodes.uniq.map { |n| MB::Sound.send(:playback_info, n) }.uniq].join(', ')}"
+            end
           )
           chain
         end

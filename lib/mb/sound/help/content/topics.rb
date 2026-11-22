@@ -1397,6 +1397,16 @@ module MB
         to full scale (a test tone straight to the sound card): `master {
         it }` and `master_gain 0.db`, with the monitor trim at 0 dB (it
         only turns down; raise the system volume for more).
+
+        The master chain keeps as an effect rack: `master.save_rack :glue`
+        writes the chain `master` shows as a rack document (a preset at its
+        end as `.master(:club)`; knobs it reads become rack knobs at their
+        current values, `:"glue/cut"`) and defines rack `:glue`;
+        `master.save_rack! :glue` replaces it.  `master :glue`, `master
+        rack(:glue)`, or `master arack { |sig| ... }` plays a rack as the
+        chain, and `fx :drums, :glue` puts it on a track.  A preset's name
+        (`:club`) always plays the preset, so racks can't be saved under
+        one.
       TEXT
       commands :masters, :master, :render
       dsl :master, :ride
@@ -1520,6 +1530,9 @@ module MB
         back, `preset :dub, sig: mic` plays it on an input (try the library
         rack `preset :dub_echo`); a saved rack that differs from the
         session's asks, or takes `racks: :session`, `:saved`, or `:rename`.
+        Effect racks play on the master (`master :dub`, `master
+        arack { |sig| ... }`) and on tracks (`fx :keys, :dub`), and
+        `master.save_rack :glue` keeps the master chain as one.
       TEXT
       commands :rack, :racks, :mrack, :irack, :arack, :lrack, :modrack
       note :racks
@@ -1764,6 +1777,8 @@ module MB
         graph document (or the whole set) and never replaces one (`save!`
         does; `bump: true` saves `:name_v2`; `tags:` and `about:` describe
         it for `find`), `preset` loads one with new inputs and params.
+        `master.save_rack :glue` saves the master chain as a rack document
+        (`master :glue` or `fx :drums, :glue` plays it again).
 
         mb-sound comes with presets too (`presets`
         lists them): drum & bass, jungle, ambient, and funk instruments,

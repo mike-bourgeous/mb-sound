@@ -1,16 +1,18 @@
 # Racks, typed ports, and the inspection protocol
 
 <!-- summary -->
-A `MB::Sound::Rack` (`lib/mb/sound/rack.rb`, console `RackMethods`) is a frozen, Proc-like reusable graph with typed ports (`:notes`, `:audio`, `:control`): `mrack`, `irack`, `arack`, `lrack`, `modrack`, `rack(name, in:, out:, **ports)`; apply with `src.then(&r)`, `r.(src)`, `stream.through(r)`.
+A `MB::Sound::Rack` (`rack.rb`, console `RackMethods`) is a frozen, Proc-like graph with typed ports (`:notes`, `:audio`, `:control`): `mrack`, `irack`, `arack`, `lrack`, `modrack`, `rack(name, in:, out:)`; apply with `src.then(&r)`, `r.(src)`, `stream.through(r)`.
 Named racks join `Session::Names`; `knob :space, 0.3` in a rack block is a rack knob (`:"dub/space"`, per player once two instances play).
-Slots (R3): `sig.slot(:color) { }` / `midi.slot(:keys) { }` are swappable holes; `swap :"dub/color", arack { }, fade:` hands over on an exact frame like master chains (`Session::Handover`; instruments keep held notes); named racks made with `slot: true` swap their instances when redefined.
-Rack documents (`save :dub, rack(:dub)`) and graph documents reload bit for bit; every Traversable answers `port_info`, `params`, and frozen `param_info`/`param_snapshot`.
+Slots (R3): `sig.slot(:color) { }` / `midi.slot(:keys) { }` are swappable holes; `swap :"dub/color", arack { }, fade:` hands over on an exact frame like master chains (`Session::Handover`); named racks made with `slot: true` swap their instances when redefined.
+Rack and graph documents reload bit for bit; Traversables answer `port_info`, `params`, frozen `param_info`/`param_snapshot`.
+Effect racks play on the master (`master :dub`) and on tracks (`fx :keys, :dub`).
 <!-- /summary -->
 
 ## Quick reference
 
 - `mrack`, `irack`, `arack`, `lrack`/`amrack`, `modrack`, `rack(name, in:, out:, **ports)`; apply with `src.then(&r)`, `r.(src)`, `stream.through(r)`; `knob :space, 0.3` inside a block makes a rack knob.
 - `save :dub, rack(:dub)` writes a rack document; code `lib/mb/sound/rack.rb`; spec `spec/lib/mb/sound/rack_spec.rb`; demo `bin/songs/rack_demo.rb`; help `help :racks`.
+- Effect racks on the master and tracks: `master :dub`, `master arack { |sig| ... }`, `fx :keys, :dub`; `master.save_rack :glue` (`Session::MasterRack`, master_effects.md); stand-in builds: `rack.build_on_stand_ins(channels: 2, knobs: { space: 0.6 })`, spec `spec/lib/mb/sound/rack_stand_ins_spec.rb`.
 - Slots (R3): `sig.slot(:color) { |s| s.softclip }`, `swap :"dub/color", arack { |s| s.diode(800) }, on: :bar, fade: 1.n8` (`fade: 0` cuts, `ring: 4.bars` lets an instrument's old voices ring past their 1 s); `arack :dub, slot: true do ... end` opts a named rack into instance slots, so `swap :dub, arack { ... }` or defining it again swaps its instances (stopped ones too); code `graph_node/slot.rb`, `session/slots.rb`, `session/handover.rb`; spec `spec/lib/mb/sound/rack_slots_spec.rb`.
 
 Branch racks-r1 (2026-10-17): phase R1 of the racks proposal; branch racks-r2 (2026-10-17): phase R2, rack knobs and rack documents (sections "Rack knobs" and "Rack documents" below) (research spike `research-racks`, `research/racks/PROPOSAL.md` + `README.md` + `survey/`; the maintainer approved the design 2026-10-17: "Racks look good; go ahead").  The proposal's section 0 holds the twelve decisions; section 7 the build order (R2 rack knobs and documents, R3 slots and live swaps, R4 MIDI parity, R5-R8 crossings and pitch shifting, V visualization).  The summary block above feeds the generated index (`design/notes/README.md`, `rake docs:index`).  Update it when behavior changes.
@@ -144,6 +146,14 @@ rack(:dub).snap :wide; recall :"dub/wide", over: 1.bar, only: [:space]   # or re
 - Format 4 for every document: typed inputs (`inputs midi: :notes`; old `inputs :midi`/`:input` load unchanged as notes/audio, `Document#input_types`), optional `outputs`.  The library presets were saved again (only the graph and inputs lines changed).
 
 - Exact reloads (round 3, maintainer 2026-10-17): each application builds under its own seed (`Rack#call` draws one from the root generator, bypassing the recorder, unless `Rack#using(seed:)` gives it, and runs the block in `MB::Sound.with_seed`), and graph documents print each named rack's use as `rack(:dub).using(seed: drawn_seed(N), space: 0.7)`: the seed (drawn ones as `drawn_seed`, so `seeds: :fresh` redraws them; left out in synth lanes, whose seeds derive from the lane's, and without seeds) and the instance's rack knobs' current values where they differ from the definition's defaults (`RubyWriter#using_args`; a rack knob that joined a session knob reads it through `Knob#joined`; shared and following rack knobs belong to their session knobs and aren't saved).  `using` rack knob values start the instance's knobs there (`Knob.new(initial:)`, the Spec's default unchanged).  The definition itself keeps defaults and no seeds.  A turned, randomized rack (noise, drift, unison) saved and loaded into a fresh session renders bit for bit (`rack_documents_spec.rb`).  Instances without a player (`preset :dub, sig: mic`, graphs loaded or built outside `bg`) are never pruned: their knobs live and die with their graph (maintainer: fine as is).
+
+## Stand-ins with channels (master-rack-1, 2026-11-22)
+
+`Rack#build_on_stand_ins` builds an audio main input on one silent node as before; when that build raises (`sig.width(1.3)`, `sig.right`, `l, r = sig`), it builds again on a two-channel bundle (raising the one-channel error if that fails too), so racks needing a stereo input save, reload, re-save to the same text, draw, and list (before, `save` raised "width needs a multichannel node").  `build_on_stand_ins(channels: n)` builds on n channels directly (the master chain's capture, master_effects.md), and `knobs:` starts the rack knobs at given values, which the document's knob lines then print; `GraphIO.dump(rack, stand_ins: { channels:, knobs: })` passes both to `RackWriter`.  A multichannel stand-in's channels are noted as `bundle[i]` (`Recipe.note_input_channels`), so they print as `sig[0]`/`sig[1]`; without it a recorded `[sig.left, ...].channels` sent the writer into endless recursion (a channel noted as an element of the result bundle while it was printed).  Still open: a body whose meaning depends on the channel count but works on one channel (`sig.mono`, `sig.stereo`) prints for the stand-in it was built on, so a rack using them saved from the one-channel default prints without the call (the capture builds on the Session's channels, so it keeps them; a re-save of such a captured rack goes back to one channel and drops `.mono`).
+
+## Effect racks on the master and as inserts (master-rack-1, 2026-11-22)
+
+`master` takes an effect rack (`master :dub`, `master rack(:dub)`, `master arack { |sig| ... }`, a library effect entry; a mastering preset's name plays the preset) and plays it as the chain (`Session::MasterRack::Block`); the chain's rack knobs join the Session (`:"dub/space"`).  Track inserts take effect Racks (`fx :keys, rack(:dub)`, `fx :keys, :dub`, which found session racks already through the :session shelf's entries); set documents save a named one by its name.  Details in master_effects.md, "The chain as an effect rack".
 
 ## Inspection data (R2)
 
