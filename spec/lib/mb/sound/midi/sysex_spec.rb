@@ -3,7 +3,7 @@
 RSpec.describe(MB::Sound::MIDI::SysEx, :aggregate_failures) do
   let(:sq80) { MB::Sound::SQ80 }
   let(:program) { sq80::Program.init('REESE ') }
-  let(:single) { sq80::SysEx.dump([program], channel: 2).pack('C*') }
+  let(:single) { sq80::SysEx.dump([program], channel: 3).pack('C*') }
   let(:bank) { sq80::SysEx.dump(Array.new(40) { |i| sq80::Program.init(format('P%02d', i)) }).pack('C*') }
   let(:korg) { [0xF0, 0x42, 0x30, 0x68, 0x01, 0x02, 0xF7].pack('C*') }
 
@@ -166,11 +166,14 @@ RSpec.describe(MB::Sound::MIDI::SysEx, :aggregate_failures) do
     end
   end
 
-  describe 'SQ80::SysEx.request' do
-    it 'makes dump requests on 1-based channels and refuses channel 0' do
+  describe 'SQ80::SysEx channels' do
+    it 'makes dump requests and dumps on 1-based channels and refuses channel 0' do
       expect(sq80::SysEx.request).to eq([0xF0, 0x0F, 0x02, 0x00, 0x09, 0xF7])
       expect(sq80::SysEx.request(:all, channel: 3)).to eq([0xF0, 0x0F, 0x02, 0x02, 0x0A, 0xF7])
       expect { sq80::SysEx.request(:program, channel: 0) }.to raise_error(ArgumentError, /channels count from 1/)
+      expect { sq80::SysEx.dump([program], channel: 0) }.to raise_error(ArgumentError, /channels count from 1/)
+      expect(sq80::SysEx.dump([program], channel: 16)[3]).to eq(15)
+      expect(sq80::SysEx.dump([program])[3]).to eq(0)
       expect { sq80::SysEx.request(:bank) }.to raise_error(ArgumentError, /:program and :all/)
     end
   end

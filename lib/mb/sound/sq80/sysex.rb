@@ -9,7 +9,7 @@ module MB
       # Manual MIDI implementation, checked against three open-source code
       # bases and local bank dumps).
       #
-      # Messages start F0 0F 02 0n (Ensoniq, ESQ family, MIDI channel n),
+      # Messages start F0 0F 02 0n (Ensoniq, ESQ family, MIDI channel n + 1),
       # then 01 (one program, 204 nybbles) or 02 (40 programs, 8160
       # nybbles), then F7.  Each 102-byte program travels as nybbles, low
       # first.
@@ -82,10 +82,10 @@ module MB
 
         # The SysEx bytes (an Array) of +programs+: one all-program message
         # for exactly 40 Programs, else one single-program message each, on
-        # MIDI +channel+ (0..15).
-        def dump(programs, channel: 0)
+        # MIDI +channel+ (1..16, counted from 1; MIDI::Channel).
+        def dump(programs, channel: 1)
           programs = Array(programs)
-          head = [0xF0, ENSONIQ, FAMILY, channel & 0x0F]
+          head = [0xF0, ENSONIQ, FAMILY, MIDI::Channel.of(channel)]
           nyb = ->(ps) { ps.flat_map(&:to_bytes).flat_map { |b| [b & 0x0F, b >> 4] } }
           if programs.length == BANK_PROGRAMS
             head + [ALL_PROGRAMS] + nyb.(programs) + [0xF7]
@@ -95,7 +95,7 @@ module MB
         end
 
         # Writes +programs+ to +path+ (see .dump).
-        def write(path, programs, channel: 0)
+        def write(path, programs, channel: 1)
           File.binwrite(path, dump(programs, channel: channel).pack('C*'))
         end
 
@@ -110,9 +110,7 @@ module MB
         # hardware.
         def request(what = :program, channel: 1)
           type = REQUESTS[what] or raise ArgumentError, "SQ-80 dump requests are #{REQUESTS.keys.map(&:inspect).join(' and ')} (got #{what.inspect})"
-          raise ArgumentError, "MIDI channels count from 1 (1..16; got #{channel.inspect})" unless channel.is_a?(Integer) && (1..16).cover?(channel)
-
-          [0xF0, ENSONIQ, FAMILY, channel - 1, type, 0xF7]
+          [0xF0, ENSONIQ, FAMILY, MIDI::Channel.of(channel), type, 0xF7]
         end
 
         # Names of the other ESQ message types, for descriptions.
@@ -131,7 +129,7 @@ module MB
           return nil unless esq?(bytes)
 
           family = 'Ensoniq ESQ-1/SQ-80'
-          ch = "channel #{(bytes[3] & 0x0F) + 1}"
+          ch = "channel #{MIDI::Channel.show(bytes[3] & 0x0F)}"
           case bytes[4]
           when ONE_PROGRAM, ALL_PROGRAMS
             programs = begin

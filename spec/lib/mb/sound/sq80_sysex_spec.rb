@@ -29,7 +29,7 @@ RSpec.describe(MB::Sound::SQ80::SysEx) do
 
   it 'writes and reads a 40-program bank (8166 bytes) and single programs (210 bytes)' do
     bank = Array.new(40) { |i| i.even? ? busy_program(format('P%02d   ', i)) : program.init(format('INIT%02d', i)) }
-    bytes = described_class.dump(bank, channel: 3)
+    bytes = described_class.dump(bank, channel: 4)
     expect(bytes.length).to eq(8166)
     expect(bytes.first(5)).to eq([0xF0, 0x0F, 0x02, 0x03, 0x02])
     expect(bytes.last).to eq(0xF7)
