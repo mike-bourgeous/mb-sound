@@ -321,6 +321,21 @@ RSpec.describe('session fuzzing') do
         'at_bar(1, beat: 4) { level :t2, 0, on: :bar }',
       ], 2,
     ],
+    # (fix-knob-reload, batch 42's soak seed 789008: a set document
+    # declaring the song's knob :cut again, loaded in a scheduled block,
+    # set the knob's new value on the next buffer's first frame instead
+    # of the block's own: 0.042 apart at 367 and 800 frames from bar 3
+    # beat 2)
+    'a set document redeclaring a knob, loaded mid-song (seed 789008)' => [
+      :buffer_size, ['bpm 126', 'knob :busy, 0.5'], [
+        'knob :cut, 1200.0, range: 200.0..4000.0',
+        'track(:t1, q: 1/4r) { |clip| clip.synth(voices: 2) { |v| v.hz.square * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'track(:t2, q: 1/2r) { |clip| clip.synth(voices: 1) { |v| v.hz.sine * v.amp_env(0.002, 0.05, 0.6, 0.02) }.filter(:lowpass, cutoff: knob(:cut), quality: 2) * 0.3 }',
+        'scene :s1, t1: melody(scale(:minor).weights, 8, rest: knob(:busy), vary: true, seed: 2).loop, t2: seq(A3, R, C4.n4, E4).n16.loop, fade: 1/4r',
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(3, beat: 2) { GraphIO.load(%(graph #{GraphIO::FORMAT}, name: "cut", kind: :set\nknob :cut, (100.hz..5000.hz).at(600.hz)\n), session: Session.current) }',
+      ], 2,
+    ],
     # (fuzz-fixes-2: after the seek back to bar 2, the flow's pass there
     # launched :s1 now, and the stop of :t1's cue that the scene's start
     # of :t1 makes (Session::Cue#end_cue_at_start) cancelled the cue
