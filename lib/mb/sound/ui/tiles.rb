@@ -1527,6 +1527,9 @@ module MB
           flash("clip #{@keyboard.clips.length}: ui.keyboard.clip (and in the REPL line: name it, e.g. riff = ...)", :ok)
         end
 
+        # What entering KEYS flashes while nothing is armed.
+        KEYS_UNARMED = 'KEYS: nothing armed, so the keys play the default patch; arm :name plays a track (arm :lead)'
+
         def enter_keys
           ensure_keyboard_pane
           @keyboard.active = true
@@ -1541,7 +1544,11 @@ module MB
           Thread.new do
             Thread.current.name = 'MB::Sound::UI keys'
             take_over_inspected
-            @keyboard.out.ensure_monitor if @keyboard.out.respond_to?(:ensure_monitor)
+            # (nothing armed: the keys play the default patch; ux-friction-3,
+            # the maintainer: "I keep forgetting that \"arm\" is a thing")
+            if @keyboard.out.respond_to?(:ensure_monitor) && @keyboard.out.ensure_monitor
+              flash(KEYS_UNARMED, :key)
+            end
           rescue StandardError => e
             flash("keyboard: #{e.class}: #{e.message}", :bad)
           end
