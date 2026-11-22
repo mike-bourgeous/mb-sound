@@ -983,7 +983,12 @@ module MB
         songs' and genre templates' generators are in the library:
         `L.gen` (`L.gen.koto_motif(seed: 3)`, `play L.gen.beat.techno`)
         and `L.flow` for their section chains (`help :library`);
-        `lesson :generative` puts them on tracks step by step.
+        `lesson :generative` puts them on tracks step by step.  Drum beats
+        are the family `L.gen.beat`: `rock`, `pop`, `halftime`, `funk`,
+        `house`, `dnb`, `techno` (`L.gen.rock` finds `L.gen.beat.rock`),
+        each with the knobs energy and swing on its track:
+        `track :drums, kit(:acoustic); bg :drums, L.gen.beat.rock;
+        turn :"drums/energy", 2.bars.lfo.square.with_phase(0.15).at(0.2..1)`.
       TEXT
       commands :tones, :chord, :weights, :harmony, :progression, :generate, :strikes, :dice, :melody, :motifs, :beats, :rhythm
       note :generative
@@ -1896,7 +1901,9 @@ module MB
         density, mutate, ...) are the track's knobs: `turn :"drums/energy",
         0.9, over: 4.bars`, read once a bar (scenes, MIDI learn, and the
         inspector's notes row too); `L.gen.beat.techno(energy: 0.8)` keeps
-        its number.
+        its number.  `L.gen.beat` is a family (the drum beats): its entries
+        print with it, and under `L.gen` alone their names narrow like
+        tags (`L.gen.rock` is `L.gen.beat.rock`).
         `L.flow.techno_chain(seed: 4)` is a genre template's section chain;
         `flow L.flow.techno_chain` plays it over the session's scenes, and
         the templates read theirs from here.  Saved graphs print them back

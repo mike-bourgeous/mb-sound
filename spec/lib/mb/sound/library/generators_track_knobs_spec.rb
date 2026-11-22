@@ -42,6 +42,7 @@ RSpec.describe MB::Sound::Library::Generators, 'track knobs', :aggregate_failure
   GEN_KNOB_ENTRIES = {
     ambient_motif: %i[density mutate], ambient_figure: %i[density mutate], techno: %i[energy],
     acid_rhythm: %i[energy], phrygian_motif: %i[density mutate], blur_cloud: %i[chance],
+    rock: %i[energy swing], pop: %i[energy swing], halftime: %i[energy swing], funk: %i[energy swing], house: %i[energy swing], dnb: %i[energy swing],
   }.freeze
 
   it 'are the ranged params that steer, named per track, apart from the instruments\' knobs' do
