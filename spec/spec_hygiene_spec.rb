@@ -31,17 +31,26 @@ RSpec.describe('spec hygiene') do
 
   # (fixes-17: perf_spec's `wait_until { acks >= 3 }` ran out its 5 s on
   # every run, silently, and under load the next wait did too, leaving a
-  # nil that failed far from the cause.)  The files with a wait_until of
-  # their own (device and JACK specs) are left to a later round.
+  # nil that failed far from the cause.)
   it 'has no bare wait_until statement (a timeout that goes unnoticed)' do
     hits = files.flat_map { |f|
-      text = File.read(File.join(root, f))
-      next [] if text.match?(/^\s*def wait_until\b/)
+      next [] if f == 'spec/support/ui_helpers.rb' # (its wait helpers return the wait's value to their callers)
 
-      text.each_line.with_index(1).filter_map { |line, n| "#{f}:#{n}" if line.match?(/^\s*wait_until\s*(\(|\{|do\b)/) }
+      File.read(File.join(root, f)).each_line.with_index(1).filter_map { |line, n| "#{f}:#{n}" if line.match?(/^\s*wait_until\s*(\(|\{|do\b)/) }
     }
     expect(hits).to eq([]), "#{hits.join("\n")}\na wait whose result nobody reads times out silently; " \
-                            'write wait_until!(what) { } (UIHelpers: raises on timeout) or expect(wait_until { }).to eq(true), why'
+                            'write wait_until!(what) { } (WaitHelpers: raises on timeout) or expect(wait_until { }).to eq(true), why'
+  end
+
+  # (fixes-18: seven device and JACK spec files had a wait_until of their
+  # own, each returning silently on timeout and out of the rule above.)
+  it 'has no wait_until of its own outside WaitHelpers' do
+    hits = files.flat_map { |f|
+      next [] if f == 'spec/support/wait_helpers.rb'
+
+      File.read(File.join(root, f)).each_line.with_index(1).filter_map { |line, n| "#{f}:#{n}" if line.match?(/^\s*def\s+(self\.)?wait_until!?\b/) }
+    }
+    expect(hits).to eq([]), "#{hits.join("\n")}\na copy of wait_until goes around the rule for bare waits; use WaitHelpers' wait_until!(what, timeout:, poll:) { }"
   end
 
   # A constant assigned in a spec file's describe block is a top-level

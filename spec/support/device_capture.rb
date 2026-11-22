@@ -53,6 +53,29 @@ module DeviceCapture
     end
   end
 
+  # Queues +frames+ frames (default the queue limit) of silence on each of
+  # +channels+ input channels ahead of audio whose frames must play back to
+  # back, returning the frames queued.  The null device pulls its whole
+  # buffer (#periods times #period frames: 1440 at 48 kHz) within
+  # microseconds of Playback.new returning, then one period per period
+  # (fixes-18, measured), and a pull finding less than its frames queued
+  # plays what there is and pads the rest with silence (a counted underrun).
+  # So a first write landing inside that start burst, or a pull between two
+  # writes while less than a period is queued, puts a gap into the audio:
+  # fast_audio_spec's one-frame first write did in 11 of 60 runs alone.  The
+  # silence is the device's leading silence to #captured, which starts at
+  # the first nonzero sample; later writes wait for room like any writer's.
+  def lead_in(pb, channels, frames = pb.queue_limit)
+    pb.write([Numo::SFloat.zeros(frames)] * channels)
+  end
+
+  # Expects the one underrun of audio that ran out at its end, and none
+  # before (a gap while it played: a late writer, or a write racing the
+  # device's start, see #lead_in).
+  def expect_one_underrun(pb)
+    expect(pb.stats[:underruns]).to eq(1), "expected only the underrun at the end of the audio; stats #{pb.stats}"
+  end
+
   # Waits until the capture of +pb+ holds every frame the device had played
   # when called (or is full): the device thread counts frames played before
   # it copies them into the capture.

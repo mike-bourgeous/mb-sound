@@ -18,11 +18,6 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
     MB::Sound::DeviceOutput.new(backends: [:null], **kwargs).tap { |o| @outputs << o }
   end
 
-  def wait_until(timeout: 2)
-    deadline = MB::U.clock_now + timeout
-    sleep 0.005 until yield || MB::U.clock_now > deadline
-  end
-
   # Drops the silence the null device plays before the first write.
   def trim_start(channels)
     start = (0...channels[0].length).find { |i| channels.any? { |c| c[i] != 0 } }
@@ -121,10 +116,15 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
 
       [0.2, 0.4, 0.4].each do |wait|
         grown = o.queue_limit
-        t = MB::U.clock_now
+        # (the wait counts from the output's own last change, the grow:
+        # timed from here instead, the expectations in between took longer
+        # than the wait under Valgrind, so the shrink came at the first
+        # write, 0.0007 s later, fixes-18)
+        grew_at = o.adapt_state[:last_change]
         write_until.() { o.queue_limit < grown }
         expect(o.queue_limit).to be < grown
-        expect(MB::U.clock_now - t).to be >= o.shrink_wait * 0.9
+        expect(o.adapt_state[:last_adapt]).to eq(:shrink)
+        expect(o.adapt_state[:last_change] - grew_at).to be >= o.shrink_wait
         drop_out(o, pause: 0.08) # right after the shrink
         expect(o.shrink_wait).to eq(wait)
         expect(notes.last).to match(/\AAudio dropout: raising the output queue to \d+ ms(?: \(#{wait} s without dropouts before lowering it again\))?\z/)
@@ -246,7 +246,7 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
     r = Numo::SFloat.new(4000).rand(-1, 1)
     5.times { |i| o.write([l[(i * 800)...((i + 1) * 800)], r[(i * 800)...((i + 1) * 800)]]) }
 
-    wait_until { o.stats[:queued] == 0 }
+    wait_until!(poll: 0.005) { o.stats[:queued] == 0 }
     cl, cr = trim_start(o.captured)
     expect(cl[0...4000]).to eq(l)
     expect(cr[0...4000]).to eq(r)
@@ -261,7 +261,7 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
     expect(o.device_channels).to eq(4)
     chans = Array.new(4) { Numo::SFloat.new(800).rand(-1, 1) }
     o.write(chans)
-    wait_until { o.stats[:queued] == 0 }
+    wait_until!(poll: 0.005) { o.stats[:queued] == 0 }
     got = trim_start(o.captured)
     expect(got.length).to eq(4)
     4.times { |c| expect(got[c][0...800]).to eq(chans[c]) }
@@ -275,7 +275,7 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
 
     data = Numo::SFloat.linspace(0.1, 0.5, 100)
     o.write([data])
-    wait_until { o.stats[:queued] == 0 }
+    wait_until!(poll: 0.005) { o.stats[:queued] == 0 }
     l, r = trim_start(o.captured)
     expect(l[0...100]).to eq(data)
     expect(r[0...100]).to eq(data)
@@ -366,7 +366,7 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
     session.add(110.hz.saw.at(0.5), name: :saw)
 
     rendered = Array.new(20) { session.process_buffer.map(&:dup) }
-    wait_until { o.stats[:queued] == 0 }
+    wait_until!(poll: 0.005) { o.stats[:queued] == 0 }
 
     # Gaps from a slow writer (e.g. under rake memcheck) break the exact
     # comparison; one underrun is the end of the audio
@@ -519,13 +519,13 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
       o = device_output(channels: 1, capture: 24000, adaptive: false, conceal: :repeat)
       t = Numo::DFloat.new(4800).seq(1)
       o.write([Numo::SFloat.cast(Numo::NMath.sin(t * 0.03) * 0.5)])
-      wait_until { o.stats[:concealed] >= 2400 }
+      wait_until!(poll: 0.005) { o.stats[:concealed] >= 2400 }
       expect(o.stats[:concealed_gaps]).to eq(1)
       expect(o.underruns).to eq(1)
 
       o.write([Numo::SFloat.zeros(10) + 0.1])
       o.end_stream
-      wait_until { o.stats[:queued] == 0 }
+      wait_until!(poll: 0.005) { o.stats[:queued] == 0 }
       gaps = o.stats[:concealed_gaps]
       sleep 0.05
       expect(o.stats[:concealed_gaps]).to eq(gaps)

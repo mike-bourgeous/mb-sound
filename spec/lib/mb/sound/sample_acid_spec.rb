@@ -150,6 +150,16 @@ RSpec.describe('ACID loop info: stretch markers and one-shots', :aggregate_failu
       expect([short.one_shot, short.declared_one_shot, short.sources[:one_shot]]).to eq([true, nil, :length])
     end
 
+    # (the folders LoopInfo reads above a spec's file are the spec temp
+    # folders: their random parts once held letters that spelled a one-shot
+    # word about one run in thirty; SpecTmp names them with digits only)
+    it 'reads no loop or one-shot word in the spec temp folders' do
+      folders = info.names_of(tmp_path('x.wav')).drop(1)
+      expect(folders.length).to be >= 2
+      expect(folders.filter_map { |n| info.name_kind(n) }).to eq([])
+      expect(File.basename(File.dirname(tmp_path('x.wav')))).to match(/\Aex-[0-9-]+\z/)
+    end
+
     it 'leaves out markers made for other audio, and a marker on the last frame' do
       # a copy at half the rate that kept its chunks: markers past the end
       stale = info.read(write_wav('stale.wav', loop_audio[0...22050], acid: { tempo: 120.0, beats: 1 }, cues: [50], strc: [auto(0), 0, 11025, 22050, 33075]))

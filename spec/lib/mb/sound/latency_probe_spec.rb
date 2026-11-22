@@ -11,16 +11,10 @@ RSpec.describe(MB::Sound::LatencyProbe, :aggregate_failures) do
     p
   end
 
-  def wait_until(timeout: 5)
-    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
-    sleep 0.005 until yield || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
-    yield
-  end
-
   # Waits until the probe has filed a row for a second that started after
   # this call (rows are filed 3 seconds after their second).
   def wait_for_rows(probe, n = 1, timeout: 15)
-    wait_until(timeout: timeout) { probe.rows.length >= n }
+    wait_until!(timeout: timeout, poll: 0.005) { probe.rows.length >= n }
   end
 
   after do
@@ -158,9 +152,9 @@ RSpec.describe(MB::Sound::LatencyProbe, :aggregate_failures) do
 
   it 'blames a GVL hold on the process, not the system' do
     probe = start_probe(threshold: 0.02)
-    wait_until(timeout: 10) { probe.stats[:calibrated] }
+    wait_until!(timeout: 10, poll: 0.005) { probe.stats[:calibrated] }
     MB::Sound::FastLatency.spin(0.3)
-    wait_until(timeout: 5) { probe.snapshot[:ruby_events] > 0 }
+    wait_until!(timeout: 5, poll: 0.005) { probe.snapshot[:ruby_events] > 0 }
     probe.stop
 
     worst_ruby = probe.ruby_events.map { |e| e[:late_ns] }.max

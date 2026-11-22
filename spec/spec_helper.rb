@@ -92,6 +92,7 @@ ENV['MB_SOUND_BENCH_DIR'] = File.join(SpecTmp::ROOT, 'listening')
 require_relative 'support/spec_buffers'
 require_relative 'support/library_files'
 require_relative 'support/slow_tier'
+require_relative 'support/wait_helpers'
 require_relative 'support/buffer_size_helpers'
 require_relative 'support/smoke_runs'
 require_relative 'support/warning_guard_hooks' # after spec_tmp, before subprocess_coverage
@@ -177,6 +178,7 @@ RSpec.configure do |config|
   # The slow tier (see SPEC_SLOW): `SLOW=1 bundle exec rspec` or `rake spec:full`
   config.filter_run_excluding slow: true unless SPEC_SLOW
   config.include SlowTier # slow_tier(sizes): sweeps' extra sizes only under SLOW=1
+  config.include WaitHelpers # wait_until!(what) { }: a wait that fails on timeout
 
   # Under Valgrind, leave out examples whose C paths other examples cover
   # (see SPEC_MEMCHECK).

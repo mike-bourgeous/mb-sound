@@ -7,11 +7,6 @@ RSpec.describe('MB::Sound::FastAudio::Playback dropout trace', :aggregate_failur
     MB::Sound::FastAudio::Playback.new([:null], -1, 'mb-sound-spec', 1, 2, rate, 0, 0, queue, 0, 2, false, 0).tap { |p| @playbacks << p }
   end
 
-  def wait_until(timeout: 3)
-    deadline = MB::U.clock_now + timeout
-    sleep 0.002 until yield || MB::U.clock_now > deadline
-  end
-
   before { @playbacks = [] }
   after { @playbacks.each(&:close) }
 
@@ -36,10 +31,10 @@ RSpec.describe('MB::Sound::FastAudio::Playback dropout trace', :aggregate_failur
     chunk = [Numo::SFloat.new(512).fill(0.1)]
     8.times { pb.write(chunk) } # (fills the 2048-frame queue, then waits for room)
     before = pb.stats[:underruns]
-    wait_until { pb.stats[:underruns] > before } # runs dry
+    wait_until!(poll: 0.002) { pb.stats[:underruns] > before } # runs dry
     sleep 0.02 # (a few dry pulls)
     pb.write(chunk) # ends the gap
-    wait_until { pb.trace_stats[:gap_open] == false && pb.stats[:queued] < 400 }
+    wait_until!(poll: 0.002) { pb.trace_stats[:gap_open] == false && pb.stats[:queued] < 400 }
     writes, gaps = pb.trace_drain
 
     expect(writes.length).to eq(9)

@@ -244,7 +244,7 @@ module MB
           MORPHS[clip] = m
           # (prints as the morph it was given: GIVEN, set documents)
           GraphNode::Recipe.share_record(value, clip)
-          KNOBS[clip] = shared.freeze
+          KNOBS[clip] = weak_knobs(shared)
           GIVEN[clip] = value
           cache[key] = [nil, shared, clip]
           clip

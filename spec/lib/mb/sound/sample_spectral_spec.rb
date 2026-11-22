@@ -176,8 +176,10 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
     expect(short.stretch(8, mode: :paul).mips).to be_nil
     expect(short.stretch(64, mode: :paul).mips).to eq(:octave)
     expect(short.stretch(64).mips).to eq(:octave)
-    expect(short.read_as(mips: :half_octave).stretch(64, mode: :paul).mips).to eq(:half_octave)
-    expect(short.read_as(:drop).stretch(64, mode: :paul).mips).to eq(false)
+    # (one read setting for every mode, Sample#stretch_read: mode: :none
+    # takes no time, where a 32 s :paul or cyclic stretch took 0.3-0.4 s)
+    expect(short.read_as(mips: :half_octave).stretch(64, mode: :none).mips).to eq(:half_octave)
+    expect(short.read_as(:drop).stretch(64, mode: :none).mips).to eq(false)
   end
 
   describe 'loops (wrap:)' do
@@ -716,9 +718,13 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
       acf[(lag - 2)..(lag + 2)].max / acf[0]
     end
 
-    let(:hiss) { Numo::NArray.srand(11); Numo::DFloat.new(96000).rand(-0.5, 0.5) }
+    # (one second: the 8x stretches of two seconds took most of the file's
+    # time, and every value checked here kept its margin at one, fixes-18:
+    # e.g. the plain stretch's self-similarity 0.134 at 2 s, 0.136 at 1 s,
+    # the loose one's 0.0041 and 0.0052, against 0.12 and 0.03)
+    let(:hiss) { Numo::NArray.srand(11); Numo::DFloat.new(96000).rand(-0.5, 0.5)[0...48000] }
     let(:tones) {
-      i = Numo::DFloat.new(96000).seq / 48000
+      i = Numo::DFloat.new(48000).seq / 48000
       (Numo::NMath.sin(i * (2 * Math::PI * 220)) + Numo::NMath.sin(i * (2 * Math::PI * 277.2)) + Numo::NMath.sin(i * (2 * Math::PI * 329.6))) * 0.2
     }
 
