@@ -165,23 +165,26 @@ RSpec.describe('MB::Sound::FastAudio::JackMIDIOutput timed messages', :aggregate
     p = playback
     expect(out.write_after(p, 100, 96, 0x90, 60, 100)).to eq(true)
     expect(out.write_after(p, 300, 0, 0x80, 60, 0)).to eq(true)
+    expect(out.write_after(p, 460, -50, 0x90, 61, 100)).to eq(true) # (early: placed once queued)
     c0 = p.jack_clock[:frame_time]
     deadline = MB::U.clock_now + 2
     sleep 0.002 until delta(c0, p.jack_clock[:frame_time]) >= 1024 || MB::U.clock_now > deadline
-    expect(out.stats).to include(timed_waiting: 2, timed_sent: 1) # (the loop_delay probe)
+    expect(out.stats).to include(timed_waiting: 3, timed_sent: 1) # (the loop_delay probe)
     expect(inp.read(false)).to eq([])
 
     audio = Numo::SFloat.zeros(512)
     audio[100] = 1
     audio[300] = 1
+    audio[460] = 1
     p.write([audio])
-    got = read_until(inp, 2)
-    expect(got.map { |_, b| b.bytes }).to eq([[0x90, 60, 100], [0x80, 60, 0]])
+    got = read_until(inp, 3)
+    expect(got.map { |_, b| b.bytes }).to eq([[0x90, 60, 100], [0x80, 60, 0], [0x90, 61, 100]])
     played = p.captured.unpack('e*')
     clicks = (0...played.length).select { |k| played[k] > 0.5 }
-    expect(clicks.length).to eq(2)
+    expect(clicks.length).to eq(3)
     expect(delta(left(p, clicks[0]), got[0][0]) - lag).to eq(96)
     expect(delta(left(p, clicks[1]), got[1][0]) - lag).to eq(0)
+    expect(delta(left(p, clicks[2]), got[2][0]) - lag).to eq(-50)
     expect(out.stats).to include(timed_waiting: 0, timed_late: 0)
   end
 

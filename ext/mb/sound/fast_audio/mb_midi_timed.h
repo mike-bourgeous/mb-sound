@@ -8,9 +8,10 @@
  * of an audio output's ring plus an offset (mb_midi_timed_put_ring): the
  * message leaves +offset+ frames after that ring frame's audio.  Ring
  * records wait (in the pending array) until the consumer's conversion
- * callback can say exactly which JACK frame the ring frame leaves on (once
- * its audio is queued: before that, a cycle the ring runs short in, at the
- * start or in an underrun, would move it), then join the others.
+ * callback can say exactly which JACK frame the ring frame leaves on (when
+ * it is played, or once its audio is queued: before that, a cycle the ring
+ * runs short in, at the start or in an underrun, would move it), then join
+ * the others.
  *
  * The producer appends records to a single-producer, single-consumer ring.
  * Each process cycle the consumer moves new records into a staging array

@@ -3448,20 +3448,22 @@ static void midi_in_process(struct mb_jack_unit *unit, uint32_t nframes)
 }
 
 // JACK's thread: the JACK frame time a timed record's ring frame leaves on
-// (mb_midi_timed_convert_fn), known once its audio is queued in the ring
-// of the playback the output follows.  Playbacks run before MIDI outputs in
-// each cycle (mb_jack_unit.early), so this cycle's pull is done: a frame it
-// took left where it went in the port buffer (after a concealment landing,
-// or in a later chunk of a long period, as recorded), and a queued frame
-// leaves at the next cycle's start plus its distance from the read
-// position, since the frames before it are queued too, so no cycle can
-// run short before it.  Before its audio is queued, a frame waits: a cycle
-// running short first (the first audio not written yet, or an underrun)
-// would move it (midi-out-first-note-2: notes queued with a JACK frame
+// (mb_midi_timed_convert_fn), from the ring of the playback the output
+// follows.  Playbacks run before MIDI outputs in each cycle
+// (mb_jack_unit.early), so this cycle's pull is done, and a frame it took
+// left where it went in the port buffer (after a concealment landing, or
+// in a later chunk of a long period, as recorded).  A record with a zero
+// or positive offset waits for that pull, so it is exact whatever happens
+// before it: a cycle running short (the first audio not written yet, or
+// an underrun; midi-out-first-note-2: notes queued with a JACK frame
 // before the first audio was written sounded a period early whenever the
-// first write came after the next cycle).  Concealment holds queued frames
-// back while it lands on them after a gap, so they wait until pulled then.
-// A record whose playback closed, or that names another one, leaves now.
+// first write came after the next cycle), a concealment landing, or a
+// cycle the server skipped.  A negative offset must leave before its
+// frame is pulled: once the frame is queued it leaves at the next cycle's
+// start plus its distance from the read position (the frames before it
+// are queued too, so no cycle can run short before it; not while
+// concealment is active, since a landing can hold queued frames back).  A
+// record whose playback closed, or that names another one, leaves now.
 static int midi_ring_frame(void *ctx, const struct mb_midi_timed_record *r, uint32_t now, uint32_t nframes, uint32_t *frame)
 {
 	struct jack_midi *m = ctx;
@@ -3493,7 +3495,7 @@ static int midi_ring_frame(void *ctx, const struct mb_midi_timed_record *r, uint
 	}
 
 	size_t wp = atomic_load_explicit(&p->write_pos, memory_order_acquire);
-	if ((int32_t)(f - (uint32_t)wp) >= 0 || p->cycle_holding) {
+	if (r->offset >= 0 || (int32_t)(f - (uint32_t)wp) >= 0 || p->cycle_holding) {
 		return 0;
 	}
 	*frame = (ran ? now + nframes : now) + (uint32_t)ahead;
@@ -3971,10 +3973,11 @@ static VALUE jack_midi_write_at(VALUE self, VALUE frame, VALUE status, VALUE dat
  * Queues one short message (see #write_at) to leave +offset+ frames (at the
  * device's rate; negative for early) after the audio of the frame +ahead+
  * frames past +playback+'s write position (the next frame Playback#write
- * queues is 0) leaves for the ports.  JACK's thread places it once that
- * frame's audio is queued, from where the ring's frames actually go, so it
- * stays with its audio at any start, through underruns, and through
- * underrun concealment (until then it waits; stats[:timed_waiting]).  The
+ * queues is 0) leaves for the ports.  JACK's thread places it from where
+ * the ring's frames actually go: in the cycle that plays the frame (for a
+ * negative offset, once the frame is queued), so it stays with its audio
+ * at any start, through underruns and their concealment (until then it
+ * waits; stats[:timed_waiting]).  The
  * port then follows +playback+ (its unit, checked each cycle): messages
  * still waiting for a playback the port no longer follows, or one that
  * closed, leave at once, counted late.  Allocates nothing; for the render
