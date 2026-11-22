@@ -185,6 +185,37 @@ RSpec.describe(MB::Sound::MIDI::Destination, :aggregate_failures) do
     expect(logs[0].last[0]).to be_between(12_000, 12_000 + 480)
   end
 
+  it 'sends MIDI clock from the transport: Start, 24 ticks a quarter note, Stop at a pause, Song Position and Continue on the resume' do
+    logs = [800, 367].map { |size|
+      log = scenario(size, before: 30_000, after: 10_000, clock: true) { |s, _| s.pause_transport }
+      log # (the resume comes in a second scenario below)
+    }
+    expect(logs[1]).to eq(logs[0])
+    sys = logs[0].select { |_, b| b[0] >= 0xf0 }
+    expect(sys.first).to eq([0, [0xfa]])
+    ticks = sys.select { |_, b| b == [0xf8] }.map(&:first)
+    expect(ticks.first(4)).to eq([0, 1000, 2000, 3000]) # (120 BPM: a quarter note is 24000 frames, a tick 1000)
+    expect(ticks.last).to eq(29_000)
+    expect(sys.last).to eq([30_000, [0xfc]])
+
+    s = session_at(800)
+    d = MB::Sound.midi_out(log: true, clock: true)
+    s.arrangement.track(:k, d)
+    s.arrangement.play(:k, riff, start_time: 0)
+    run(s, 30_000, 800)
+    s.pause_transport
+    run(s, 4000, 800)
+    s.play_on
+    run(s, 4000, 800)
+    sys = d.log.select { |_, b| b[0] >= 0xf0 && b[0] != 0xf8 }
+    # Song Position counts 16ths: 30000 frames is 5 of them (6000 each)
+    expect(sys).to eq([[0, [0xfa]], [30_000, [0xfc]], [34_000, [0xf2, 5, 0]], [34_000, [0xfb]]]) # (the resume lands on the next buffer)
+    expect(d.log.select { |f, b| b == [0xf8] && f > 30_000 }.first).to eq([34_000, [0xf8]]) # (the tick at the held position, then one per 1000 frames)
+    s.remove(:k, fade: 0)
+    run(s, 1600, 800)
+    expect(d.log.last[1]).to eq([0xfc])
+  end
+
   it 'refuses effect inserts on a MIDI out track' do
     s = session_at(800)
     s.arrangement.track(:k, MB::Sound.midi_out(log: true))

@@ -14,7 +14,10 @@ module MB
       # it plays).  +port:+ instead makes a port of our own, unconnected,
       # for another program to connect to.  +cc:+ binds Session knobs to
       # the synth's controllers (`cc: { cut: 74 }`: turning :cut sends CC
-      # 74 while the track plays).
+      # 74 while the track plays).  +clock: true+ sends MIDI clock (24 per
+      # quarter note) with Start/Stop/Continue/Song Position from the
+      # transport while the track plays, so an arpeggiator or sequencer
+      # follows the session's tempo.
       #
       # Notes leave lined up with mb-sound's audio at the speakers: on JACK
       # exactly (the output queue's latency added to each message's frame),
@@ -27,8 +30,8 @@ module MB
       #     bg :kronos, seq(C3, E3, G3, B3).n8.loop
       #     track :surge, midi_out('Surge XT', channel: 2)
       #     midi_out('SQ-80').test          # a test note: which synth is it?
-      def midi_out(name = nil, channel: 1, program: nil, bank: nil, offset: 0, port: nil, cc: nil, log: false)
-        MIDI::Destination.new(name, channel: channel, program: program, bank: bank, offset: offset, port: port, cc: cc, log: log)
+      def midi_out(name = nil, channel: 1, program: nil, bank: nil, offset: 0, port: nil, cc: nil, clock: false, log: false)
+        MIDI::Destination.new(name, channel: channel, program: program, bank: bank, offset: offset, port: port, cc: cc, clock: clock, log: log)
       end
 
       # Lists the MIDI ports (MIDI::Ports::Port rows): +direction+ :out for

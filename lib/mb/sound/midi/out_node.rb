@@ -59,6 +59,10 @@ module MB
           # knob binds: [name, CC number, knob or nil, last value sent]
           @cc_binds = destination.ccs.map { |name, n| [name, n, nil, nil] }
           @cc_look = 0 # buffers until missing knobs are looked for again
+          @clock = destination.clock? # MIDI clock (see #follow_clock)
+          @clock_running = false
+          @clock_next = nil # the timeline position the next read should start at
+          @clock_tick = 0 # the next tick (96 per whole note)
         end
 
         # Silence (+count+ samples, a frozen buffer), or nil once the stream
@@ -89,6 +93,7 @@ module MB
           if session && !@live
             follow_level(session, frame, count)
             follow_ccs(session, frame, count) unless @cc_binds.empty?
+            follow_clock(session, span, frame, count) if @clock
           end
 
           i = 0
@@ -104,7 +109,7 @@ module MB
 
           @next_frame = frame + count
           @read_end = @next_frame
-          if @held_count > 0 && session && !@registered
+          if (@held_count > 0 || @clock_running) && session && !@registered
             @registered = true
             session.note_midi_out(self)
           end
@@ -136,12 +141,16 @@ module MB
           if @read_end.nil? || @read_end < span_end
             release_held(session, @read_end || span_end)
           end
-          @registered = @held_count > 0
+          @registered = @held_count > 0 || @clock_running
         end
 
         # Sends note-offs for every key this node holds, for session frame
         # +frame+.
         def release_held(session, frame)
+          if @clock_running
+            @clock_running = false
+            @destination.send_at(session, frame, 0xfc, 0, 0)
+          end
           return if @held_count == 0
           k = 0
           while k < 128
@@ -212,6 +221,46 @@ module MB
           return if cc == @level_cc
           @level_cc = cc
           transmit(session, frame + at, 0xb0, 7, cc)
+        end
+
+        # MIDI clock (Destination#clock?): 24 ticks per quarter note (one
+        # per 1/96 whole note) on the samples holding their timeline
+        # positions, Start when the track starts at the beginning, Song
+        # Position (16ths) then Continue when it starts elsewhere or after
+        # a jump or a resume, Stop on a pause, a jump (then Song Position
+        # and Continue), and when the track stops (#release_held).
+        def follow_clock(session, span, frame, count)
+          per = span.per_sample
+          pos = span.moving ? Sequence::Transport.position_at(span.pos, frame - span.frame, per) : span.pos
+          unless span.moving
+            if @clock_running
+              @clock_running = false
+              transmit(session, frame, 0xfc, 0, 0)
+            end
+            return
+          end
+
+          if !@clock_running || pos != @clock_next
+            transmit(session, frame, 0xfc, 0, 0) if @clock_running
+            spp = (pos * 16).ceil
+            if spp == 0
+              transmit(session, frame, 0xfa, 0, 0)
+            else
+              transmit(session, frame, 0xf2, spp & 0x7f, (spp >> 7) & 0x7f)
+              transmit(session, frame, 0xfb, 0, 0)
+            end
+            @clock_running = true
+            @clock_tick = spp * 6
+          end
+
+          stop = pos + count * per
+          while (t = Rational(@clock_tick, 96)) < stop
+            off = ((t - pos) / per).floor
+            off = 0 if off < 0
+            transmit(session, frame + off, 0xf8, 0, 0)
+            @clock_tick += 1
+          end
+          @clock_next = stop
         end
 
         # Knobs bound to controllers (Destination#ccs): each sends its

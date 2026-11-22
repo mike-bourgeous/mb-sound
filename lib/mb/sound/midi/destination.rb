@@ -98,6 +98,14 @@ module MB
         # 0..127), mirroring `knob :cut, ..., cc: 74` for input.
         attr_reader :ccs
 
+        # True if the destination gets MIDI clock while its track plays
+        # (`clock: true`): 24 ticks per quarter note from the transport,
+        # Start (or Song Position and Continue) when the track starts or the
+        # timeline jumps or resumes, Stop when it stops, pauses, or jumps.
+        def clock?
+          @clock
+        end
+
         # Our own port's name for +port:+, or nil.
         attr_reader :port_name
 
@@ -108,7 +116,7 @@ module MB
         attr_reader :log
 
         # See the class description.
-        def initialize(target = nil, channel: 1, program: nil, bank: nil, offset: 0, port: nil, cc: nil, log: false)
+        def initialize(target = nil, channel: 1, program: nil, bank: nil, offset: 0, port: nil, cc: nil, clock: false, log: false)
           raise ArgumentError, 'Give midi_out a destination name (part of a port name) or port: (a port of our own), not both' if target && port
           raise ArgumentError, "Give midi_out a destination: midi_out('KRONOS'), or port: 'name' for a port others connect to" if target.nil? && port.nil? && !log
 
@@ -116,6 +124,8 @@ module MB
           @program = Destination.check_program(program)
           @bank = Destination.check_bank(bank)
           @ccs = Destination.check_ccs(cc)
+          raise ArgumentError, "clock: is true or false (got #{clock.inspect})" unless clock == true || clock == false
+          @clock = clock
           @target = target&.to_s
           @port_name = port&.to_s
           @log = log ? [] : nil
@@ -283,7 +293,7 @@ module MB
         # session frame +frame+ of +session+ (see the class description).
         # Called on the render thread by OutNode.
         def send_at(session, frame, kind, data1, data2 = 0)
-          status = kind | @status_base
+          status = kind >= 0xf0 ? kind : kind | @status_base
           note_held(status, data1, data2)
           rate = session ? session.sample_rate : 48000
           if !@offset_rate.equal?(rate)
@@ -328,6 +338,7 @@ module MB
           args << "bank: #{@bank.inspect}" if @bank
           args << "offset: #{RubyValue.to_ruby(@offset)}" unless @offset_seconds.zero?
           args << "cc: { #{@ccs.map { |k, v| "#{k.to_s.match?(/\A[a-z_][a-z0-9_]*\z/) ? "#{k}:" : "#{k.inspect} =>"} #{v}" }.join(', ')} }" unless @ccs.empty?
+          args << 'clock: true' if @clock
           args << "port: #{@port_name.inspect}" if @port_name
           args << 'log: true' if @log && @target.nil? && @port_name.nil?
           "midi_out(#{args.join(', ')})"
@@ -378,7 +389,9 @@ module MB
 
         def message_bytes(status, data1, data2)
           k = status & 0xf0
-          if k == 0xc0 || k == 0xd0
+          if status >= 0xf8 || status == 0xfa || status == 0xfb || status == 0xfc
+            [status]
+          elsif k == 0xc0 || k == 0xd0
             [status, data1]
           else
             [status, data1, data2]
