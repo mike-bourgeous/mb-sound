@@ -12,7 +12,7 @@ require 'set'
 require_relative '../../../../support/midi_writer'
 require 'mb/sound/help'
 
-RSpec.describe('MIDI channels and programs count from 1 (guard)', :aggregate_failures) do
+module OneBasedGuard
   NAMES = %i[channel program bank].freeze
   # (channels also names audio channel counts everywhere; only these
   # namespaces' channels are MIDI channel filters)
@@ -88,41 +88,7 @@ RSpec.describe('MIDI channels and programs count from 1 (guard)', :aggregate_fai
     'MB::Sound::Plan::ScaleMatch.pad(program)' => 'a plan program, not a MIDI program',
   }.freeze
 
-  # [owner#method, param] => ->(n) { a call passing n }: must raise for 0
-  # with the hint and take 1.
-  def checked
-    clip = MB::Sound.seq(MB::Sound::C4).n4
-    path = nil
-    file = -> { path ||= MidiWriter.write(tmp_path('one.mid'), tracks: [{ channel: 0, notes: [[0, 480, 60, 100]] }]) }
-    {
-      'MB::Sound::MidiMethods#cc(channel)' => ->(n) { MB::Sound.cc(1, channel: n) },
-      'MB::Sound::MIDI::Param::CC#initialize(channel)' => ->(n) { MB::Sound::MIDI::Param::CC.new(1, channel: n) },
-      'MB::Sound::MidiMethods#midi_clip(channel)' => ->(n) { MB::Sound.midi_clip(file.call, channel: n) },
-      'MB::Sound::MIDI::Import#clip(channel)' => ->(n) { MB::Sound::MIDI::Import.new(file.call).clip(channel: n) },
-      'MB::Sound::MIDI::FileSource#note_stats(channel)' => ->(n) { MB::Sound::MIDI::FileSource.new(file.call).note_stats(channel: n) },
-      'MB::Sound::Note#to_midi(channel)' => ->(n) { MB::Sound::C4.to_midi(channel: n) },
-      'MB::Sound::Pitch#to_midi(channel)' => ->(n) { 440.hz.to_midi(channel: n) },
-      'MB::Sound::Tone#to_midi(channel)' => ->(n) { 440.hz.sine.to_midi(channel: n) },
-      'MB::Sound::Sequence::Clip#stream(channel)' => ->(n) { clip.stream(channel: n) },
-      'MB::Sound::MIDI::Stream#channel(channels)' => ->(n) { clip.stream.channel(n) },
-      'MB::Sound::MIDI::Transform::Channel#initialize(channels)' => ->(n) { clip.stream.channel([n]) },
-      'MB::Sound::MIDI::Transform::Rechannel#initialize(channel)' => ->(n) { clip.stream.rechannel(n) },
-      'MB::Sound::MIDI::Stream#rechannel(channel)' => ->(n) { clip.stream.rechannel(n) },
-      'MB::Sound::MIDI::Stream#to_channel(channel)' => ->(n) { clip.stream.to_channel(n) },
-      'MB::Sound::MidiOutMethods#midi_out(channel)' => ->(n) { MB::Sound.midi_out(channel: n, log: true) },
-      'MB::Sound::MidiOutMethods#midi_out(program)' => ->(n) { MB::Sound.midi_out(program: n, log: true) },
-      'MB::Sound::MIDI::Destination#initialize(channel)' => ->(n) { MB::Sound::MIDI::Destination.new(channel: n, log: true) },
-      'MB::Sound::MIDI::Destination#initialize(program)' => ->(n) { MB::Sound::MIDI::Destination.new(program: n, log: true) },
-      'MB::Sound::MIDI::Destination.check_channel(channel)' => ->(n) { MB::Sound::MIDI::Destination.check_channel(n) },
-      'MB::Sound::MIDI::Destination.check_program(program)' => ->(n) { MB::Sound::MIDI::Destination.check_program(n) },
-      'MB::Sound::RecordMethods#rec(channel)' => ->(n) { RecGuard.call { MB::Sound.rec(1, :rec_guard, channel: n) } },
-      'MB::Sound::RecordMethods#record(channel)' => ->(n) { RecGuard.call { MB::Sound.record(1, :rec_guard, channel: n) } },
-      'MB::Sound::RecordMethods#capture(channel)' => ->(n) { RecGuard.call { MB::Sound.capture(:rec_guard, length: 1, channel: n) } },
-      'MB::Sound::RecordMethods#capture_midi(channel)' => ->(n) { RecGuard.call { MB::Sound.capture_midi(:rec_guard, length: 1, channel: n) } },
-      'MB::Sound::Arrangement::Recording#record(channel)' => ->(n) { RecGuard.call { |s| s.arrangement.record(1, :rec_guard, channel: n) } },
-      'MB::Sound::Arrangement::Recording#capture(channel)' => ->(n) { RecGuard.call { |s| s.arrangement.capture(:rec_guard, length: 1, channel: n) } },
-    }
-  end
+  ZERO_BASED = /\b(0-based|zero-based|counts? from 0)\b|\bchannels? 0\s*(\.\.|to)\s*15\b|\bprograms? 0\s*(\.\.|to)\s*127\b|\bchannel 0\b/i
 
   # Runs a recording command on a fresh non-realtime Session with a
   # track to record into, then closes it.  (A capture of nothing played
@@ -172,9 +138,48 @@ RSpec.describe('MIDI channels and programs count from 1 (guard)', :aggregate_fai
     out
   end
 
+end
+
+RSpec.describe('MIDI channels and programs count from 1 (guard)', :aggregate_failures) do
+  # [owner#method, param] => ->(n) { a call passing n }: must raise for 0
+  # with the hint and take 1.
+  def checked
+    clip = MB::Sound.seq(MB::Sound::C4).n4
+    path = nil
+    file = -> { path ||= MidiWriter.write(tmp_path('one.mid'), tracks: [{ channel: 0, notes: [[0, 480, 60, 100]] }]) }
+    {
+      'MB::Sound::MidiMethods#cc(channel)' => ->(n) { MB::Sound.cc(1, channel: n) },
+      'MB::Sound::MIDI::Param::CC#initialize(channel)' => ->(n) { MB::Sound::MIDI::Param::CC.new(1, channel: n) },
+      'MB::Sound::MidiMethods#midi_clip(channel)' => ->(n) { MB::Sound.midi_clip(file.call, channel: n) },
+      'MB::Sound::MIDI::Import#clip(channel)' => ->(n) { MB::Sound::MIDI::Import.new(file.call).clip(channel: n) },
+      'MB::Sound::MIDI::FileSource#note_stats(channel)' => ->(n) { MB::Sound::MIDI::FileSource.new(file.call).note_stats(channel: n) },
+      'MB::Sound::Note#to_midi(channel)' => ->(n) { MB::Sound::C4.to_midi(channel: n) },
+      'MB::Sound::Pitch#to_midi(channel)' => ->(n) { 440.hz.to_midi(channel: n) },
+      'MB::Sound::Tone#to_midi(channel)' => ->(n) { 440.hz.sine.to_midi(channel: n) },
+      'MB::Sound::Sequence::Clip#stream(channel)' => ->(n) { clip.stream(channel: n) },
+      'MB::Sound::MIDI::Stream#channel(channels)' => ->(n) { clip.stream.channel(n) },
+      'MB::Sound::MIDI::Transform::Channel#initialize(channels)' => ->(n) { clip.stream.channel([n]) },
+      'MB::Sound::MIDI::Transform::Rechannel#initialize(channel)' => ->(n) { clip.stream.rechannel(n) },
+      'MB::Sound::MIDI::Stream#rechannel(channel)' => ->(n) { clip.stream.rechannel(n) },
+      'MB::Sound::MIDI::Stream#to_channel(channel)' => ->(n) { clip.stream.to_channel(n) },
+      'MB::Sound::MidiOutMethods#midi_out(channel)' => ->(n) { MB::Sound.midi_out(channel: n, log: true) },
+      'MB::Sound::MidiOutMethods#midi_out(program)' => ->(n) { MB::Sound.midi_out(program: n, log: true) },
+      'MB::Sound::MIDI::Destination#initialize(channel)' => ->(n) { MB::Sound::MIDI::Destination.new(channel: n, log: true) },
+      'MB::Sound::MIDI::Destination#initialize(program)' => ->(n) { MB::Sound::MIDI::Destination.new(program: n, log: true) },
+      'MB::Sound::MIDI::Destination.check_channel(channel)' => ->(n) { MB::Sound::MIDI::Destination.check_channel(n) },
+      'MB::Sound::MIDI::Destination.check_program(program)' => ->(n) { MB::Sound::MIDI::Destination.check_program(n) },
+      'MB::Sound::RecordMethods#rec(channel)' => ->(n) { OneBasedGuard::RecGuard.call { MB::Sound.rec(1, :rec_guard, channel: n) } },
+      'MB::Sound::RecordMethods#record(channel)' => ->(n) { OneBasedGuard::RecGuard.call { MB::Sound.record(1, :rec_guard, channel: n) } },
+      'MB::Sound::RecordMethods#capture(channel)' => ->(n) { OneBasedGuard::RecGuard.call { MB::Sound.capture(:rec_guard, length: 1, channel: n) } },
+      'MB::Sound::RecordMethods#capture_midi(channel)' => ->(n) { OneBasedGuard::RecGuard.call { MB::Sound.capture_midi(:rec_guard, length: 1, channel: n) } },
+      'MB::Sound::Arrangement::Recording#record(channel)' => ->(n) { OneBasedGuard::RecGuard.call { |s| s.arrangement.record(1, :rec_guard, channel: n) } },
+      'MB::Sound::Arrangement::Recording#capture(channel)' => ->(n) { OneBasedGuard::RecGuard.call { |s| s.arrangement.capture(:rec_guard, length: 1, channel: n) } },
+    }
+  end
+
   it 'lists every channel, program, and bank parameter as checked or allowed with a reason' do
-    found = self.class.guarded_params
-    known = checked.keys + ALLOWED.keys
+    found = OneBasedGuard.guarded_params
+    known = checked.keys + OneBasedGuard::ALLOWED.keys
     missing = found.keys - known
     expect(missing).to be_empty, "Methods taking a MIDI channel, program, or bank must count from 1 (MIDI::Channel.of; add them to checked) or be ALLOWED with a reason:\n#{missing.map { |k| "  #{k} #{found[k]}" }.join("\n")}"
     stale = known - found.keys
@@ -198,13 +203,11 @@ RSpec.describe('MIDI channels and programs count from 1 (guard)', :aggregate_fai
     end
   end
 
-  ZERO_BASED = /\b(0-based|zero-based|counts? from 0)\b|\bchannels? 0\s*(\.\.|to)\s*15\b|\bprograms? 0\s*(\.\.|to)\s*127\b|\bchannel 0\b/i
-
   it 'never describes channels or programs as counted from 0 in help topics, bin/ scripts, or the checked methods\' doc comments' do
     MB::Sound::Help.index
     texts = MB::Sound::Help::TOPICS.values.map { |t| ["help :#{t.name}", t.about] }
     texts += Dir['bin/**/*.rb'].map { |f| [f, File.read(f)] }
-    found = self.class.guarded_params
+    found = OneBasedGuard.guarded_params
     checked.each_key do |key|
       file, line = found[key]&.split(':')
       next unless file && File.exist?(file)
@@ -218,7 +221,7 @@ RSpec.describe('MIDI channels and programs count from 1 (guard)', :aggregate_fai
       texts << ["#{key}'s doc comment", doc.join]
     end
     bad = texts.flat_map { |where, text|
-      text.split(/(?<=[.!?])\s+|\n/).select { |l| l.match?(/channel|program/i) && l.match?(ZERO_BASED) && !l.match?(/soundfont|preset|wire|Event#channel|byte|raises|refuse/i) }.map { |l| "#{where}: #{l.strip}" }
+      text.split(/(?<=[.!?])\s+|\n/).select { |l| l.match?(/channel|program/i) && l.match?(OneBasedGuard::ZERO_BASED) && !l.match?(/soundfont|preset|wire|Event#channel|byte|raises|refuse/i) }.map { |l| "#{where}: #{l.strip}" }
     }
     expect(bad).to be_empty, "MIDI channels and programs count from 1 for people (say \"the wire's 0-based number\" where the wire is meant):\n  #{bad.join("\n  ")}"
   end
