@@ -5,19 +5,34 @@ RSpec.describe(SmokeRuns) do
 
   it 'runs commands side by side, each with its own output and status' do
     runs.add(:a, 'echo a; echo err >&2')
-    runs.add(:b, 'sleep 0.3; exit 3')
-    runs.add(:c, 'sleep 0.3; echo c')
-    t = MB::U.clock_now
+    # b and c print the times they start and end, so the overlap of their
+    # runs proves they ran at once, whatever the load (a bound on the wall
+    # time failed on three merge trains: 0.58 and 0.68 s against 0.55)
+    runs.add(:b, 'date +%s.%N; sleep 0.3; date +%s.%N; exit 3')
+    runs.add(:c, 'date +%s.%N; sleep 0.3; date +%s.%N; echo c')
     runs.start(%i[a b c])
     a, sa = runs.take(:a)
-    _, sb = runs.take(:b)
+    b, sb = runs.take(:b)
     c, sc = runs.take(:c)
-    expect(MB::U.clock_now - t).to be < 0.55 # (b and c at once)
+    b_start, b_end = b.lines.map { |l| Rational(l.chomp) }
+    c_start, c_end = c.lines.first(2).map { |l| Rational(l.chomp) }
+    expect(c_start).to be < b_end # (b and c at once)
+    expect(b_start).to be < c_end
     expect(a).to eq("a\nerr\n")
     expect(sa).to be_success
     expect(sb.exitstatus).to eq(3)
-    expect([c, sc.success?]).to eq(["c\n", true])
+    expect([c.lines.last, sc.success?]).to eq(["c\n", true])
     runs.stop
+  end
+
+  it 'runs one command at a time with one job (so the overlap above means side by side)' do
+    one = SmokeRuns.new(tmp_path('one'), jobs: 1)
+    one.add(:b, 'date +%s.%N; sleep 0.05; date +%s.%N')
+    one.add(:c, 'date +%s.%N')
+    one.start(%i[b c])
+    one.stop # (both on the one thread: a #take before it starts a run would run it at once)
+    _, b_end = one.take(:b).first.lines.map { |l| Rational(l.chomp) }
+    expect(Rational(one.take(:c).first.chomp)).to be >= b_end
   end
 
   it 'runs a command nothing started when its example takes it, with its env' do
