@@ -134,7 +134,7 @@ RSpec.describe('Clip and Kit transform parity', :aggregate_failures) do
       ],
       'stream transforms returning a MIDI::Stream (per row they would make one stream per row)' => %i[arp chord degrees echo lock snap strum through],
       'clocks (kits play on their player\'s clock: track ..., clock:)' => %i[% at clock clocked clocked_at clocking over],
-      'pitch moves: a kit row is a drum voice, so moving its note moves it to another voice' => %i[transpose ghost_chords],
+      'pitch moves: a kit row is a drum voice, so moving its note moves it to another voice' => %i[transpose ghost_chords within],
       'combining and resizing clips (kits combine with Kit#fill, rows by name)' => %i[& | * repeat truncate bake roll],
       'note lengths: drum voices ignore them (Kit#legato is there for gated kits)' => %i[d dd dotted double_dotted t triplet note_length staccato],
       'generator morphs: a morph blends two looping generator clips (L.gen.beat.rock.morph(:funk)); a kit\'s grid rows are fixed' => %i[morph],

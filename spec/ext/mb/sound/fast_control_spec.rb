@@ -74,4 +74,24 @@ RSpec.describe(MB::Sound::FastControl) do
       expect { MB::Sound::FastControl.smooth(x, Numo::SFloat.zeros(10), 0, 9, bad, *st[1..]) }.to raise_error(ArgumentError, /positions/)
     end
   end
+
+  describe '.octave_fold' do
+    it 'folds every sample like its Ruby mirror, edge cases included' do
+      x = Numo::SFloat[0, -0.0, 1e-38, 1e-45, 0.3, 2, 7.99, 8, 8.01, 110, 3e38, -440, Float::NAN, Float::INFINITY, -Float::INFINITY]
+      [[2.0, 8.0, false], [2.0, 8.0, true], [300.0, 400.0, false], [55.0, 55.0, false]].each do |lo, hi, excl|
+        out = MB::Sound::FastControl.octave_fold(x, Numo::SFloat.zeros(x.length), lo, hi, excl)
+        ref = MB::Sound::GraphNode::Within.process_ruby(x, Numo::SFloat.zeros(x.length), lo, hi, excl)
+        expect(out.to_a.map(&:to_s)).to eq(ref.to_a.map(&:to_s)), "#{lo}..#{hi} #{excl}"
+      end
+    end
+
+    it 'checks its arguments' do
+      x = Numo::SFloat.ones(4)
+      expect { MB::Sound::FastControl.octave_fold(x, Numo::SFloat.zeros(3), 2.0, 8.0, false) }.to raise_error(ArgumentError, /as many/)
+      expect { MB::Sound::FastControl.octave_fold(x, Numo::SFloat.zeros(4).freeze, 2.0, 8.0, false) }.to raise_error(FrozenError)
+      expect { MB::Sound::FastControl.octave_fold(Numo::DFloat.ones(4), Numo::SFloat.zeros(4), 2.0, 8.0, false) }.to raise_error(ArgumentError, /SFloat/)
+      expect { MB::Sound::FastControl.octave_fold(x, Numo::SFloat.zeros(4), 0.0, 8.0, false) }.to raise_error(ArgumentError, /range/)
+      expect { MB::Sound::FastControl.octave_fold(x, Numo::SFloat.zeros(4), 8.0, 2.0, false) }.to raise_error(ArgumentError, /range/)
+    end
+  end
 end

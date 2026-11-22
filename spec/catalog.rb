@@ -31,6 +31,8 @@ module Catalog
   # as before
   # 17 900 until racks-r3 added slot (17 969 bytes with both; maintainer
   # 2026-11-21: "ok")
+  # 18 000 until note-within-1 added within (18 037 bytes: a question for
+  # the maintainer, as before); 18 200 with master-ai's own raise
   BUDGET = 18_200
 
   # Characters for a description, and bytes for a whole line
@@ -47,7 +49,7 @@ module Catalog
   # GraphNode *Methods modules is in exactly one (by its primary name;
   # aliases are folded into its line), in the order listed.
   GROUPS = {
-    'Synthesis and oscillators' => %i[tone freq phase_table wavetable waveshape ping resonate adsr],
+    'Synthesis and oscillators' => %i[tone freq within phase_table wavetable waveshape ping resonate adsr],
     'Arithmetic and math' => %i[+ - * / ** coerce at abs aabs real imag arg floor ceil round log log2 log10 ring],
     'Filters and EQ' => %i[filter lp1 hp1 lp4 diode formant filter_bank peq peq_series bandpass_series hilbert_iir clip_rate inertia smooth derivative integral],
     'Distortion and shaping' => %i[softclip asoftclip clip aclip quantize aquantize decimate ease aease shape_db ashape_db chebyshev sample_hold],

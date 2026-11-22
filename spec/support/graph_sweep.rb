@@ -235,6 +235,13 @@ module GraphSweep
       # Arithmetic and routing
       ['arithmetic', ->(c) { (c.sig * c.mod(0, 1) + 0.1.constant - c.sig(55) / 2.constant.+(c.mod(0, 1))) }],
       ['note numbers to Hz (NoteFrequency)', ->(c) { c.mod(48, 60).freq.tone.ramp * 0.5 + c.s::C4.saw * 0.1 }],
+      # (note-within-1) frequencies folded into note and Hz ranges by
+      # octaves: a gliding note crossing octave edges, a moving rate, an
+      # exclusive top, a range narrower than an octave
+      ['octave fold (Within)', ->(c) {
+        c.mod(30, 90).freq.within(c.s::E2..c.s::E3).tone.ramp * 0.3 + c.mod(100, 900).within(2.hz..8.hz) * 0.01 +
+          c.notes.freq.within(c.s::C4...c.s::C5).tone.triangle * 0.2 + c.mod(20, 2000).within(300.hz..400.hz) * 0.001
+      }],
       ['power, abs, rounding, logs', ->(c) { (c.mod(0.1, 2) ** 2.constant) + c.sig.aabs + c.sig.abs + (c.mod(0.5, 3).log + c.mod(1, 4).log2 + c.mod(1, 4).log10).floor + c.sig.round + c.sig.ceil }],
       # A shared (frozen) input with an operand that ends first: the trimmed
       # view is copied, not written (effects-2)
