@@ -95,6 +95,35 @@ RSpec.describe('MB::Sound::FastMIDI', :aggregate_failures) do
       input&.close
     end
 
+    it 'drops and counts messages longer than its longest message, and reads the next ones' do
+      output
+      index = MB::Sound::FastMIDI.input_ports(:jack, 'list').index('mbspec_sender:out')
+      input = MB::Sound::FastMIDI::Input.new(:jack, 'mbspec_receiver', index, 'midi_in', 100, 64)
+      expect(input.max_message).to eq(64)
+      wait_for_connection(input)
+
+      long = ([0xf0, 0x7d] + Array.new(200) { |i| i % 128 } + [0xf7]).pack('C*')
+      short = [0xf0, 0x7d, 1, 2, 3, 0xf7].pack('C*')
+      output.send_bytes(long)
+      output.send_bytes(short)
+      output.send_bytes([0x90, 60, 100].pack('C*'))
+
+      expect(wait_for(input, 2).map(&:last)).to eq([short, [0x90, 60, 100].pack('C*')])
+      expect(input.dropped).to eq(1)
+    ensure
+      input&.close
+    end
+
+    it 'checks the longest message size' do
+      expect { MB::Sound::FastMIDI::Input.new(:jack, 'mbspec_receiver', nil, 'midi_in', 100, 0) }.to raise_error(ArgumentError, /1 to/)
+      expect { MB::Sound::FastMIDI::Input.new(:jack, 'mbspec_receiver', nil, 'midi_in', 100, 1 << 30) }.to raise_error(ArgumentError, /1 to/)
+      input = MB::Sound::FastMIDI::Input.new(:jack, 'mbspec_receiver', nil, 'midi_in', 100)
+      expect(input.max_message).to eq(65536)
+      expect(input.dropped).to eq(0)
+    ensure
+      input&.close
+    end
+
     it 'creates virtual input ports' do
       input = MB::Sound::FastMIDI::Input.new(:jack, 'mbspec_virtual', nil, 'virtual_in', 100)
       expect(input.closed?).to eq(false)
