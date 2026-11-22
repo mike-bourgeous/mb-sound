@@ -450,6 +450,15 @@ module MB
 
         Grids join two ways: bars with `|` in one grid (`bd: 'x...x... |
         x.x.x...'`), or whole grids in turn with `seq(verse, fill)`.
+
+        Kits by kind: `kit(:acoustic)` (also `:jazz`, `:hand_percussion`,
+        `:gm`) is the first installed SoundFont kit of its list, else a
+        drum machine (one line in the console names the package:
+        avldrums.lv2-soundfont).  Every kit plays drum roles: GM names
+        plus `half_open_hat`, `hat_swish`, `ride_shank`, `crash3`, chokes,
+        and tom rims, each kit playing what it has for them (a 909's open
+        hat for a half-open one; the acoustic kits' rack tom for GM's high
+        tom).
       TEXT
       commands :tr808, :tr909, :kit, :drum_kit, :grid, :euclid
       note :drums
@@ -714,6 +723,12 @@ module MB
         specification's).
         `mips: :default` reads smoother tables (more memory) than the
         `:octave` default.
+
+        A name without a slash finds an installed font: `sf2('Black_Pearl')`
+        (on $MB_SOUND_SOUNDFONTS, /usr/share/sounds/sf2 and the other
+        SoundFont folders, ~/Library/Audio/Sounds/Banks on a Mac; Tab
+        offers the names), saved as the name.  Drum kit presets map drum
+        roles to their keys (`roles: false` plays the font's own keys).
       TEXT
       commands :sf2, :soundfont
       see :sampler, :sequences
@@ -971,9 +986,14 @@ module MB
         :VII)` is a chord a bar on degrees of the key, so the lines re-voice
         into each chord and move when the key does.  The demo
         songs' and genre templates' generators are in the library:
-        `L.gen` (`L.gen.koto_motif(seed: 3)`, `play L.gen.techno_beat`)
+        `L.gen` (`L.gen.koto_motif(seed: 3)`, `play L.gen.beat.techno`)
         and `L.flow` for their section chains (`help :library`);
-        `lesson :generative` puts them on tracks step by step.
+        `lesson :generative` puts them on tracks step by step.  Drum beats
+        are the family `L.gen.beat`: `rock`, `pop`, `halftime`, `funk`,
+        `house`, `dnb`, `techno` (`L.gen.rock` finds `L.gen.beat.rock`),
+        each with the knobs energy and swing on its track:
+        `track :drums, kit(:acoustic); bg :drums, L.gen.beat.rock;
+        turn :"drums/energy", 2.bars.lfo.square.with_phase(0.15).at(0.2..1)`.
       TEXT
       commands :tones, :chord, :weights, :harmony, :progression, :generate, :strikes, :dice, :melody, :motifs, :beats, :rhythm
       note :generative
@@ -1881,17 +1901,19 @@ module MB
         (note effects), `L.analyze` (audio to notes or control), `L.mod`,
         `L.all`.
 
-        Generators are entries too: `L.gen.techno_beat(seed: 3, energy:
+        Generators are entries too: `L.gen.beat.techno(seed: 3, energy:
         knob(:energy))` is the demo songs' evolving beat as a clip (a word
-        given keywords builds; `L.gen.techno_beat.()` at the defaults,
-        printed back with its seed: `L.gen.techno_beat(seed: 5)`),
-        `track :drums, L.gen.techno_beat` plays it on its kit, `track :lead,
+        given keywords builds; `L.gen.beat.techno.()` at the defaults,
+        printed back with its seed: `L.gen.beat.techno(seed: 5)`),
+        `track :drums, L.gen.beat.techno` plays it on its kit, `track :lead,
         L.gen.phrygian_motif, :tine_piano` on another instrument.  On a
         track, the params the call leaves out that steer it (energy,
         density, mutate, ...) are the track's knobs: `turn :"drums/energy",
         0.9, over: 4.bars`, read once a bar (scenes, MIDI learn, and the
-        inspector's notes row too); `L.gen.techno_beat(energy: 0.8)` keeps
-        its number.
+        inspector's notes row too); `L.gen.beat.techno(energy: 0.8)` keeps
+        its number.  `L.gen.beat` is a family (the drum beats): its entries
+        print with it, and under `L.gen` alone their names narrow like
+        tags (`L.gen.rock` is `L.gen.beat.rock`).
         `L.flow.techno_chain(seed: 4)` is a genre template's section chain;
         `flow L.flow.techno_chain` plays it over the session's scenes, and
         the templates read theirs from here.  Saved graphs print them back

@@ -71,7 +71,7 @@ module MB
             raise Error, "track #{track.inspect}, #{name.inspect}: #{hits.length} instruments are named #{name} (#{paths.join(', ')}): give one, e.g. track #{track.inspect}, #{paths.first}"
           end
           names = Library.index.entries.select { |e| KINDS.include?(e.kind) }.map(&:name).uniq
-          raise Error, "track #{track.inspect}, #{name.inspect}: no instrument #{name}#{did_you_mean(name, names)} (find '#{name}' searches the library; L.inst lists instruments)"
+          raise Error, "track #{track.inspect}, #{name.inspect}: no instrument #{name}#{Library::Heads.renamed_hint(nil, name)}#{did_you_mean(name, names)} (find '#{name}' searches the library; L.inst lists instruments)"
         end
 
         # +entry+ if a track can play it from its clip (an instrument or

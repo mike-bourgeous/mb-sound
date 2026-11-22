@@ -147,9 +147,9 @@ module MB
 
       # A clip method (transpose, echo, ...) on a generator or clip entry
       # that hasn't been called (the maintainer's take, 2026-11-21: `bg
-      # :drums, L.gen.techno_beat.transpose(4)` said "undefined method
+      # :drums, L.gen.beat.techno.transpose(4)` said "undefined method
       # 'transpose' for an instance of MB::Sound::Library::Entry", and
-      # `L.gen.techno_beat.call.transpose(1)` worked): the call that makes
+      # `L.gen.beat.techno.call.transpose(1)` worked): the call that makes
       # the clip, or nil.
       def clip_entry_guess(entry, e)
         return nil unless %i[generator clip].include?(entry.kind) && Sequence::Clip.method_defined?(e.name)

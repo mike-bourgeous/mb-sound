@@ -183,7 +183,7 @@ module MB
 
         NOTE_NAME = /\A[A-G][sb]?\d+\z/
 
-        # Library heads documents may walk (`L.gen.techno_beat(seed: 3)`,
+        # Library heads documents may walk (`L.gen.beat.techno(seed: 3)`,
         # `generate L.flow.techno_chain.(), bars: ...`): the generators'
         # (lib-gen-1; recipes print their builds as these calls).
         LIBRARY_HEADS = Set[:gen, :flow].freeze

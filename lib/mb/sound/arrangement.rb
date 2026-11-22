@@ -643,7 +643,7 @@ module MB
         # (a knob's short name, :"bass/reso", is the knob's full name in the
         # scene: Session::Knobs#full_knob_name)
         values = values.transform_keys { |k| (k.is_a?(Symbol) && @session.full_knob_name(k)) || k }
-        # (a track's generator, L.gen.techno_beat or a clip it built, plays
+        # (a track's generator, L.gen.beat.techno or a clip it built, plays
         # with the track's knobs for its params, :"drums/energy", made if
         # missing and left as they are if not: Library::Generators.track_clip)
         values = values.to_h { |k, v|

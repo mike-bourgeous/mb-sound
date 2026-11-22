@@ -102,7 +102,7 @@ RSpec.describe MB::Sound::Library::Bench do
       expect(bench.role_of(entry(:preset, :dnb_reese))).to eq(:bass)
       expect(bench.role_of(entry(:preset, :dnb_pad))).to eq(:pad)
       expect(bench.role_of(entry(:preset, :jungle_flute))).to eq(:lead)
-      expect(bench.role_of(entry(:preset, :funk_beat))).to eq(:drums)
+      expect(bench.role_of(entry(:preset, :funk_kit))).to eq(:drums)
       expect(bench.role_of(entry(:struck, :bell))).to eq(:struck)
       expect(bench.role_of(entry(:preset, :tine_piano))).to eq(:keys)
 

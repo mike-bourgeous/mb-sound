@@ -235,7 +235,8 @@ RSpec.describe(MB::Sound::Drums::TR808, :aggregate_failures) do
     expect(described_class.voice_name(:pedal_hat)).to eq(:closed_hat)
     expect(described_class.voice_name(:ride)).to eq(:cymbal)
     expect(described_class.voice_name(56)).to eq(:cowbell)
-    expect(described_class.voice_name(:tambourine)).to be_nil
+    expect(described_class.voice_name(:tambourine)).to eq(:maracas) # (no tambourine: the roles' fallback, shaker; drum-gen-1)
+    expect(described_class.voice_name(:crash_choke)).to be_nil
   end
 
   it 'routes every GM note to one voice' do
