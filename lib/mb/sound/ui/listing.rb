@@ -62,7 +62,7 @@ module MB
       # ":pager should be an alias"; and of the library picker, titled
       # "library" on screen, ":library should be an alias for it" (the
       # `help :library` topic is another namespace).
-      PANE_ALIASES = { pager: :page, library: :picker }.freeze
+      PANE_ALIASES = { pager: :page, library: :picker, midi_devices: :midi_ports, ports: :midi_ports }.freeze
       MB::Term::Viewports.pane_aliases = PANE_ALIASES
 
       # Every pane there is (`ui.panes`): built-in, defined with `pane`,
