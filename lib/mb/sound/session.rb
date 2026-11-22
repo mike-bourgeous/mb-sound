@@ -626,15 +626,23 @@ module MB
           # this time or later is superseded (this build has its changes
           # too: it is cancelled, and this one carries from the current
           # graph); anything else lands first, and this one follows it,
-          # carrying from the graph it starts.
+          # carrying from the graph it starts.  A superseded rebuild that
+          # followed an earlier queued start hands that on: this one follows
+          # it in turn (undo-one-step-1: before, it carried from the current
+          # graph, which that start replaced first, so it was dropped where
+          # it landed; a bind's rebuild queued for an earlier launch point
+          # than the redefinitions after it kept only the first, SessionFuzz
+          # seed 382's :carry relation).
           follows = @render_lock.synchronize {
-            pending = @changes.reverse_each.find { |c| c.subject == name && START_KINDS.include?(c.kind) }
-            if pending&.kind == :bg && pending.split && pending.time >= time
+            pending = nil
+            loop do
+              pending = @changes.reverse_each.find { |c| c.subject == name && START_KINDS.include?(c.kind) }
+              break unless pending&.kind == :bg && pending.split && pending.time >= time
+
               cancel_changes(pending)
-              nil
-            else
-              pending&.kind == :bg && pending.graph ? pending : nil
+              note_command_cancel(pending) # (undoing this command brings it back: Undo#revert_step)
             end
+            pending&.kind == :bg && pending.graph ? pending : nil
           }
           old = follows ? nil : @mutex.synchronize { @players.each_value.find { |p| p.name == name && p.current? } }
           carried = Carry.plan(follows ? follows.graph : old.input, nodes) if follows || old
@@ -667,6 +675,11 @@ module MB
             add_now(name: name, input: input, description: description, timeline_nodes: timeline_nodes, start: t, fade: fade, explicit_fade: explicit_fade,
                     carry: carried, clip: clip, spill: spill)
           }
+          if carried # (see Undo#revert_step)
+            c.carries = carried.old_input
+            # (queued: what plays now, or the graph the start it follows plays)
+            c.base = follows ? pending_state(follows) : undo_snapshot(snapshot_subject(c)) unless c.lands
+          end
           hold&.hold(c, -> { start_time ? @transport.position : launch_time(point, timeline_nodes, default: default) })
           end_cue_at_start(name, time) unless carried # (see Cue; a rebuild of the name isn't a launch: its cue plays on)
         }
@@ -719,6 +732,7 @@ module MB
             if time.nil?
               waiting = waiting.select { |c| c.time.nil? || c.time <= due } if due
               cancel_changes(*waiting)
+              waiting.each { |c| note_command_cancel(c) } # (undo issues them again)
             end
 
             if playing || (time && !waiting.empty?)

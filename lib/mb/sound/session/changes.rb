@@ -64,8 +64,16 @@ module MB
         # until the warm-up is done; see Warming).  +given+ is the time its
         # action gets when a held change was issued for a time already past
         # (a lead: track launched now), as a change landing at once gets it.
+        # +carries+ is the graph input a carrying rebuild's running state
+        # comes from (Carry::Plan#old_input; it is dropped where it lands
+        # if that graph isn't playing then), and +base+ the snapshot of its
+        # subject when it was issued (the state it would replace, for undo
+        # if it is cancelled before it lands).  +reissued+ is the change an
+        # undo or redo issued this cancelled change again as (see
+        # Undo#reissue_change).
         Change = Struct.new(
-          :seq, :kind, :subject, :time, :action, :entry, :before, :after, :lands, :starts, :graph, :split, :spill, :hold, :follows, :given,
+          :seq, :kind, :subject, :time, :action, :entry, :before, :after, :lands, :starts, :graph, :split, :spill, :hold, :follows, :given, :carries, :base,
+          :reissued,
           keyword_init: true
         )
 

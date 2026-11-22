@@ -42,13 +42,20 @@ module MB
         PlayerSubject = Data.define(:name)
 
         # The undo group of a running command (see #command, Context#command):
-        # its Session, the changes it made, and Set-level extras
-        # ([participant, before, after]).
-        CommandGroup = Struct.new(:session, :changes, :extras, :warm_hold) do
+        # its Session, the changes it made, Set-level extras
+        # ([participant, before, after]), and the queued changes of earlier
+        # commands it cancelled (+cancelled+: a redefinition superseding a
+        # queued one, a stop dropping a queued start; see
+        # #note_command_cancel), which undoing it issues again.
+        CommandGroup = Struct.new(:session, :changes, :extras, :warm_hold, :cancelled) do
           def initialize(session)
-            super(session, [], [], nil)
+            super(session, [], [], nil, [])
           end
         end
+
+        # A graph a cancelled change would have started (see
+        # #restore_superseded), standing in for a Player in a PlayerState.
+        PendingGraph = Data.define(:input, :description, :timeline_nodes)
 
         # How undo snapshots and restores one subject type: +snapshot+ and
         # +restore+ name Session methods, called as
@@ -109,8 +116,10 @@ module MB
 
         # One undo step: the changes one command made (see Changes::Change),
         # Set-level state around it (+extras+: [participant, before, after]
-        # triples), and +cancelled+ changes (a step that undid queued
-        # changes, which redo issues again).
+        # triples), and +cancelled+ changes: queued changes the step
+        # cancelled (a step that undid queued changes, a `cancel queued:`,
+        # or a command that superseded or dropped queued changes of earlier
+        # commands), which reverting the step issues again.
         Step = Struct.new(:label, :changes, :extras, :cancelled, :line, keyword_init: true) do
           # The label and where the step's changes land, e.g. "go :drop
           # lands 9:1".
@@ -167,7 +176,9 @@ module MB
           group = CommandGroup.new(self)
           value = Session.with_context_fields(command: group) { yield }
 
-          push_step(label, group.changes, group.extras) unless group.changes.empty? && group.extras.empty?
+          unless group.changes.empty? && group.extras.empty? && group.cancelled.empty?
+            push_step(label, group.changes, group.extras, cancelled: group.cancelled.empty? ? nil : group.cancelled)
+          end
           @arrangement&.sync_arms # (arm states follow the monitors' players; see Arrangement::Arm)
           [value, group.changes]
         end
@@ -195,11 +206,31 @@ module MB
 
         private
 
+        # Records that the running command (see #command) cancelled queued
+        # change +c+ (a carrying rebuild superseded by a newer one, a start
+        # dropped by a stop for now; see Session#add, #remove), so undoing
+        # the command issues it again: undo steps back exactly one command
+        # (the maintainer, 2026-11-22: "Having undo step back only one step
+        # seems ideal"), also to a definition that was queued but never got
+        # to play.  A change the command itself made is just dropped from
+        # its step.  Called with @render_lock held.
+        def note_command_cancel(c)
+          group = Session.context&.command
+          return unless group && group.session.equal?(self)
+
+          if (i = group.changes.index { |g| g.equal?(c) })
+            group.changes.delete_at(i)
+          else
+            group.cancelled << c
+          end
+        end
+
         def init_undo
           @undo_stack = []
           @redo_stack = []
           @undo_lock = Mutex.new
           @undo_inputs = [].freeze
+          @undo_waiting = [].freeze
         end
 
         # Graph inputs the undo and redo lists hold (playing, kept for
@@ -207,6 +238,16 @@ module MB
         # #prune_steps after every change to the lists.
         def undo_inputs
           @undo_inputs
+        end
+
+        # Graphs that cancelled changes held by the undo and redo lists
+        # would start (a superseded redefinition's, a start a stop dropped,
+        # one an undo cancelled), which undo or redo may issue again or
+        # restore (see #revert_step): Strip#catch_up_waiting keeps them in
+        # step with shared nodes like graphs waiting in the queue, so they
+        # can start after more than a second.  Updated by #prune_steps.
+        def undo_waiting_graphs
+          @undo_waiting
         end
 
         # Adds a command's changes as an undo step and clears the redo list.
@@ -234,6 +275,7 @@ module MB
               stack.shift
             end
             @undo_inputs = held_inputs(@undo_stack + @redo_stack).freeze
+            @undo_waiting = cancelled_graphs(@undo_stack + @redo_stack).freeze
           }
         end
 
@@ -249,11 +291,18 @@ module MB
           held_inputs(steps).reject { |i| live.any? { |l| l.equal?(i) } }
         end
 
-        # Distinct graph inputs held by +steps+' snapshots.
+        # Distinct graph inputs held by +steps+' snapshots and cancelled
+        # changes.
         def held_inputs(steps)
-          steps.flat_map { |s|
-            s.changes.flat_map { |c| [c.before, c.after] }.grep(PlayerState).flat_map { |st| [st.player&.input, st.stopped&.input] }
-          }.compact.uniq(&:__id__)
+          (steps.flat_map { |s|
+            (s.changes + (s.cancelled || [])).flat_map { |c| [c.before, c.after, c.base] }.grep(PlayerState).flat_map { |st| [st.player&.input, st.stopped&.input] }
+          } + cancelled_graphs(steps)).compact.uniq(&:__id__)
+        end
+
+        # Distinct graphs that +steps+' cancelled changes would start (not
+        # yet issued again).
+        def cancelled_graphs(steps)
+          steps.flat_map { |s| s.cancelled ? s.cancelled.map { |c| c.reissued ? nil : c.graph } : [] }.compact.uniq(&:__id__)
         end
 
         # Pops up to +count+ steps from +from+, launches the state from
@@ -275,27 +324,76 @@ module MB
 
         # Reverts one step (see #shift_steps).  Returns the step that would
         # revert this revert.
+        #
+        # One step back, always (undo-one-step-1; the maintainer,
+        # 2026-11-22: "Having undo step back only one step seems ideal"):
+        # the step's changes that landed restore their subjects from their
+        # +before+ snapshots, those still waiting are cancelled, and the
+        # queued changes of earlier commands the step cancelled (see
+        # #note_command_cancel) are issued again, after the restores.  A
+        # redefinition that superseded a queued one (Session#add) thus
+        # steps back to that queued definition, whether or not it got to
+        # play: re-queued while the newer one hadn't landed (still carrying
+        # from the graph playing), else its graph restored in place of the
+        # snapshot (#restore_superseded).  Before, undo restored what was
+        # playing when the undone line ran, so lines faster than their
+        # landings undid several redefinitions at once.
         def revert_step(step, verb, at, start_time)
           # Changes count as landed by the logical time (see #now), so a take
-          # replaying lines ahead of time undoes the same way as live
+          # replaying lines ahead of time undoes the same way as live.  A
+          # change issued again by an earlier undo or redo is reverted as
+          # that issue.  A cancelled carrying rebuild (superseded by a later
+          # command, or cancelled by an undo or a stop) restores the state
+          # it would have replaced (Change#base), as if it had landed.
           logical_now = now
           landed, waiting = @render_lock.synchronize {
-            l, w = step.changes.partition { |c| c.lands ? true : c.time.nil? || c.time <= logical_now }
+            live = step.changes.map { |c| current_issue(c) }
+            live.select! { |c| c.entry&.status != :cancelled || (c.before ||= c.base) }
+            l, w = live.partition { |c| c.lands || c.entry&.status == :cancelled || c.time.nil? || c.time <= logical_now }
             cancel_changes(*w)
             [l, w]
           }
-          time = start_time ? start_time.to_r : (landed.empty? ? nil : launch_time(at, [], default: :bar))
+          # (the launch point: restores land there, and changes issued again
+          # whose own time has passed)
+          point = nil
+          point_time = -> { point ||= start_time ? start_time.to_r : launch_time(at, [], default: :bar) }
+          time = landed.empty? && !start_time ? nil : point_time.call
 
           restores = []
+          reissues = step.cancelled ? step.cancelled.dup : []
           Session.with_perform(source: :undo) do
-            # Changes undone by cancelling them are issued again on redo
-            step.cancelled&.each do |c|
-              restores << change(c.kind, c.subject, c.time && c.time > now ? c.time : time, data: c.entry.data, undoes: c.seq, starts: c.starts, &c.action)
-            end
+            # The newest carrying rebuild (a redefinition) the step
+            # superseded, for each player name
+            superseded = reissues.select { |c| carrying_rebuild?(c) }.group_by { |c| snapshot_subject(c) }
+              .select { |subject, _| subject.is_a?(PlayerSubject) }.transform_values { |list| list.max_by(&:seq) }
+            bring_back = lambda { |subject, k, original, t|
+              reissues.reject! { |c| Changes::START_KINDS.include?(c.kind) && c.seq <= k.seq && snapshot_subject(c) == subject }
+              restores << restore_superseded(subject, k, original, t)
+            }
 
             landed.reject { |c| Changes::NO_SNAPSHOT_KINDS.include?(c.kind) }.group_by { |c| snapshot_subject(c) }.each do |subject, list|
               first = list.min_by(&:seq)
-              restores << restore_change(subject, first, time)
+              if (k = superseded.delete(subject))
+                # (the newer definition landed: its graph replaced the one
+                # the superseded rebuild would carry from)
+                bring_back.call(subject, k, first, time)
+              else
+                restores << restore_change(subject, first, time)
+              end
+            end
+
+            # A superseded rebuild is queued again where the graph it
+            # carries from still plays (the newer definition never landed),
+            # else its graph comes back in place of what plays
+            superseded.each do |subject, k|
+              bring_back.call(subject, k, nil, point_time.call) unless carry_base_playing?(subject.name, k)
+            end
+
+            # Changes cancelled by the step (or undone by cancelling them)
+            # are issued again, after the restores (a queued change lands
+            # on the state from before the step)
+            reissues.each do |c|
+              restores << reissue_change(c, c.time && c.time > now ? c.time : point_time.call)
             end
           end
 
@@ -306,6 +404,75 @@ module MB
 
           label = step.label.start_with?("#{verb == 'undo' ? 'redo' : 'undo'} ") ? step.label.sub(/\A\w+ /, '') : "#{verb} #{step.label}"
           Step.new(label: label, changes: restores, extras: extras, cancelled: waiting.empty? ? nil : waiting, line: Take.current_line_id)
+        end
+
+        # The change +c+ is now: itself, or the change an undo or redo
+        # issued it again as (Change#reissued), and so on.
+        def current_issue(c)
+          c = c.reissued while c.reissued
+          c
+        end
+
+        # Issues cancelled change +c+ again at +time+, as it was (its graph,
+        # timeline nodes, buffer split, spill-over, and the queued change it
+        # follows), journaled as undoing it; +c+ points to the new change.
+        def reissue_change(c, time)
+          follows = c.follows && current_issue(c.follows)
+          c.reissued = change(c.kind, c.subject, time, data: c.entry.data, undoes: c.seq, starts: c.starts, graph: c.graph, split: c.split, spill: c.spill,
+                              follows: follows, &c.action)
+          c.reissued.carries = c.carries
+          c.reissued.base = c.base
+          c.reissued
+        end
+
+        # True for a carrying rebuild of a player's graph (a redefined
+        # patch, a bind's or build knob's rebuild; Session#add).
+        def carrying_rebuild?(c)
+          c.kind == :bg && c.split && !c.graph.nil? && !c.carries.nil?
+        end
+
+        # True if carrying rebuild +k+, issued again now, would land on the
+        # graph it carries from: that graph plays as +name+ and no other
+        # start is queued for the name, or it follows a queued change that
+        # starts that graph.
+        def carry_base_playing?(name, k)
+          @render_lock.synchronize {
+            if (f = k.follows && current_issue(k.follows)) && @changes.any? { |c| c.equal?(f) }
+              next f.graph.equal?(k.carries)
+            end
+            next false if @changes.any? { |c| c.subject == name && Changes::START_KINDS.include?(c.kind) }
+
+            cur = @mutex.synchronize { @players.each_value.find { |p| p.name == name && p.current? } }
+            !cur.nil? && cur.input.equal?(k.carries)
+          }
+        end
+
+        # Puts player +subject+ back to the definition +superseded+ (a
+        # carrying rebuild that a later command superseded before it
+        # landed, Session#add) at +time+: the graph it would have started
+        # comes back like an undone graph (a declick crossfade, or the
+        # graph replaced spilling over), its notes from that time.  The
+        # mute and solo flags are those from before +original+ (the landed
+        # change of the step being undone), if given, else the name's own.
+        def restore_superseded(subject, superseded, original, time)
+          before = original&.before
+          state = pending_state(superseded, flags: before.is_a?(PlayerState) ? before : nil)
+          spill = !!(original || superseded).spill
+          # (+graph+: kept in step with shared nodes while it waits, see
+          # Strip#catch_up_waiting)
+          change(:restore, subject.name, time, data: {}, undoes: (original || superseded).seq, starts: state.player.timeline_nodes, graph: superseded.graph) { |t|
+            restore_player(subject.name, state, t, spill: spill)
+          }
+        end
+
+        # A PlayerState whose player is the graph queued change +c+ starts
+        # (a PendingGraph), with +flags+' mute and solo flags (nil: left as
+        # they are).  For #restore_superseded, and as Change#base of a
+        # rebuild that follows +c+ (Session#add): the state it replaces.
+        def pending_state(c, flags: nil)
+          graph = PendingGraph.new(input: c.graph, description: c.entry.data[:description], timeline_nodes: c.starts || [])
+          clips = graph.timeline_nodes.grep(MIDI::ClipSource).to_h { |n| [n, n.ring_clip || n.pending_clip || n.clip] }.compare_by_identity
+          PlayerState.new(player: graph, stopped: nil, clips: clips, muted: flags&.muted, soloed: flags&.soloed)
         end
 
         # The subject whose state change +c+ snapshots for undo (a subject
@@ -414,7 +581,7 @@ module MB
 
           strip_changed = false
           [[@muted, state.muted], [@soloed, state.soloed]].each do |set, flag|
-            next if set.include?(name) == flag
+            next if flag.nil? || set.include?(name) == flag
             flag ? set << name : set.delete(name)
             strip_changed = true
           end

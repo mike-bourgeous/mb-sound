@@ -930,6 +930,23 @@ module SessionFuzz
       clip = s.pick(MELODIC.select { |c| c.include?('knob(:busy)') } + ['beats(16, energy: knob(:busy), seed: 5) { kick [1, 0, 0, 0] * 4; hat euclid(7, 16) }.transpose(24)'])
       "swap :#{t}, #{clip}, on: :bar; after(in: #{s.pick(['1/16r', '1/4r'])}) { turn :busy, #{s.pick([0.1, 0.9])} }"
     },
+    ->(s) {
+      # (undo-one-step-1, the maintainer's "Having undo step back only one
+      # step seems ideal") a playing synth track redefined two or three
+      # times within a bar, each a scheduled block of its own (an undo
+      # step), faster than its launch point lands them (each supersedes
+      # the one queued before it), then undone and maybe redone: undo
+      # steps back one definition at a time, played or not
+      next if s.swappable.empty?
+
+      t = s.pick(s.swappable)
+      defs = Array.new(s.rng.rand(2..3)) {
+        "track(:#{t}) { |clip| clip.synth(voices: 2) { |v| v.hz.#{s.pick(SHAPES)} * v.amp_env(0.002, 0.05, 0.6, 0.02) }" \
+          ".filter(:lowpass, cutoff: #{s.pick([500.0, 1400.0, 3200.0])}, quality: 2) * 0.3 }"
+      }
+      tail = "after(in: 1/64r) { #{s.pick(['undo', 'undo; undo', 'undo; undo; redo!', 'undo(on: :now)'])} }"
+      defs.reverse.reduce(tail) { |inner, d| "after(in: 1/64r) { #{d}; #{inner} }" }.delete_prefix('after(in: 1/64r) { ').delete_suffix(' }')
+    },
     # (new commands go here, at the end)
   ].freeze
 
