@@ -195,6 +195,7 @@ module MB
   end
 end
 
+require_relative 'drums/roles'
 require_relative 'drums/voice'
 require_relative 'drums/kit'
 require_relative 'drums/tr808'
