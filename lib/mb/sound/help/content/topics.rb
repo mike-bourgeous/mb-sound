@@ -1490,9 +1490,9 @@ module MB
         `.mod(lfo, depth: 0.2)` swings around it.  `rack(:dub).snap :wide`
         and `recall :"dub/wide", only: [:space]` keep variations.  `help
         rack(:dub)` shows ports, knobs, and latency; `rack(:dub).draw` draws
-        its inside by rank (its ports at the left), and `ui.show :rack` puts
-        the rack pane in the tiles: the instance the racks pane picked, its
-        knobs, and that drawing.  `save :dub,
+        its inside by rank (its ports at the left), and the rack pane (under
+        the racks in `ui :session`, or `ui.show :rack`) shows the instance
+        the racks pane picked, its knobs, and that drawing.  `save :dub,
         rack(:dub)` writes a rack document: `preset :dub` gives the rack
         back, `preset :dub, sig: mic` plays it on an input (try the library
         rack `preset :dub_echo`); a saved rack that differs from the
@@ -2106,7 +2106,7 @@ module MB
         dim ▷ marks the other scenes that would keep it playing if launched,
         ◆ is queued with its countdown in beats), the clip under its cursor
         (`clip`: a piano roll and the Ruby that made it), racks with their
-        knobs, buses with meters.  Focus a pane in NAV (its number, or a
+        knobs and the picked rack drawn below them, buses with meters.  Focus a pane in NAV (its number, or a
         for clips, r racks, o knobs, b buses) and press Enter for its keys: arrows
         move, Enter launches the cell (`launch :bass, 3`), g its scene (`go
         :drop`), x stops the track, Space plays or stops the cell, s m

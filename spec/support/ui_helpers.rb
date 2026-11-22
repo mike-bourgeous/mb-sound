@@ -168,14 +168,27 @@ module UIHelpers
     UI::MatrixInfo.new(tracks: tracks, scenes: scenes)
   end
 
+  # The fake rack's drawing (RackInfo#graph): a small rack with the fake
+  # instance's ports and knobs, built once per process.
+  def ui_fake_rack_graph = UIHelpers.fake_rack_graph
+
+  def self.fake_rack_graph
+    @fake_rack_graph ||= MB::Sound.arack(side: :audio) { |sig, side:|
+      space = MB::Sound.knob :space, 0.35
+      tone = MB::Sound.knob :tone, 2400, range: 600..8000, curve: :exp, unit: 'Hz'
+      sig.duck(side).filter(:lowpass, cutoff: tone) * space
+    }.graph
+  end
+
   # One rack instance with two knobs (knobs :"bass/dub/space" and
-  # :"bass/dub/tone" in ui_fake_rack_knobs).
+  # :"bass/dub/tone" in ui_fake_rack_knobs) and a drawing.
   def ui_fake_racks(prefix = '')
     specs = { space: ui_knob_spec(:"#{prefix}space", 0.35, 0.0..1.0), tone: ui_knob_spec(:"#{prefix}tone", 2400.0, 600.0..8000.0, curve: :exp, unit: 'Hz') }.freeze
     [MB::Sound::Rack::RackInfo.new(
       name: :"#{prefix}dub", path: :"bass/#{prefix}dub", kind: :effect, signature: 'audio(sig) + audio(side) -> audio',
       ports: [{ name: :sig, type: :audio, role: :main, required: true }.freeze, { name: :side, type: :audio, role: :side, required: false }.freeze].freeze,
-      latency: 72, knobs: [:"bass/#{prefix}dub/space", :"bass/#{prefix}dub/tone"].freeze, knob_specs: specs, slots: [].freeze
+      latency: 72, knobs: [:"bass/#{prefix}dub/space", :"bass/#{prefix}dub/tone"].freeze, knob_specs: specs, slots: [].freeze,
+      graph: ui_fake_rack_graph
     )].freeze
   end
 

@@ -7,7 +7,7 @@ Every terminal drawing goes one way: Plot builds cells into an `MB::Term` grid (
 ## Quick reference
 
 - `node.draw` (any Traversable) or `MB::Sound::Plot.graph(node)` returns a `Plot::Graph` that prints itself in Pry; `#lines(color:)`, `#to_s`, `#show`, `#save('g.txt' | 'g.ans' | 'g.html')`, `#size`; `rack(:dub).draw` draws a rack's inside on stand-ins, its ports as the left edge.
-- The rack pane: `ui.show :rack` in the tiles (it follows the racks pane's picked knob's instance; in its mode arrows pan the drawing, Shift by a quarter of the pane, Home back, `n`/`p` the next or previous instance).
+- The rack pane: under the racks in `ui :session` (racks-v-2), or `ui.show :rack` in other tiles (it follows the racks pane's picked knob's instance; in its mode arrows pan the drawing, Shift by a quarter of the pane, Home back, `n`/`p` the next or previous instance).
 - Code: `lib/mb/sound/plot/graph.rb` (generic layout and text drawing), `lib/mb/sound/plot/graph_view.rb` (mb-sound's side: graph walks to boxes and wires); `lib/mb/sound/ui/rack_pane.rb` (`Panes::RackDetail`); specs `spec/lib/mb/sound/plot/graph_spec.rb` (every graph sweep factory lays out and draws), `spec/lib/mb/sound/ui/rack_pane_spec.rb`; help `help :racks`, `help :plots`.
 
 Phase V of the racks proposal (`research-racks`, `research/racks/PROPOSAL.md` section 5 and row V of section 7; approved with the rest by the maintainer, 2026-10-17: "Racks look good; go ahead"), the roadmap's "Drawing consolidation (racks V)": "One UI code path for plots, `vis`, racks, graph drawings and lanes: a rack pane, `Plot.graph` rank layout, `view`/`lanes` stacked on one time axis, the live lanes pane."  First slice (racks-v-1, 2026-11-15): this note, `Plot.graph`, and the rack pane.  Left for the next slices: `view`/`lanes`, the live lanes pane, owner groups, typed panels inside the boxes, `highlight: :plan`, SVG/PNG drawings of graphs.
@@ -51,7 +51,7 @@ What it replaces: the graph drawing replaces nothing yet; `graphviz`/`open_graph
 
 ## The rack pane
 
-`Panes::RackDetail` (`:rack`, a set pane beside `:racks`, so not on the `:wall`; `ui.show :rack`): the instance the racks pane's pick is on (else the first), drawn from `Snapshot#racks` (`Rack::RackInfo`, Poll, no render lock) and knob values from `Snapshot#knobs`:
+`Panes::RackDetail` (`:rack`, a set pane beside `:racks`, so not on the `:wall`; the lower half of `ui :session`'s racks column since racks-v-2, the maintainer's answer "yes" to question 2, 2026-11-21; elsewhere `ui.show :rack`): the instance the racks pane's pick is on (else the first), drawn from `Snapshot#racks` (`Rack::RackInfo`, Poll, no render lock) and knob values from `Snapshot#knobs`:
 
 - header: path (or name), kind, signature, latency;
 - ports: typed, optional ones marked `?` (`sig:audio side:audio?`);

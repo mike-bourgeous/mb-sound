@@ -385,7 +385,7 @@ Cost: the painter now draws meters and scopes 60 times a second instead of 30 (`
 Drawn from the feed contract above; keys through ux-r4-nav's pane modes (NAV Enter, or a pane's jump letter, enters the focused pane's `mode_keys`; Esc leaves).
 
 ```ruby
-ui :session      # racks + landed | the console over the clip matrix and the clip detail | meters, buses, MIDI (160x45 and up)
+ui :session      # racks + the picked rack + landed | the console over the clip matrix and the clip detail | meters, buses, MIDI (160x45 and up)
 ui :mixer        # the console over a scope | master meters, buses with their meters, CPU (120x40 and up)
 ```
 

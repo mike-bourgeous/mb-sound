@@ -17,19 +17,19 @@ bass/dub  effect  lat 72 smp │                                                
                              │                                                            │● drums   → master  compress
                              │                                                            │ ← drums       to:
                              │                                                            │
-                             │                                                            │routing
-                             │                                                            │master
-                             │                                                            │├─ verb
-                             │                                                            ││  └─ pad (send)
-                             │                                                            │├─ drums
-                             │                                                            ││  └─ drums
-                             │                                                            │├─ pad
-                             │                                                            │└─ bass
-                             │                                                            │
-                             ├─ CLIP MATRIX ───────────────── 8 ─┬─ CLIP DETAIL ────── 9 ─┤
-                             │        intro ▶drop   break  slots │beat_a  1 bar  loop  on…│
-                             │▶drums  ■     ▶beat…  fill         │kick  !██·███··███·███··├─ MIDI ───────────────── 10 ─
-─ LANDED ─────────────── 11 ─┤▶bass  ▷bass… ▶bass… ◆… 2.0  bass… │snare ··███······███····│no MIDI yet
+─ RACK ────────────────── 8 ─┤                                                            │routing
+bass/dub  effect  a  lat 72 …│                                                            │master
+in sig:audio side:audio?  ou…│                                                            │├─ verb
+knobs  space 0.6 (0..1)  ton…│                                                            ││  └─ pad (send)
+slots none (slots come with …│                                                            │├─ drums
+┌ sig ┐                      │                                                            ││  └─ drums
+│     ├───────────┐          │                                                            │├─ pad
+└─────┘           │          │                                                            │└─ bass
+                  │  ┌ duck ─│                                                            │
+┌ side ┐          └──▸input  ├─ CLIP MATRIX ───────────────── 9 ─┬─ CLIP DETAIL ───── 10 ─┤
+│      ├─────────────▸sidecha│        intro ▶drop   break  slots │beat_a  1 bar  loop  on…│
+└──────┘           ┌┄▸up    …│▶drums  ■     ▶beat…  fill         │kick  !██·███··███·███··├─ MIDI ───────────────── 11 ─
+─ LANDED ─────────────── 12 ─┤▶bass  ▷bass… ▶bass… ◆… 2.0  bass… │snare ··███······███····│no MIDI yet
 nothing landed yet           │ lead   ■      hook   ·            │hat   ······███······███│
                              │ pad   ▷chor… ▶chor… ◆■            │                        │
                              │                                   │                        │
