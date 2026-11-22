@@ -8,6 +8,12 @@
 # this guard names the example that left them, like
 # support/transport_guard.rb does for the default transport.
 #
+# The same for a default Session left with its transport paused, suspended,
+# or its output opened (fixes-16: form_pane_spec's screen sent Space to the
+# default Session, whose transport stayed paused, and a later example's
+# at_bar block in that Session waited for a resume that never came; the
+# output the pause opened was the visible trace).
+#
 # MB_SOUND_SESSION_CHECK:
 # - unset or "fail" (default): an example that leaves set state in the
 #   default Session fails, naming what it left (close the Session, or the
@@ -29,7 +35,8 @@ module SessionGuard
       m
     end
 
-    # The set state +session+ holds that a fresh Session doesn't, as text
+    # The set state +session+ holds that a fresh Session doesn't (and a
+    # paused transport, a suspend, or an opened output), as text
     # ("tracks :lead, :hum; scenes :intro"), or nil.  Doesn't create the
     # session's arrangement.
     def leftovers(session)
@@ -51,6 +58,9 @@ module SessionGuard
       out << "#{scheduled.length} scheduled blocks" unless scheduled.empty?
       meta = session.metadata
       out << "metadata (#{[*(meta[nil].empty? ? [] : ['the set']), *meta.names.map(&:inspect)].join(', ')})" unless meta.empty?
+      out << 'the transport paused' if session.transport_paused?
+      out << 'suspended' if session.realtime? && session.paused?
+      out << "its output opened (#{session.output.class})" if session.output_open?
       out.empty? ? nil : out.join('; ')
     end
   end
