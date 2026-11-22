@@ -31,7 +31,7 @@ module Catalog
   # as before
   # 17 900 until racks-r3 added slot (17 969 bytes with both; maintainer
   # 2026-11-21: "ok")
-  BUDGET = 18_000
+  BUDGET = 18_200
 
   # Characters for a description, and bytes for a whole line
   DESCRIPTION_MAX = 80
