@@ -209,7 +209,7 @@ CUE is dry (pre-bus, pre-master) and never reaches renders, stems, or taps; phon
 
 A `MB::Sound::Rack` (`lib/mb/sound/rack.rb`, console `RackMethods`) is a frozen, Proc-like reusable graph with typed ports (`:notes`, `:audio`, `:control`): `mrack`, `irack`, `arack`, `lrack`, `modrack`, `rack(name, in:, out:, **ports)`; apply with `src.then(&r)`, `r.(src)`, `stream.through(r)`.
 Named racks join `Session::Names`; `knob :space, 0.3` in a rack block is a rack knob (`:"dub/space"`, per player once two instances play).
-Slots (R3): `sig.slot(:color) { }` / `midi.slot(:keys) { }` are swappable holes; `swap :"dub/color", arack { }, fade:` hands over on an exact frame like master chains (`Session::Handover`; instruments keep sounding notes); re-defined named racks swap their instances.
+Slots (R3): `sig.slot(:color) { }` / `midi.slot(:keys) { }` are swappable holes; `swap :"dub/color", arack { }, fade:` hands over on an exact frame like master chains (`Session::Handover`; instruments keep held notes); named racks made with `slot: true` swap their instances when redefined.
 Rack documents (`save :dub, rack(:dub)`) and graph documents reload bit for bit; every Traversable answers `port_info`, `params`, and frozen `param_info`/`param_snapshot`.
 
 ### [Genre templates (`lib/mb/sound/genre.rb`, `genre/`, console `GenreMethods`)](genres.md)
