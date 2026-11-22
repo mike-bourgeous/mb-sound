@@ -35,6 +35,18 @@ module UIScreenGuard
     list
   end
 
+  # Panes publish their cursor's pick for a detail pane in per-process
+  # state (Clips.selected for :clip, Racks.selected for :rack), which an
+  # example drawing those panes leaves set.  Cleared before each example:
+  # a fresh screen's first frame draws :clip before :clips republishes,
+  # so tiles_property_spec's fresh screen showed a clip an earlier example
+  # in the same process had picked (merge train 2026-11-22, seed 33918).
+  def self.reset_selections
+    panes = MB::Sound::UI::Panes
+    panes::Clips.selected = nil if defined?(panes::Clips)
+    panes::Racks.selected = nil if defined?(panes::Racks)
+  end
+
   def self.clean_up
     ui = MB::Sound::UI
     (ui.tiles&.stop rescue nil)
@@ -54,6 +66,7 @@ RSpec.configure do |config|
   # (An around hook, outside the examples' own: specs that stop their
   # screens in an around hook after example.run are clean)
   config.around(:each) do |example|
+    UIScreenGuard.reset_selections if defined?(MB::Sound::UI::Panes)
     example.run
     problems = UIScreenGuard.problems
     unless problems.empty?
