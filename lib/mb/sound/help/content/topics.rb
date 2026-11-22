@@ -1638,7 +1638,7 @@ module MB
       commands :midi, :midi_file, :midi_stream, :synth, :per_voice, :close_midi, :mod_sum, :mod_scale
       dsl :gate, :trigger, :velocity, :amp_env, :hz, :cutoff, :reso, :arp, :echo, :chord
       note :midi
-      see :record, :midi_files, :wire
+      see :record, :midi_files, :wire, :midi_out
     end
 
     Help.topic :midi_out, 'MIDI out: tracks on synths and other programs', group: :perform do

@@ -71,9 +71,11 @@ RSpec.describe('MB::Sound::FastAudio::JackMIDIOutput timed messages', :aggregate
     past = (fa.jack_frame_time - 10_000) & 0xffff_ffff
     out.write_at(past, 0x90, 60, 1)
     got = read_until(inp, 1)
-    expect(delta(past, got[0][0]) - lag).to be >= 10_000
+    # (jack_frame_time is the server's estimate of now, up to a period past
+    # the start of the cycle the message goes out in; memcheck found 9977)
+    expect(delta(past, got[0][0]) - lag).to be >= 10_000 - 256
     expect(out.stats[:timed_late]).to eq(1)
-    expect(out.stats[:timed_max_late]).to be >= 10_000
+    expect(out.stats[:timed_max_late]).to be >= 10_000 - 256
   end
 
   it 'takes one- and two-byte messages and refuses SysEx' do
