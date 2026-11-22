@@ -138,6 +138,86 @@ RSpec.describe('MB::Sound::FastAudio::JackMIDIOutput timed messages', :aggregate
     expect(out.stats[:too_large]).to eq(1)
   end
 
+  # A JACK playback capturing what it plays (the frames before its first
+  # write included), its first cycle run
+  def playback(name = 'out_1')
+    p = fa::Playback.new(nil, -1, client, 1, 1, 48000, 0, 0, 8192, 48000, 2, false, 0, [name]).tap { |x| @opened << x }
+    deadline = MB::U.clock_now + 2
+    sleep 0.005 until p.jack_clock || MB::U.clock_now > deadline
+    expect(p.jack_clock).not_to eq(nil)
+    p
+  end
+
+  # The JACK frame where captured frame +k+ of +p+ left (the device clock
+  # counts every frame played)
+  def left(p, k)
+    clock = p.jack_clock
+    (clock[:frame_time] + k - clock[:frames_played]) & 0xffff_ffff
+  end
+
+  # midi-out-first-note-2: a message timed by a ring frame waits until that
+  # frame's audio is queued, then leaves with it, however long the ring
+  # stayed empty (by a JACK frame mapped before the write, it went a period
+  # early when a cycle passed before the write)
+  it 'holds a message timed by a ring frame until its audio is queued, then sends it with that audio' do
+    out, inp = loopback
+    lag = loop_delay(out, inp)
+    p = playback
+    expect(out.write_after(p, 100, 96, 0x90, 60, 100)).to eq(true)
+    expect(out.write_after(p, 300, 0, 0x80, 60, 0)).to eq(true)
+    c0 = p.jack_clock[:frame_time]
+    deadline = MB::U.clock_now + 2
+    sleep 0.002 until delta(c0, p.jack_clock[:frame_time]) >= 1024 || MB::U.clock_now > deadline
+    expect(out.stats).to include(timed_waiting: 2, timed_sent: 1) # (the loop_delay probe)
+    expect(inp.read(false)).to eq([])
+
+    audio = Numo::SFloat.zeros(512)
+    audio[100] = 1
+    audio[300] = 1
+    p.write([audio])
+    got = read_until(inp, 2)
+    expect(got.map { |_, b| b.bytes }).to eq([[0x90, 60, 100], [0x80, 60, 0]])
+    played = p.captured.unpack('e*')
+    clicks = (0...played.length).select { |k| played[k] > 0.5 }
+    expect(clicks.length).to eq(2)
+    expect(delta(left(p, clicks[0]), got[0][0]) - lag).to eq(96)
+    expect(delta(left(p, clicks[1]), got[1][0]) - lag).to eq(0)
+    expect(out.stats).to include(timed_waiting: 0, timed_late: 0)
+  end
+
+  it 'sends waiting messages at once, counted late, when the port follows another playback or the playback closes' do
+    out, inp = loopback
+    loop_delay(out, inp)
+    p1 = playback('out_1')
+    p2 = playback('out_2')
+    expect(out.write_after(p1, 48_000, 0, 0x90, 61, 100)).to eq(true)
+    expect(out.write_after(p2, 48_000, 0, 0x90, 62, 100)).to eq(true) # (the port follows p2 now)
+    got = read_until(inp, 1)
+    expect(got.map { |_, b| b.getbyte(1) }).to eq([61])
+    expect(out.stats).to include(timed_late: 1, timed_waiting: 1)
+
+    p2.close
+    got = read_until(inp, 1)
+    expect(got.map { |_, b| b.getbyte(1) }).to eq([62])
+    expect(out.stats).to include(timed_late: 2, timed_waiting: 0)
+    expect(out.write_after(p2, 0, 0, 0x90, 63, 100)).to eq(nil)
+    expect { out.write_after(p1, 0, 0, 0xf0, 1, 2) }.to raise_error(ArgumentError, /SysEx/)
+  end
+
+  it 'drops messages waiting for their audio on discard_timed' do
+    out, inp = loopback
+    loop_delay(out, inp)
+    p = playback
+    out.write_after(p, 10, 0, 0x90, 64, 100)
+    deadline = MB::U.clock_now + 2
+    sleep 0.002 until out.stats[:timed_waiting] == 1 || MB::U.clock_now > deadline
+    out.discard_timed
+    out.write_after(p, 20, 0, 0x90, 65, 100)
+    p.write([Numo::SFloat.zeros(256)])
+    expect(read_until(inp, 1, 1).map { |_, b| b.getbyte(1) }).to eq([65])
+    expect(out.stats).to include(timed_waiting: 0, timed_late: 0)
+  end
+
   it "maps ring frames to JACK frames with a playback's clock" do
     p = fa::Playback.new(nil, -1, client, 1, 1, 48000, 0, 0, 2048, 0, 2, false, 0, ['out_1']).tap { |x| @opened << x }
     deadline = MB::U.clock_now + 2
