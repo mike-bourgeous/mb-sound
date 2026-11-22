@@ -188,10 +188,26 @@ module MB
         # clip at the defaults (as `track :x, entry` takes it), played on
         # the track; instruments and effects say how to change the track's
         # (lesson-fixes-1: `bg :drums, L.gen.beat.techno` played the 8-bar
-        # audition in place of the track; `play` and new players keep it)
+        # audition in place of the track; `play` keeps it)
         if sound.is_a?(Library::Entry) && name && Session.current.arrangement.tracks[name]
           sound = Internal.entry_for_track('bg', name, sound)
           return MB::Sound.live_error(sound) if sound.is_a?(Exception)
+        end
+        # A generator entry with no track of that name plays its clip on its
+        # instrument without an end (beat-halftime-1, 2026-11-22: `bg
+        # :drums, L.gen.beat.halftime` after a new output had dropped the
+        # track played the 8-bar audition and stopped; `play entry` keeps
+        # the audition), saying what it plays on, and naming a track of
+        # that name that a new output left behind (his `latency` after
+        # `panic` had dropped the set unseen)
+        notice = MB::Sound.live? && Session.context&.session.nil? && !Session.context&.batch
+        gone = notice && name.is_a?(Symbol) && !Session.current.arrangement.tracks[name] && Session.left_behind.include?(name)
+        gone_text = gone ? ": it went with the old session when latency or use_output changed the output" : ''
+        if sound.is_a?(Library::Entry) && sound.kind == :generator
+          sound = Library::Generators.endless(sound, name)
+          $stdout.puts "\e[2mbg#{" #{name.inspect}" if name}: #{sound.description}, as a player#{" (no track #{name.inspect}#{gone_text})" if name}; #{sound.note}\e[0m" if notice
+        elsif gone
+          $stdout.puts "\e[2mbg #{name.inspect}: a player, not a track #{name.inspect}#{gone_text}\e[0m"
         end
         sound = Sequence::Clocked.apply(sound, clock) if clock
         raise ArgumentError, ':all is reserved for stop(:all)' if name == :all
@@ -389,6 +405,9 @@ module MB
             disarmed = session.arrangement.panic_disarm
           }
         }
+        # MIDI out: all notes off now on every destination (the stopped
+        # tracks' own note-offs follow on their stop frame)
+        MIDI::Destination.panic_all
         return stops if Session.context&.batch
 
         stopped = Array(stops).grep(Session::Journal::Entry)
