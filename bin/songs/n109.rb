@@ -39,12 +39,37 @@
 #     one more go in the outro
 #   - my own: more weight under the snare in the two-step drop
 #
-# How the versions map here: the instruments' variant knobs (0 the first
-# version, 1 the second; bin/synths/halftime.rb) carry the voice, the
-# rain's level, and the clap; the rain's and downpour's bus sends fade by
-# the same laws; the stop bell, a part only the second version has, comes
-# with --version 2.  --variant sets the knobs between the two (0.5: half
-# way, in dB and in log time) while --version still picks the parts.
+# As a set (n109-1 round 2, 2026-11-22; the maintainer: "n109 would make
+# a good demo if it can be restructured to tracks and scenes"): one track
+# per part on its library sound, the scenes below in a flow for Kez's bar
+# counts, hall, plate, and dub buses, Kez's master as the set's master.
+# bin/save_presets.rb saves the same set as presets/n109.mbg (`demo :n109`).
+#
+#   scene      bars     what plays
+#   weather      1-8    rain, vinyl, clicks
+#   hats         9-16   + hats, the pad, the voice's grain cloud (first sighting at 15)
+#   kick        17-24   + kick, shakers, the voice
+#   clack       25-32   + the clack on the three
+#   drop        33-64   drop 1: sub, the voice and its answer
+#   breakdown   65-80   no drums: the smear, the pad's octave, the downpour; the bell from 69 (v2),
+#                       the sub's swell from 73, a heartbeat kick from 77
+#   drop2       81-96   THE SWITCH: two-step, the sub talks, the ride
+#   drop2b      97-112  half-time again, the Reese underneath, its lowpass opening over the sixteen
+#   outro      113-128  strip it back (the Reese fades over a bar)
+#   strip      129-136  kick only, the bell again (v2); the pad and the cloud fade
+#   rain_out   137-140  clicks, hats, rain
+#   last_word  141-146  the voice's last word, the vinyl fades; ends on rain
+#
+# How the versions map here: one Session knob, :variant (0 the first
+# version, 1 the second; --variant sets it, by default the version's),
+# turns the clack kits' and the rain's variant params (bin/synths/halftime.rb),
+# the weather's wetter sends (pass-through buses :rain_hall, :pour_hall,
+# and :rain_dub whose gains follow it), and the voice: each phrase is
+# bounced as both versions' ghost voice and the two crossfade at equal
+# power.  The stop bell, a part only the second version has, comes with
+# --version 2 (version 1's scenes leave it out).  The clicks run the whole
+# song as one clip on the timeline (Kez's second click bar is a 16th long,
+# so they drift against the bar).
 #
 # Usage:
 #     bin/songs/n109.rb                       # plays version 2 live
@@ -54,8 +79,11 @@
 #     bin/songs/n109.rb --from 65 --bars 16 --seek breakdown.flac
 #
 # Or in bin/sound.rb:
-#     load 'bin/songs/n109.rb'
-#     rewind; n109 version: 1                # bg players and at_bar blocks from bar 1 (stop or panic ends it)
+#     demo :n109                    # the saved set, paused at bar 1
+#     start                         # the whole form
+#     go :drop2                     # a scene (at the next bar)
+#     turn :variant, 0, over: 8.bars  # the whole song moves back to Kez's first version
+#     load 'bin/songs/n109.rb'; n109 version: 1; n109_form   # the first version's set and form
 #
 # The instruments on their own (bin/sound.rb):
 #     bpm 174
@@ -176,28 +204,50 @@ module MB::Sound
     { drum: drum, sub: sub_bars, swell: swell_bars, vox: vox_bars, ans: ans_bars }
   end
 
-  # A send level fading from +a+ dB (the first version) to +b+ dB (the
-  # second) at +variant+, evenly in dB (Decibels at the ends, exactly).
-  def self.n109_send(a, b, variant)
-    return a.db if variant == 0
-    return b.db if variant == 1
+  # The song's scenes and the bars each plays in the form (Kez's sections,
+  # the intro and outro cut where something comes in or goes).  The
+  # tracks' clips for a scene are the bars of the parts above (an empty
+  # part leaves the track out of the scene).
+  N109_SCENES = {
+    weather: 1..8,       # rain, vinyl, clicks
+    hats: 9..16,         # hats, the pad, the voice's cloud; the first sighting at 15
+    kick: 17..24,        # the kick, the shakers, the voice
+    clack: 25..32,       # the clack on the three
+    drop: 33..64,        # drop 1: half-time, the sub, the voice and its answer
+    breakdown: 65..80,   # no drums: the smear, the pad's octave, the downpour; the bell (v2), the swell, a heartbeat
+    drop2: 81..96,       # THE SWITCH: two-step, the sub talks, the ride
+    drop2b: 97..112,     # half-time again, a Reese underneath
+    outro: 113..128,     # strip it back for the DJ
+    strip: 129..136,     # the pad and the cloud fade, kick only, the bell again (v2)
+    rain_out: 137..140,  # clicks, hats, rain
+    last_word: 141..146, # the voice's last word, the vinyl fades; ends on rain
+  }.freeze
 
-    (a + (b - a) * variant).db
+  # The bell's notes (v2): four bars of quarters, notes of the two chords.
+  N109_DING = [R, C6, R, G5, R, R, R, Ab5, R, Db6, R, Bb5, R, R, F5, R].freeze
+
+  # +first+ and +second+ (nodes: the first and the second version of a
+  # bounced part) crossfaded by the Session knob :variant at equal power
+  # (sqrt(1 - variant) and sqrt(variant), the halftime layers' law): the
+  # knob at 0 or 1 plays one of them sample for sample.
+  def self.n109_blend(first, second)
+    v = knob(:variant)
+    first * variant_layer(v, :out) + second * variant_layer(v, :in)
   end
 
-  # The rain's and downpour's sends: +hall+ [v1, v2] dB, and the dub echo
-  # at -12 dB, which only the second version has (by amplitude,
-  # sqrt(variant); none at 0).
-  def self.n109_weather_send(hall, variant)
-    s = { hall: n109_send(*hall, variant) }
-    s[:dub] = variant == 1 ? -12.db : -12.db.to_f * variant_layer(variant, :in) if variant_builds?(variant, :in)
-    s
+  # A pass-through bus's gain fading from 1 (the first version) to +db+
+  # (the second) by the Session knob :variant, evenly in dB: the weather's
+  # wetter sends in the second version.
+  def self.n109_bus_fade(db)
+    variant_fade(1.0, db.db.to_f, knob(:variant))
   end
 
-  # Arranges N109 on the current session: +version+ 1 or 2 picks the parts
-  # (the stop bell is version 2's), +variant+ (0..1; by default 0 for
-  # version 1 and 1 for version 2) the instruments' variant knobs and the
-  # weather's sends.
+  # Sets up N109 on the current session as tracks, scenes, and knobs (the
+  # flow is .n109_form).  +version+ 1 or 2 picks the arrangement (the stop
+  # bell is the second version's), +variant+ (0..1; by default 0 for
+  # version 1 and 1 for version 2) the Session knob :variant, which turns
+  # the instruments' variant params, the weather's sends, and the bounced
+  # voices between the two versions (`turn :variant, 0, over: 8.bars`).
   def self.n109(version: 2, variant: nil)
     raise ArgumentError, "version must be 1 or 2 (got #{version.inspect})" unless [1, 2].include?(version)
 
@@ -206,10 +256,10 @@ module MB::Sound
 
     seed 109
     parts = n109_parts
-    drum = parts[:drum]
-    row = ->(*names) { names.to_h { |n| [n, drum[n].join('|')] } }
-
     bpm 174
+    quant 1
+
+    knob :variant, v.to_f, range: 0.0..1.0 # 0 the first version, 1 the second
 
     # My master, not the stock one: mono the lows, CLIP the drum peaks onto the
     # bass (a clipper doesn't ride the gain, so nothing pumps), limiter last and
@@ -219,99 +269,163 @@ module MB::Sound
     bus(:hall)  { |sig| sig.filter(:highpass, cutoff: 400).reverb(:hall, mix: 1) }
     bus(:plate) { |sig| sig.filter(:highpass, cutoff: 600).reverb(:plate, mix: 1) }
     bus(:dub)   { |sig| sig.ping_pong(3.n16, feedback: 0.5).filter(:lowpass, cutoff: 2400).filter(:highpass, cutoff: 400) }
-
-    # ---- weather: on before bar 1, still on after the last note ---------------
-    bg :rain, window_rain(variant: v).at(1.db), send: n109_weather_send([-18, -5], v)
-    bg :vinyl, vinyl_specks.pan(-0.3).at(3.db)
+    # The weather's sends, wetter in the second version (the rain's hall
+    # -18 -> -5 dB, the downpour's -14 -> -5 dB, the dub echo in at -12 dB):
+    # pass-through buses whose gains follow :variant
+    bus(:rain_hall, to: :hall) { |sig| sig * n109_bus_fade(13) }
+    bus(:pour_hall, to: :hall) { |sig| sig * n109_bus_fade(9) }
+    bus(:rain_dub, to: :dub) { |sig| sig * variant_layer(knob(:variant), :in) }
 
     # ---- the voice: sung once, bounced, then it's a sample ---------------------
-    sing = ->(phrase, vowels) { bounce(1.bar) { ghost_voice(phrase.legato(1), vowels: vowels, variant: v) } }
+    # (each phrase bounced as both versions' voice, crossfaded by :variant)
+    sing = ->(phrase, vowels) {
+      [0, 1].map { |x| bounce(1.bar) { ghost_voice(phrase.legato(1), vowels: vowels, variant: x) } }
+    }
     vox   = sing.(seq(C4.n4, Eb4.n4, F4.n2), %i[a o u])       # "ah-oh-oo", going up
     vox_b = sing.(seq(F4.n4, Eb4.n4, C4.n2), %i[u o a])       # "oo-oh-ah", coming back down
+    # The phrase smeared out to eight bars: C for two, Eb for two, F for four.
+    # It lands on the chords by itself.  Twice through.
+    long = vox.map { |x| x.stretch(8, mode: :paul) }
 
-    ghost = ->(sample, bars) { seq(*bars.flatten).n16.sampler(sample).filter(:highpass, cutoff: 350).filter(:lowpass, cutoff: 4200) }
-    bg :vox, ghost.(vox, parts[:vox]).at(-14.db), send: { plate: -7.db, dub: -8.db }
-    bg :answer, ghost.(vox_b, parts[:ans]).pan(0.3).at(-17.db), send: { plate: -5.db, dub: -10.db }
+    # ---- weather: on before bar 1, still on after the last note ---------------
+    track(:rain, send: { rain_hall: -18.db, rain_dub: -12.db }) { |_c| window_rain(variant: knob(:variant)).at(1.db) }
+    # (the vinyl specks stay bone dry on purpose: that's the record, not the weather)
+    track(:vinyl) { |c| preset(:vinyl_specks, midi: c).pan(-0.3).at(3.db) }
+
+    ghost = ->(c, pair) { n109_blend(c.sampler(pair[0]), c.sampler(pair[1])).filter(:highpass, cutoff: 350).filter(:lowpass, cutoff: 4200) }
+    track(:vox, send: { plate: -7.db, dub: -8.db }) { |c| ghost.(c, vox).at(-14.db) }
+    track(:answer, send: { plate: -5.db, dub: -10.db }) { |c| ghost.(c, vox_b).pan(0.3).at(-17.db) }
 
     # ---- drums ----------------------------------------------------------------
-    bones = clack_machine
-    bg :drums,  bones.kit(grid(16, **row.(:kick, :snare, :clap)), clap: { weight: clack_clap(v) }).at(0.db), send: { plate: -15.db }
-    bg :clicks, bones.kit(grid(16, **row.(:rim))).pan(0.25).at(8.db), send: { plate: -14.db }
-    bg :hats,   bones.kit(grid(16, **row.(:hat))).at(0.db)
+    track(:drums, send: { plate: -15.db }) { |c| preset(:clack_kit, midi: c, variant: :variant) }
+    track(:clicks, send: { plate: -14.db }) { |c| preset(:clack_kit, midi: c, variant: :variant).pan(0.25).at(8.db) }
+    track(:hats) { |c| preset(:clack_kit, midi: c, variant: :variant) }
     # 21 ms LATE, every one of them.  Written, not rolled: that's the drag.
-    bg :shakers, bones.kit(grid(16, **row.(:open_hat))).delay(0.021).pan(-0.2).at(7.db)
-    bg :ride,   bones.kit(grid(16, **row.(:ride))).duck(:drums, amount: -7.db, release: 1.n16).pan(0.15).at(-3.db)
+    track(:shakers) { |c| preset(:clack_kit, midi: c, variant: :variant).delay(0.021).pan(-0.2).at(7.db) }
+    track(:ride) { |c| preset(:clack_kit, midi: c, variant: :variant).duck(:drums, amount: -7.db, release: 1.n16).pan(0.15).at(-3.db) }
 
     # ---- sub: one, mono, clean ------------------------------------------------
     # A sine with whole-number FM on top so it locks to the note: x3 as each
     # note speaks, x4 breathing over four bars.  That's what you hear on a
     # phone; the 43 Hz is what you feel on a rig.
-    talk = 4.bars.lfo.at(0.1..1.0)
-    sub = ->(bars, attack) { talking_sub(seq(*bars.flatten).n16, attack: attack, talk: talk) }
-    bg :sub, sub.(parts[:sub], 0.03).duck(:drums, only: :kick, amount: -9.db, release: 1.n32).at(-2.db)
-    bg :sub_swell, sub.(parts[:swell], 1.2).at(-9.db)
+    track(:sub) { |c| preset(:talking_sub, midi: c).duck(:drums, only: :kick, amount: -9.db, release: 1.n32).at(-2.db) }
+    # Breakdown, 73-80: the sub comes back as a long quiet swell on its own fader,
+    # so it promises the drop without spending it.
+    track(:sub_swell) { |c| preset(:talking_sub, midi: c, attack: 1.2).at(-9.db) }
 
     # ---- the pad: two chords, tape dragging; in from bar 9 --------------------
-    chords = seq([F3, C4, Eb4, G4], T, [Gb3, Bb3, Db4, F4], T).n1
-    at_bar(9) {
-      bg :pad, tape_pad(chords.loop).at(-22.db), send: { hall: -8.db }
-
-      # the same breath as a cloud of grains, way back: the bit you're not sure you heard
-      bg :vox_cloud, vox.grains(size: 140.ms, density: 14, pitch: [0, 7, 12], pan_spread: 0.9).filter(:highpass, cutoff: 500).at(-21.db),
-         send: { hall: -6.db }
+    track(:pad, send: { hall: -8.db }) { |c| preset(:tape_pad, midi: c).at(-22.db) }
+    # the same breath as a cloud of grains, way back: the bit you're not sure you heard
+    track(:vox_cloud, send: { hall: -6.db }) { |_c|
+      cloud = vox.map { |x| x.grains(size: 140.ms, density: 14, pitch: [0, 7, 12], pan_spread: 0.9) }
+      n109_blend(*cloud).filter(:highpass, cutoff: 500).at(-21.db)
     }
 
     # ---- breakdown: 65-80 -----------------------------------------------------
-    at_bar(65) {
-      # The phrase smeared out to eight bars: C for two, Eb for two, F for four.
-      # It lands on the chords by itself.  Twice through.
-      long = vox.stretch(8, mode: :paul)
-      bg :smear, seq(C4, T, T, T, T, T, T, T).n1.loop.sampler(long).filter(:highpass, cutoff: 300).filter(:lowpass, cutoff: 5000).chorus.at(-20.db),
-         send: { hall: -6.db }
-      # the pad's octave, so the roof lifts while the floor's gone
-      bg :pad_hi, tape_pad_high(chords.transpose(12).loop).at(-27.db), send: { hall: -6.db }
-      # and it rains harder
-      bg :downpour, window_rain(density: 260, low: 2000, high: 8000, bed: nil, pan_rate: 0.7, seed: 7, variant: v).at(-2.db),
-         send: n109_weather_send([-14, -5], v)
+    track(:smear, send: { hall: -6.db }) { |c|
+      n109_blend(c.sampler(long[0]), c.sampler(long[1])).filter(:highpass, cutoff: 300).filter(:lowpass, cutoff: 5000).chorus.at(-20.db)
     }
-
+    # the pad's octave, so the roof lifts while the floor's gone
+    track(:pad_hi, send: { hall: -6.db }) { |c| preset(:tape_pad_high, midi: c).at(-27.db) }
+    # and it rains harder
+    track(:downpour, send: { pour_hall: -14.db, rain_dub: -12.db }) { |_c|
+      window_rain(density: 260, low: 2000, high: 8000, bed: nil, pan_rate: 0.7, seed: 7, variant: knob(:variant)).at(-2.db)
+    }
+    # The one new thing in v2: the stop bell.  Somebody's pressed it.  A struck
+    # bowl, four notes that belong to the two chords, a long way down the bus.
     if version == 2
-      # The one new thing: the stop bell.  Somebody's pressed it.  A struck bowl,
-      # four notes that belong to the two chords, a long way down the bus.
-      ding = seq(R, C6, R, G5,   R, R, R, Ab5,   R, Db6, R, Bb5,   R, R, F5, R).n4
-      bell = -> { struck(ding.loop, :rin, voices: 4, level: 1).filter(:highpass, cutoff: 400).pan(-0.25).at(-15.db) }
-      at_bar(69) { bg :bell, bell.(), send: { hall: -5.db, dub: -7.db } }
-      at_bar(129) { bg :bell, bell.(), send: { hall: -5.db, dub: -7.db } }
-      at_bar(137) { stop :bell, ring: true }
+      track(:bell, send: { hall: -5.db, dub: -7.db }) { |c| with_seed(1090) { struck(c, :rin, voices: 4, level: 1) }.filter(:highpass, cutoff: 400).pan(-0.25).at(-15.db) }
     end
 
-    at_bar(81) {
-      stop :smear, fade: 0
-      stop :downpour, fade: 0
-      stop :pad_hi, fade: 2
-      stop :bell, ring: true if version == 2
-    }
-
     # ---- drop 2b: 97-112, the ache --------------------------------------------
-    at_bar(97) {
-      line = seq(F2, T, T, T, T, T, T, T,   F2, T, T, T, T, T, Eb2, T,
-                 Gb2, T, T, T, T, T, T, T,  Gb2, T, T, T, T, Ab2, T, R).n8
-      # two saws beating about once a second, driven BEFORE a dark lowpass that
-      # opens over the sixteen, sub cut out from under it.  It aches; it doesn't snarl.
-      bg :reese, notch_reese(line.loop, cutoff: tween([420.hz, 1300.hz], 16.bars, loop: false, align: :launch))
-                   .duck(:drums, amount: -4.db, release: 1.n16)
-                   .at(-7.db),
-         send: { hall: -14.db }
-    }
-    at_bar(113) { stop :reese, fade: 1 }
+    # two saws beating about once a second, driven BEFORE a dark lowpass that
+    # opens over the sixteen (drop2b's :"reese/cutoff" ramp), sub cut out from
+    # under it.  It aches; it doesn't snarl.
+    track(:reese, send: { hall: -14.db }) { |c| preset(:notch_reese, midi: c).duck(:drums, amount: -4.db, release: 1.n16).at(-7.db) }
 
-    # ---- outro ----------------------------------------------------------------
-    at_bar(129) {
-      stop :pad, fade: 8
-      stop :vox_cloud, fade: 12
+    # ---- the clips --------------------------------------------------------------
+    looped = ->(clip, name) { clip.loop(align: :launch).named(name) }
+    steps = ->(bars, name) { bars.flatten.all? { |n| n == R } ? nil : looped.(seq(*bars.flatten).n16, name) }
+    drum = parts[:drum]
+    kit = ->(range, name, *rows) {
+      strings = rows.to_h { |r| [r, drum[r][(range.begin - 1)..(range.end - 1)].join('|')] }
+      strings.values.all? { |s| s.delete('|.').empty? } ? nil : looped.(grid(16, **strings), name)
     }
-    at_bar(141) { stop :vinyl, fade: 4 }
+    bar = seq(R).n1.loop.named(:bar)
+    # The clicks run the whole song as one clip on the timeline: every other
+    # bar is a 16th long, so they drift against the bar (the wiper against
+    # the indicator), and a scene picks them up where the song is
+    clicks = grid(16, rim: drum[:rim].join('|')).loop.named(:clicks)
+    chords = seq([F3, C4, Eb4, G4], T, [Gb3, Bb3, Db4, F4], T).n1
+    pad = looped.(chords, :chords)
+    pad_hi = looped.(chords.transpose(12), :chords_high)
+    smear = looped.(seq(C4, T, T, T, T, T, T, T).n1, :smear)
+    line = looped.(seq(F2, T, T, T, T, T, T, T,   F2, T, T, T, T, T, Eb2, T,
+                       Gb2, T, T, T, T, T, T, T,  Gb2, T, T, T, T, Ab2, T, R).n8, :reese_line)
+    bells = {
+      breakdown: looped.(seq(*([R] * 16), *(N109_DING * 3)).n4, :bell_breakdown), # in at bar 69
+      strip: looped.(seq(*N109_DING).n4, :bell),
+    }
+
+    N109_SCENES.each do |name, range|
+      slice = ->(part) { parts[part][(range.begin - 1)..(range.end - 1)] }
+      vals = {
+        rain: bar,
+        vinyl: bar,
+        vox: steps.(slice.(:vox), :"vox_#{name}"),
+        answer: steps.(slice.(:ans), :"answer_#{name}"),
+        drums: kit.(range, :"drums_#{name}", :kick, :snare, :clap),
+        clicks: clicks,
+        hats: kit.(range, :"hats_#{name}", :hat),
+        shakers: kit.(range, :"shakers_#{name}", :open_hat),
+        ride: kit.(range, :"ride_#{name}", :ride),
+        sub: steps.(slice.(:sub), :"sub_#{name}"),
+        sub_swell: steps.(slice.(:swell), :"swell_#{name}"),
+      }
+      vals[:pad] = pad if (9..128).cover?(range.begin)
+      vals[:vox_cloud] = bar if (9..128).cover?(range.begin)
+      vals.merge!(smear: smear, pad_hi: pad_hi, downpour: bar) if name == :breakdown
+      vals[:bell] = bells[name] if version == 2 && bells[name]
+      vals[:reese] = line if name == :drop2b
+      vals.compact!
+      # The tracks Kez fades out play at their full level wherever they start
+      fading = %i[vinyl pad vox_cloud pad_hi reese]
+      vals.each_key { |t| vals[t] = { clip: vals[t], level: 1 } if fading.include?(t) }
+      # the Reese's lowpass opens 420 -> 1300 Hz over the sixteen
+      vals[:reese][:cutoff] = [1300, from: 420, over: 16] if name == :drop2b
+
+      # Kez's stops, where a scene change would only ring out: cuts, and
+      # fades as level ramps (the track stops, silent, in the scene after;
+      # :sine_in on the fader's taper is within 0.5 dB of a stop's linear fade)
+      out = ->(bars) { { level: [0, over: bars, curve: :sine_in] } }
+      case name
+      when :drop2 then vals.merge!(smear: :cut, downpour: :cut, pad_hi: out.(2))
+      when :outro then vals[:reese] = out.(1)
+      when :strip then vals.merge!(pad: out.(8), vox_cloud: out.(12))
+      when :rain_out then vals[:vox_cloud] = :keep
+      when :last_word then vals[:vinyl] = out.(4)
+      end
+      scene name, **vals
+    end
     nil
+  end
+
+  # The form: N109_SCENES in order, for their bars.
+  def self.n109_form(play: true)
+    flow(play: play) do
+      weather   8
+      hats      8
+      kick      8
+      clack     8
+      drop      32
+      breakdown 16
+      drop2     16
+      drop2b    16
+      outro     16
+      strip     8
+      rain_out  4
+      last_word 6
+    end
   end
 
   if main_script?(__FILE__)
@@ -321,6 +435,7 @@ module MB::Sound
       variant: [nil, Float, 'The instruments\' variant knobs and the weather\'s sends, 0 (version 1) to 1 (version 2); by default the version\'s', 0.0..1.0],
     ) { |p|
       n109(version: p.version, variant: p.variant)
+      n109_form
     }
   end
 end

@@ -133,7 +133,8 @@ module MB::Sound
   # the set (tracks, scenes, knobs, master) in a sandbox Session and its
   # form method the flow, then the Arrangement is saved as a set document.
   # (tunnel_vision since genre-fixes, 2026-10-18, when set documents
-  # learned buses, sends, and routes.)
+  # learned buses, sends, and routes; n109 since n109-1, 2026-11-22, a
+  # bundle holding its bounced voices.)
   LIBRARY_PRESET_SETS = {
     night_bus: ['bin/songs/night_bus_flow.rb', :last_stop, :last_stop_form, {},
                 'Set :night_bus from bin/songs/night_bus_flow.rb ("Night Bus: Last Stop", tech house at 126 BPM in A minor): ' \
@@ -144,6 +145,11 @@ module MB::Sound
                     'the buses demo): drums, Reese, sub, neuro, boom, riser, pad, pluck; a :hall bus (ducked by the kick) and an :echo bus with sends, ' \
                     'the basses ducked by the drums\' kick voice; scenes intro..tail; knobs :cut, :grit, :space, :air, :lift; ' \
                     'its flow (play_form doc.form).  `demo :tunnel_vision` loads it.'],
+    n109: ['bin/songs/n109.rb', :n109, :n109_form, { play: false },
+           'Set :n109 from bin/songs/n109.rb ("N109", Kez Volta\'s half-time drum & bass at 174 BPM in F Phrygian, its second version): ' \
+           'rain, vinyl, the bounced ghost voice and its answer, five clack kit tracks, the talking sub, tape pads, the smear, the grain cloud, ' \
+           'the downpour, the stop bell, the notch Reese; hall, plate, and dub buses; scenes weather..last_word; the knob :variant ' \
+           '(0 the first version, 1 the second) and the tracks\' preset knobs; its flow (play_form doc.form).  `demo :n109` loads it.'],
   }.freeze
 
   # The MIDI file script patches are saved from.
