@@ -169,6 +169,18 @@ module MB
           super(name, gm_time(name, time))
         end
 
+        # The shortest segment +name+ can be in samples (see
+        # Envelope#busy_through?): a GM2-scaled fixed time at its
+        # controller's shortest factor (x1/8; Notes::GM_CONTROLS), else as
+        # Envelope says.
+        def min_segment_samples(name)
+          gm = @gm_nodes[name]
+          return super unless gm.is_a?(GmTime)
+
+          role = self.class.segment_role(names.index(name), release_node)
+          gm.time * Notes::GM_CONTROLS.fetch(GM_TIMES.fetch(role)).range.begin * @sample_rate
+        end
+
         private
 
         # The time as the patch gave it, before GM2 scaling (see

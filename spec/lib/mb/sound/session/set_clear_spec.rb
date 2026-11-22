@@ -109,6 +109,23 @@ RSpec.describe('MB::Sound::Session#clear_set', :aggregate_failures) do
     expect(session.knobs.keys).to eq([:other])
   end
 
+  # (ux-friction-3: he asked "How do I clear everything in
+  # form/track/bg/etc.?"; measured: plain bg players, named and not, and
+  # stopped players kept for resume all go)
+  it 'stops plain bg players too, and forgets stopped ones kept for resume' do
+    run(4) do
+      MB::Sound.bg(:hum, 220.hz.sine.at(0.05), on: :now)
+      MB::Sound.bg(110.hz.saw.at(0.05), on: :now)
+      MB::Sound.bg(:kept, 330.hz.sine.at(0.05), on: :now)
+    end
+    run(2) { MB::Sound.stop(:kept, fade: 0) }
+    expect(session.players.length).to eq(2)
+    expect(session.resumable?(:kept)).to eq(true)
+    run(2) { session.clear_set }
+    expect(session.players).to be_empty
+    expect(session.resumable?(:kept)).to eq(false)
+  end
+
   it 'refuses while a track is armed' do
     build_set
     session.midi_in.input = MB::Sound::MIDI::Stream.new(MIDIListSource.new) # (no live MIDI device here)

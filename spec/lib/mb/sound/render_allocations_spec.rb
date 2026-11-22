@@ -1,4 +1,5 @@
 require_relative '../../../support/allocation_budget'
+require_relative '../../../support/sf2_writer'
 
 # Guards for allocation-free rendering (alloc-1, 2026-10-21; per-buffer
 # budgets since alloc-2, 2026-10-25; measure the whole picture with
@@ -180,6 +181,59 @@ RSpec.describe('render-path allocations') do
       it 'the tiles\' feed (meters and the scope)' do
         m = with_feed(%i[meters scope])
         expect(m.objects_per_buffer).to be <= 90, m.report
+      end
+    end
+
+    # A SoundFont drum kit as a patch track (sf2-cost-1, the maintainer's
+    # acoustic kit): mono hits in two velocity layers, a pan (so stereo
+    # voices), a hat choke group, and acoustic kits' ~100 s release, so
+    # every lane's envelope is still releasing long after its hit ended.
+    # The 512-frame case crosses an 800-sample grid point in most blocks.
+    describe 'a SoundFont kit' do
+      def kit_font
+        path = tmp_path('kit.sf2')
+        samples = []
+        zones = []
+        [36, 38, 42, 46].each do |k|
+          2.times do |l|
+            data = Array.new(3000) { |i| Math.sin(2 * Math::PI * (60 + 150 * (k - 36)) * i / 44100.0) * Math.exp(-i / 600.0) * (0.4 + 0.4 * l) }
+            samples << { name: "k#{k}l#{l}", data: data, rate: 44100, pitch: 60 }
+            zones << { key_range: [k, k], vel_range: l == 0 ? [0, 63] : [64, 127], sample_id: samples.length - 1, pan: k == 38 ? 200 : 0,
+                       exclusive_class: [42, 46].include?(k) ? 1 : 0 }
+          end
+        end
+        SF2Writer.write(path, samples: samples, instruments: [{ name: 'Kit', global: { release_vol_env: 8000 }, zones: zones }],
+                              presets: [{ name: 'Kit', program: 0, zones: [{ instrument: 0 }] }])
+      end
+
+      def start_kit(sess)
+        font = MB::Sound.sf2(kit_font)
+        beat = MB::Sound.grid(16, kick: 'x...x...x...x...', snare: '....x.......x..x', closed_hat: 'xx.xxx.xxx.xxx.x', open_hat: '..x...x...x...x.').to_clip.loop
+        MB::Sound::Session.with_context(session: sess) {
+          MB::Sound.track(:drums, font)
+          MB::Sound.bg(:drums, beat)
+        }
+      end
+
+      it 'at 128 frames' do
+        start_kit(session)
+        expect_budget(objects: 130, bytes: 9_500) # (sf2-cost-1, no YJIT: before 333.5 objects, 26.8 kB; after 117.8, 8.3 kB: Notes and MIDI stream Rationals lead)
+      end
+
+      it 'at 512 frames (blocks crossing grid points)' do
+        out = MB::Sound::NullOutput.new(channels: 2, buffer_size: 512, sleep: false)
+        s = MB::Sound::Session.new(output: out, transport: transport, channels: 2, buffer_size: 512, realtime: false, raise_errors: true)
+        start_kit(s)
+        MB::Sound::Session.with_context(session: s) { 400.times { s.process_buffer } }
+        m = MB::Sound::Session.with_context(session: s) { AllocationBudget.measure(buffers: 200) { s.process_buffer } }
+        puts "\n\e[1m#{RSpec.current_example.description}\e[0m\n#{m.report}" if ENV['ALLOC_REPORT']
+        # (sf2-cost-1, no YJIT: before 1219 objects, 159 kB, a lane's block
+        # split at each grid point while its envelope released; after 376,
+        # 44.7 kB: the pieces left are note events, Notes' Rationals lead)
+        expect(m.objects_per_buffer).to be <= 420, m.report
+        expect(m.bytes_per_buffer).to be <= 50_000, m.report
+      ensure
+        s&.close
       end
     end
 
