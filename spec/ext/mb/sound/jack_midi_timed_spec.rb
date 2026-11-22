@@ -118,6 +118,26 @@ RSpec.describe('MB::Sound::FastAudio::JackMIDIOutput timed messages', :aggregate
     expect { out.write('x'.b * (out.max_message + 1)) }.to raise_error(ArgumentError, /up to #{out.max_message} bytes/)
   end
 
+  # (midi-one-based-1, from the review of midi-out-1: a long message queued
+  # while it fit, whose room then shrank, must not hold the queue forever)
+  it 'drops and counts a queued long message that no longer fits a cycle, and sends what follows it' do
+    out, inp = loopback
+    loop_delay(out, inp)
+    out.cap_message(1000)
+    sysex = ([0xf0] + Array.new(1998) { |i| i % 128 } + [0xf7]).pack('C*')
+    small = ([0xf0] + Array.new(98) { |i| i % 128 } + [0xf7]).pack('C*')
+    out.write(sysex) # (the port's own room still takes it: queued)
+    out.write(small)
+    out.write([0x90, 60, 100].pack('C*'))
+    got = read_until(inp, 2)
+    expect(got.map(&:last)).to eq([small, [0x90, 60, 100].pack('C*')])
+    expect(out.stats[:too_large]).to eq(1)
+    out.cap_message(0)
+    out.write(sysex)
+    expect(read_until(inp, 1).map(&:last)).to eq([sysex])
+    expect(out.stats[:too_large]).to eq(1)
+  end
+
   it "maps ring frames to JACK frames with a playback's clock" do
     p = fa::Playback.new(nil, -1, client, 1, 1, 48000, 0, 0, 2048, 0, 2, false, 0, ['out_1']).tap { |x| @opened << x }
     deadline = MB::U.clock_now + 2

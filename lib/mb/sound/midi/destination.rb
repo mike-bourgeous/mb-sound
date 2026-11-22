@@ -226,6 +226,15 @@ module MB
           @output
         end
 
+        # The port's counters (MIDI::Output#stats: messages, dropped,
+        # too_large (long messages that no longer fit a cycle, dropped),
+        # timed_sent, timed_late, ...), or an empty Hash when not connected
+        # or not on JACK.  Warns once for long messages dropped since the
+        # last report.
+        def stats
+          @output.nil? || @output.closed? ? {} : @output.stats
+        end
+
         # A MIDI::OutNode playing +source+ (a Clip, Kit, Stream, or anything
         # MIDI::Stream.for takes) to this destination: what a track's patch
         # builds for each clip.

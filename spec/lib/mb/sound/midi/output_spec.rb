@@ -35,6 +35,21 @@ RSpec.describe(MB::Sound::MIDI::Output, :aggregate_failures) do
       events.map { |_, b| b.bytes }
     end
 
+    it 'reports long messages JACK dropped because they no longer fit a cycle, once per batch' do
+      ENV['JACK_CLIENT_NAME'] = 'mbspec_drops'
+      input = track(MB::Sound::MIDI::Input.new)
+      out = track(MB::Sound::MIDI::Output.new(connect: 'mbspec_drops:midi_in'))
+      out.write([0xb0, 1, 1])
+      expect(wait_for(input, 1).length).to eq(1)
+      out.instance_variable_get(:@output).cap_message(1000) # (as if the period shrank)
+      out.write([0xf0, *Array.new(1998, 1), 0xf7])
+      out.write([0x90, 60, 100])
+      expect(wait_for(input, 1)).to eq([[0x90, 60, 100]])
+      expect { expect(out.stats[:too_large]).to eq(1) }.to output(/MIDI out .*: dropped 1 long message larger than the JACK port takes in one cycle now/).to_stderr
+      expect { out.stats }.not_to output.to_stderr
+      expect(out.report_drops).to eq(0)
+    end
+
     it 'connects to a destination by part of its name and sends Arrays, Strings, and Events' do
       ENV['JACK_CLIENT_NAME'] = 'mbspec_synth'
       input = track(MB::Sound::MIDI::Input.new) # mbspec_synth:midi_in on the shared client
