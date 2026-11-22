@@ -215,6 +215,19 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       MB::Sound.rewind
     end
 
+    # Waits (up to 5 s) until the named players have started on the
+    # default Session's render thread.  A player still waiting to start
+    # ("starts at" in #players) stops at once instead of fading, so the
+    # examples below that stop or fade a player wait for this instead of a
+    # fixed sleep (the panic example lost :a after `sleep 0.05` at a load
+    # average of 21: the render thread hadn't started it yet).
+    def wait_started(*names)
+      deadline = MB::U.clock_now + 5
+      started = -> { p = MB::Sound.players; names.all? { |n| p[n] && !p[n].include?('starts at') } }
+      sleep 0.01 until started.() || MB::U.clock_now > deadline
+      expect(names.map { |n| MB::Sound.players[n] }).to all(be_a(String).and(satisfy { |v| !v.include?('starts at') }))
+    end
+
     describe '#latency' do
       around(:each) do |ex|
         saved = %w[AUDIO_BACKEND AUDIO_PROFILE].to_h { |k| [k, ENV.delete(k)] }
@@ -393,14 +406,14 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       it 'fades everything out over four bars with #outro' do
         MB::Sound.bg(:a, 220.hz.sine)
         MB::Sound.bg(:b, 330.hz.sine, at: :now)
-        sleep 0.05
+        wait_started(:a, :b)
         expect(MB::Sound.outro.map(&:name)).to contain_exactly(:a, :b)
         expect(MB::Sound.players.values).to all(end_with('(fading out)'))
       end
 
       it 'ends everything with #fadeout and no names, as #outro' do
         MB::Sound.bg(:a, 220.hz.sine)
-        sleep 0.05
+        wait_started(:a)
         expect(MB::Sound.fadeout(fade: 0).name).to eq(:a)
         expect(MB::Sound.players).to be_empty
       end
@@ -452,7 +465,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
 
       it 'fades out over four bars by default' do
         MB::Sound.bg(:a, 220.hz.sine)
-        sleep 0.05
+        wait_started(:a)
         MB::Sound.stop(:a)
         expect(MB::Sound.players[:a]).to end_with('(fading out)')
         expect(MB::Sound::Session.default.fade_out).to eq(4)
@@ -460,7 +473,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
 
       it 'can fade out over a given number of bars' do
         MB::Sound.bg(:a, 220.hz.sine)
-        sleep 0.05
+        wait_started(:a)
         expect(MB::Sound.stop(:a, fade: 1/10r).name).to eq(:a)
         expect(MB::Sound.players[:a]).to end_with('(fading out)')
         deadline = MB::U.clock_now + 5
@@ -470,10 +483,14 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
 
       it 'stops everything right away with #panic, including fading and waiting players' do
         MB::Sound.bg(:a, 220.hz.sine)
-        MB::Sound.bg(:b, 330.hz.sine)   # waits for the next bar
-        sleep 0.05
+        MB::Sound.bg(:b, 330.hz.sine)
+        # (both start at bar 1 of the idle Session; a player still waiting
+        # stops at once, and panic counts a waiting one as a cancelled
+        # queued change: console_results_spec)
+        wait_started(:a, :b)
         MB::Sound.stop(:a)                       # fading out over four bars
         expect(MB::Sound.players.keys).to contain_exactly(:a, :b)
+        expect(MB::Sound.players[:a]).to end_with('(fading out)')
 
         entries = nil
         expect { entries = MB::Sound.panic }.to output("panic: stopped 2 players\n").to_stderr
