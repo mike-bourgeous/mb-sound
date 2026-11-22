@@ -463,6 +463,23 @@ module MB
       # whose name, title, and text best match the words (`help mix an
       # effect in`), else a search.
       def self.page_for_text(text, binding = nil)
+        page = words_page(text, binding)
+        hint = INTENTS[text.to_s.strip.downcase.squeeze(' ')]
+        hint ? LeadPage.new(Doc.new.note(hint).to_s, page) : page
+      end
+
+      # Words people type for a task whose command has another name, and
+      # a line pointing at it above whatever page the words find
+      # (ux-friction-3: the maintainer tried `clear`, `reset`,
+      # `session.clear`, `clear :form`, and `Session.clear` before asking
+      # how to empty the set).
+      START_OVER = 'Starting over? clear_set empties the set: it stops everything and takes out the tracks, scenes, flow, ' \
+                   'knobs, buses, and racks (tempo, key, and master gain stay; undo puts it back; help :clear_set).'
+      INTENTS = ['clear', 'reset', 'start over', 'new', 'empty', 'new set', 'clear all', 'clear everything', 'reset set',
+                 'clear set', 'clear session', 'wipe', 'empty set'].to_h { |w| [w, START_OVER] }.freeze
+
+      # The page for words (see .page_for_text, which adds INTENTS).
+      def self.words_page(text, binding = nil)
         text = text.to_s.strip
         return page_for(nil) if text.empty?
         page = owner_method_page(text, binding) and return page

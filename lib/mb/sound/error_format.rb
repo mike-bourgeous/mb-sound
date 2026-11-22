@@ -47,7 +47,14 @@ module MB
           end
         end
         console = e.is_a?(NameError) && (e.receiver.equal?(MB::Sound) rescue false)
-        if console && !e.is_a?(NoMethodError) && (hint = session_name_hint(e.name))
+        if console && CLEAR_WORDS.include?(e.name)
+          # (bare words and calls alike: `clear_all`, `new_set(...)`)
+          suggestions.replace([e.name == :reset ? "#{CLEAR_SET}, or pry-reset (Pry's reset of the console itself)" : CLEAR_SET])
+        elsif console && !e.is_a?(NoMethodError) && e.name == :session
+          # (`session.clear`, `session.reset`: the console has no
+          # `session` variable)
+          suggestions.replace(["Session.current (the console's session; clear_set empties its set: #{CLEAR_SET[/\((.*)\)/, 1]})"])
+        elsif console && !e.is_a?(NoMethodError) && (hint = session_name_hint(e.name))
           suggestions.unshift(hint)
         elsif e.is_a?(NoMethodError) && (e.receiver.is_a?(Symbol) rescue false) && MB::Sound.respond_to?(e.name) && !Symbol.method_defined?(e.name)
           # (ux-notes-1: the maintainer's `swap :growl. seq(...)`, a period
@@ -84,6 +91,19 @@ module MB
           "or ui.note '...' (a note about what you hear, with the screen)"
       }
       GUESSES = { attach: CLIP_ON_TRACK, note: NOTE_ON_TRACK }.freeze
+
+      # Console words for emptying the set, and what does it (ux-friction-3:
+      # the maintainer tried `clear`, `reset`, `session.clear`, `clear
+      # :form`, `Session.clear`, "a few others", then asked "How do I
+      # clear everything in form/track/bg/etc.?").  Also the methods
+      # people call on a Session for it (#value_guess).
+      CLEAR_SET = 'clear_set (stops everything and takes out the tracks, scenes, flow, knobs, buses, and racks; ' \
+                  'tempo, key, and master gain stay; undo puts it back)'
+      CLEAR_WORDS = %i[
+        reset clear_session clear_all clear_everything clear_tracks clear_form clear_flow clear_players reset_session
+        reset_all reset_set new_set new_session empty_set start_over wipe wipe_set clearset
+      ].freeze
+      SESSION_CLEAR = %i[clear reset clear_set clear_all reset_all empty wipe new_set clear!].freeze
 
       # Method names people reach for on graph nodes, and what they meant
       # (feedback-api-guesses: the omnibus19 name test's runners-up for
@@ -203,6 +223,8 @@ module MB
         elsif r.is_a?(Sequence::Duration) && Tone::WAVE_TYPES.include?(name)
           d = RubyValue.to_ruby(r)
           "#{d}.lfo.#{name} (the shape comes after .lfo; #{d}.hz.#{name} is a tone at that rate)"
+        elsif (r.is_a?(Session) || r.equal?(Session)) && SESSION_CLEAR.include?(name)
+          CLEAR_SET
         elsif (r.is_a?(UI::Facade) || r.is_a?(UI::Pending)) && %i[warn warning warnings].include?(name)
           # (his `ui.warn`, looking for where warnings show with a screen up)
           'ui.messages (the messages pane, NAV m: warnings from players and threads; the console\'s own commands warn in the REPL) ' \

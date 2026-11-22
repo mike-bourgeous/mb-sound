@@ -36,6 +36,33 @@ RSpec.describe(MB::Sound::ErrorFormat) do
       expect(described_class.console(e, color: false)).to eq("NoMethodError: undefined method 'plya' (did you mean play?)")
     end
 
+    # (ux-friction-3: before asking how to clear everything he tried
+    # clear, reset, session.clear, clear :form, Session.clear, "a few
+    # others")
+    it 'points the guesses at emptying the set to clear_set' do
+      want = 'did you mean clear_set (stops everything and takes out the tracks, scenes, flow, knobs, buses, and racks; tempo, key, and master gain stay; undo puts it back)'
+      %w[reset clear_session clear_all new_set reset_set start_over Session.clear Session.current.clear Session.current.reset].each do |code|
+        e = (MB::Sound.module_eval(code) rescue $!)
+        expect(described_class.summary(e)).to include(want), "#{code}: #{described_class.summary(e)}"
+      end
+      expect(described_class.summary((MB::Sound.module_eval('reset') rescue $!))).to include("or pry-reset (Pry's reset of the console itself)")
+      %w[session.clear session.reset].each do |code|
+        e = (MB::Sound.module_eval(code) rescue $!)
+        expect(described_class.summary(e)).to eq("NameError: undefined local variable or method 'session' (did you mean Session.current (the console's session; " \
+                                                 'clear_set empties its set: stops everything and takes out the tracks, scenes, flow, knobs, buses, and racks; ' \
+                                                 'tempo, key, and master gain stay; undo puts it back)?)'), code
+      end
+    end
+
+    it 'clears the screen with clear, saying once what empties the set, and points clear :form at the commands that clear parts' do
+      MB::Sound::Internal.instance_variable_set(:@clear_told, nil)
+      expect { MB::Sound::Internal.console_clear }.to output("\e[H\e[2J\e[2mclear clears the screen; clear_set empties the set (tracks, scenes, flow, knobs, buses, racks)\e[0m\n").to_stdout
+      expect { MB::Sound::Internal.console_clear }.to output("\e[H\e[2J").to_stdout
+      expect { MB::Sound::Internal.console_clear(:form) }.to raise_error(ArgumentError, /\Aclear clears the screen; :form goes to another command: clear_set empties the whole set .*untrack :name .*finish/)
+      MB::Sound::Internal.instance_variable_set(:@clear_told, nil)
+      expect { MB::Sound::Internal.console_clear(quiet: true) }.to output("\e[H\e[2J").to_stdout
+    end
+
     it 'points a note for a track at meta notes:, about:, and ui.note (GUESSES)' do
       e = (MB::Sound.note(:lead, 'breathy') rescue $!)
       expect(e).to be_a(NoMethodError)

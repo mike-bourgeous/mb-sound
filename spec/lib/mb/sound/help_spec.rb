@@ -1038,6 +1038,13 @@ RSpec.describe MB::Sound::Help do
         expect(out.string).not_to include("mb-sound's help")
       end
 
+      it 'leads the words people use for starting over with clear_set (ux-friction-3)' do
+        ['clear', 'reset', 'start over', 'new', 'empty', '  Clear  All '].each do |q|
+          expect(text(MB::Sound::Help.page_for_text(q)).lines.first).to start_with('Starting over? clear_set empties the set'), q
+        end
+        expect(text(MB::Sound::Help.page_for_text('tr808')).lines.first).not_to include('clear_set')
+      end
+
       it 'lists the rows of a page that name other pages, for the page pane' do
         drums = text(MB::Sound.help(:drums))
         links = MB::Sound::Help.page_links(drums).to_h

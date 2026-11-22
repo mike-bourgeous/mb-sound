@@ -537,6 +537,30 @@ module MB
         nil
       end
 
+      # The console's `clear` (bin/sound.rb): without arguments, clears
+      # the screen ($stdout, which the tiled screen's REPL pane reads too)
+      # and, the first time unless +quiet+, prints one dim line saying
+      # clear_set empties the set; with arguments (`clear :form`, `clear
+      # :tracks`), raises an ArgumentError naming the commands that clear
+      # those (ux-friction-3: the maintainer tried `clear`, `reset`,
+      # `session.clear`, `clear :form`, and `Session.clear` before asking
+      # how to clear everything; `clear :form` said "wrong number of
+      # arguments (given 1, expected 0)").  Returns nil.
+      def console_clear(*what, quiet: false)
+        unless what.empty?
+          raise ArgumentError, "clear clears the screen; #{what.map(&:inspect).join(', ')} goes to another command: clear_set empties the whole set " \
+            '(tracks, scenes, flow, knobs, buses, racks; undo puts it back); for one part: untrack :name (a track), stop or stop :name ' \
+            '(players), forget (stopped players kept for resume), finish (the form to its ending), panic (everything quiet now)'
+        end
+        $stdout.write("\e[H\e[2J")
+        unless quiet || @clear_told
+          @clear_told = true
+          $stdout.write("\e[2mclear clears the screen; clear_set empties the set (tracks, scenes, flow, knobs, buses, racks)\e[0m\n")
+        end
+        $stdout.flush
+        nil
+      end
+
       # An ArgumentError for console +command+ (swap) given a sound where
       # the player's name goes (+name+: an instrument, a graph, a clip),
       # naming the track that plays it when exactly one does, else nil for
