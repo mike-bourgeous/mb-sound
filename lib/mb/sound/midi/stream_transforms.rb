@@ -485,7 +485,40 @@ module MB
         # (Spec) both reorder, so everything prints canonically.
         ARGUMENT_ORDER = {
           echo: ->(args) { Transform::Echo.order(args) },
+          arp: ->(args) { Stream.bind_order(ARP_SIGNATURE, args) },
+          strum: ->(args) { Stream.bind_order(STRUM_SIGNATURE, args) },
         }.freeze
+
+        # #arp's mode (a Symbol) and rate (an Integer division, a Duration,
+        # a Rational) in either order: `arp(16, :up)` is `arp(:up, 16)`.
+        ARP_SIGNATURE = ArgTypes.register([:notes, :arp], ArgTypes::Signature.new(:arp, receiver: 'notes', params: [
+          ArgTypes::Param.new(name: :mode, primary: true, types: { name: 'the order (Transform::Arp::MODES: :up, :down, ...)' }),
+          ArgTypes::Param.new(name: :rate, default: 16, types: {
+            number: 'a note division (16 is sixteenths)', duration: 'one step (1.n16.t)', ratio: 'one step in whole notes (1/16r)',
+          }),
+        ]))
+
+        # #strum's spread (a length) and direction (a Symbol) in either
+        # order: `strum(:up, 30.ms)` is `strum(30.ms, :up)`.
+        STRUM_SIGNATURE = ArgTypes.register([:notes, :strum], ArgTypes::Signature.new(:strum, receiver: 'notes', params: [
+          ArgTypes::Param.new(name: :spread, primary: true, types: {
+            number: 'seconds from the first note to the last (0.03)', seconds: 'from the first note to the last (30.ms)',
+            samples: 'from the first note to the last', duration: 'from the first note to the last (1.n32)', ratio: 'seconds (3/100r)',
+          }),
+          ArgTypes::Param.new(name: :direction, default: :down, types: { name: 'the order (:down, :up, :alternate, ...)' }),
+        ]))
+
+        # +args+ in +signature+'s declared order when two are given and
+        # exactly one is a Symbol (the parameter taking names) written in
+        # the other's place; else as written (rates and spreads may also be
+        # clips or MIDI params, which the transforms read themselves).
+        def self.bind_order(signature, args)
+          return args unless args.length == 2
+          at = signature.params.index { |p| p.takes?(:name) }
+          names = args.each_index.select { |i| args[i].is_a?(Symbol) }
+          return args unless names.length == 1 && names[0] != at
+          args.reverse
+        end
 
         # +args+ of transform +name+ in canonical order (see
         # ARGUMENT_ORDER).

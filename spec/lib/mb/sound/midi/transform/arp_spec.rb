@@ -218,4 +218,19 @@ RSpec.describe(MB::Sound::MIDI::Transform::Arp, :midi_transforms) do
     expect(n).to be_a(MB::Sound::Notes)
     expect(n.to_s).to include('arp(:down, n16)')
   end
+
+  # (ux-friction-2, after the maintainer's "dwim argument order" for echo:
+  # the other clip transforms whose two arguments have disjoint types)
+  it 'takes the mode and rate in either order, and strum its spread and direction, recording the canonical order' do
+    clip = MB::Sound.seq(MB::Sound::A3.n2) & MB::Sound.seq(MB::Sound::C4.n2)
+    expect(clip.arp(16, :up).lineage.steps).to eq([[:arp, [:up, 16], {}]])
+    expect(clip.stream.arp(1.n16, :down).lineage.steps).to eq([[:arp, [:down, 1.n16], {}]])
+    expect(MB::Sound.arp(8, :updown).steps.first[1]).to eq([:updown, 8])
+    expect(clip.strum(:up, 30.ms).lineage.steps).to eq([[:strum, [30.ms, :up], {}]])
+    expect(clip.arp(:up).lineage.steps).to eq([[:arp, [:up], {}]])
+    expect { clip.arp(:up, :down) }.to raise_error(ArgumentError, /got :down/) # (two names: as written, the rate refuses it)
+    a = read_events(MB::Sound::Notes.new(held(60, 64)).arp(16, :down).stream) rescue nil
+    b = read_events(MB::Sound::Notes.new(held(60, 64)).arp(:down, 16).stream) rescue nil
+    expect(a).to eq(b)
+  end
 end
