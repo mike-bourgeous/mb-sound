@@ -84,7 +84,13 @@ module MB
       # the bump) carries descriptive metadata: a `meta: { ... }` keyword
       # on the `graph` line, `.note(...)` calls, and inline comments read
       # as notes (GraphIO::Comments); older documents' comments stay
-      # comments.
+      # comments.  Format 14 (form-knobs-1, 2026-11-22) prints a scene's
+      # or section's knob values of a track as its track hash (`drums: {
+      # clip: beat, energy: 0.8 }` for `drums: beat, "drums/energy": 0.8`),
+      # and `over: :section` ramps, which older mb-sound reads as a track
+      # given a Hash (it stops at the format line instead); older
+      # documents' quoted keys load as before.  (The number is the
+      # branch's; the merge train numbers format changes in merge order.)
       #
       # FORMATS names the change each version made, so loaders gate on a
       # name (GraphIO.since?) and branches adding versions touch only this
@@ -102,6 +108,7 @@ module MB
         11 => :metadata,
         12 => :following_scales,
         13 => :rack_slots,
+        14 => :track_hashes,
       }.freeze
       FORMAT = FORMATS.keys.max
 
