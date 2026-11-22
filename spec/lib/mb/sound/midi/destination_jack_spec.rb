@@ -28,6 +28,41 @@ RSpec.describe('MIDI out on JACK (timing)', :aggregate_failures) do
     expect(got).to eq([[0x90, 64, 100], [0x80, 64, 0]])
   end
 
+  # midi_out makes a new Destination on each call (a console line typed
+  # twice, a track and a later `.stats`); every destination aimed at one
+  # port shares that port's MIDI::Output (Destination.output_for): one JACK
+  # port of ours, one timed queue (so notes of several tracks leave it in
+  # frame order), and #stats and #panic of a fresh object reach the port a
+  # track plays through (fixes-18: train 12 asked whether a second port opens)
+  it 'shares one output, and one JACK port, among destinations aimed at the same port' do
+    synth = "#{ENV['JACK_CLIENT_NAME']}_synth:in"
+    ours = -> { MB::Sound::FastAudio.jack_ports("^#{Regexp.escape(ENV['JACK_CLIENT_NAME'])}:", true, MB::Sound::FastAudio::JACK_PORT_IS_OUTPUT) }
+    a = MB::Sound.midi_out("#{ENV['JACK_CLIENT_NAME']}_synth")
+    expect(ours.()).to eq([a.output.port])
+    b = MB::Sound.midi_out(synth, channel: 2) # (another spelling of the same port)
+    expect(b).not_to equal(a)
+    expect(b.output).to equal(a.output)
+    expect(ours.()).to eq([a.output.port])
+    expect(MB::Sound::MIDI::Destination.outputs.keys).to eq([[:jack, synth]])
+    expect(MB::Sound::FastAudio.jack_connections(a.output.port)).to eq([synth])
+
+    got = []
+    receive = ->(n) {
+      deadline = MB::U.clock_now + 2
+      while got.length < n && MB::U.clock_now < deadline
+        got.concat(@synth.read.map { |_, bytes| bytes.bytes })
+        sleep 0.005
+      end
+    }
+    a.test(60, length: 0.05)
+    receive.(2)
+    expect(MB::Sound.midi_out(synth).stats).to eq(a.stats)
+    MB::Sound.midi_out(synth, channel: 2).panic
+    receive.(4)
+    expect(got).to eq([[0x90, 60, 100], [0x80, 60, 0], [0xb1, 120, 0], [0xb1, 123, 0]])
+    expect(ours.()).to eq([a.output.port])
+  end
+
   [120, 137].each do |bpm|
     it "sends each note on the JACK frame of its audio plus the offset, exactly, at five buffer sizes (#{bpm} BPM)" do
       clip = MB::Sound.seq(MB::Sound::C3, MB::Sound::E3, MB::Sound::G3, MB::Sound::B3, MB::Sound::D4, nil, MB::Sound::A3, MB::Sound::F3).n32
