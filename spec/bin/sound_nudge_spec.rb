@@ -85,8 +85,11 @@ RSpec.describe('bin/sound.rb number nudge', :aggregate_failures) do
     # to a file, so the example can wait for each redefinition to land (a
     # warm-up, then a bar: under load longer than any fixed wait) without
     # typing on the prompt (a probe would take the nudged line off it).
-    # Each nudge waits for the one before to land: undo steps back to the
-    # definition that was playing when the undone line ran.
+    # The nudges don't wait for each other to land: undo steps back exactly
+    # one redefinition whether or not the one before it got to play
+    # (undo-one-step-1; before, it restored what was playing when the
+    # undone line ran, so a nudge typed before the last one landed went
+    # back two).
     playing_path = tmp_path('playing')
     playing = -> { File.read(playing_path).to_s rescue '' }
     watcher = "Thread.new { loop { (pl = Session.current.instance_variable_get(:@players).values.find { _1.name == :t && _1.current? }; " \
@@ -124,11 +127,10 @@ RSpec.describe('bin/sound.rb number nudge', :aggregate_failures) do
       d = MB::U.clock_now + 10
       sleep 0.03 until count.(/=> :t/) > runs || MB::U.clock_now > d
       expect(count.(/=> :t/)).to eq(runs + 1), text.call
-      # (the prompt comes back with the nudged line; then its
-      # redefinition lands, on a bar)
+      # (the prompt comes back with the nudged line; its redefinition
+      # lands on a bar, maybe after the next nudge)
       want = ["sound.rb [#{6 + i}] MB::Sound(0) > #{line.sub('1200', "120#{i + 1}")}", "#{i + 1}"]
       expect(settle.(want, 10) { prompt_line.call }).to eq(want), text.call
-      expect(settle.("[120#{i + 1}]", 20) { playing.call }).to eq("[120#{i + 1}]"), text.call
     end
 
     pl = 'pl = Session.current.instance_variable_get(:@players).values.find { _1.name == :t && _1.current? }'
