@@ -15,7 +15,11 @@ module MB
       DEMOS = {
         night_bus: '"Night Bus: Last Stop", tech house at 126 BPM in A minor (bin/songs/night_bus_flow.rb)',
         tunnel_vision: '"Tunnel Vision", drum & bass at 174 BPM in F minor with hall and echo buses (bin/songs/tunnel_vision.rb)',
+        n109: '"N109", half-time drum & bass at 174 BPM in F Phrygian; turn :variant between its two versions (bin/songs/n109.rb)',
       }.freeze
+
+      # A knob turn to try, for demos without a :cut knob.
+      TURNS = { n109: 'turn :variant, 0, over: 8.bars' }.freeze
 
       # Loads demo set +name+ (see #demos) into the current Session, paused
       # at bar 1: tracks, scenes, knobs, the master chain, and its flow,
@@ -39,7 +43,7 @@ module MB
 
         s = Session.current
         replaced = s.set_summary
-        path = File.join(GraphIO.library_presets_dir, "#{name}#{GraphIO::EXTENSION}")
+        path = DemoMethods.demo_file(name)
         doc = begin
           s.clear_set(label: "demo #{name.inspect}") {
             rewind
@@ -56,9 +60,20 @@ module MB
         puts "  tracks  #{arr.tracks.keys.join(' ')}"
         puts "  scenes  #{arr.scenes.keys.join(' ')}"
         puts "  knobs   #{s.knobs.keys.join(' ')}" unless s.knobs.empty?
-        puts "\e[2mTry:\e[0m go :#{arr.scenes.keys[1] || arr.scenes.keys[0]}    turn :cut, 3000, over: 2    go :drop    stop :all"
+        puts "\e[2mTry:\e[0m go :#{arr.scenes.keys[1] || arr.scenes.keys[0]}    #{TURNS.fetch(name, 'turn :cut, 3000, over: 2')}    go :drop    stop :all"
         puts "\e[2m     \e[0mplay_form demo.form   (the whole song; loop!, onward, finish steer it)    ui :tiles    help :demo"
         doc
+      end
+
+      # The set document of demo +name+ in mb-sound's presets/: a plain
+      # document, or a bundle's when the set holds audio (N109's bounced
+      # voices); the plain path when neither exists.
+      def self.demo_file(name)
+        path = File.join(GraphIO.library_presets_dir, "#{name}#{GraphIO::EXTENSION}")
+        return path if File.file?(path)
+
+        bundle = GraphIO.bundle_dir(path)
+        (File.directory?(bundle) && GraphIO.bundle_document(bundle)) || path
       end
 
       # The demo sets (name => what it is), printed as a list.

@@ -113,6 +113,14 @@ RSpec.describe(MB::Sound::DemoMethods) do
     expect { within { MB::Sound.demo(:tunnel_vision) } }.to raise_error(MB::Sound::GraphIO::LoadError, 'x.mbg.rb:3: no such thing')
   end
 
+  it 'finds every demo\'s set document, plain or a bundle' do
+    MB::Sound::DemoMethods::DEMOS.each_key do |name|
+      file = MB::Sound::DemoMethods.demo_file(name)
+      expect(File.file?(file)).to eq(true), "#{name}: #{file}"
+      expect(MB::Sound::GraphIO.parse(file).kind).to eq(:set)
+    end
+  end
+
   it 'lists the demos on its help page' do
     page = MB::Sound::ColorPolicy.strip(MB::Sound.help(:demos).to_s)
     expect(page).to include('A demo set to explore')
