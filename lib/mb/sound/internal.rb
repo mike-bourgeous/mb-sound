@@ -537,6 +537,30 @@ module MB
         nil
       end
 
+      # An ArgumentError for console +command+ (swap) given a sound where
+      # the player's name goes (+name+: an instrument, a graph, a clip),
+      # naming the track that plays it when exactly one does, else nil for
+      # names (Symbols, Integers, journal entries) and Hashes.
+      # (ux-friction-3: the maintainer's `swap kit, euclid` with `kit` the
+      # SoundFont on track :drums said "No background player
+      # #<MB::Sound::Sampler::SF2::Font ...> is playing or stopped")
+      def sound_for_name_error(command, name)
+        return nil if name.is_a?(Symbol) || name.is_a?(Integer) || name.is_a?(String) || name.is_a?(Hash) || name.is_a?(Session::Journal::Entry) || name.nil?
+
+        arr = Session.current.arrangement
+        tracks = arr.tracks.values.select { |tr|
+          tr.graph.equal?(name) || tr.clip.equal?(name) ||
+            Arrangement::InstrumentPatch.voice_of(tr.patch).equal?(name) || Arrangement::InstrumentPatch.entry_of(tr.patch).equal?(name)
+        }.map(&:name)
+        what = name.class.name.to_s.sub('MB::Sound::', '')
+        plays = case tracks.length
+                when 1 then "; track #{tracks[0].inspect} plays it: #{command} #{tracks[0].inspect}, clip"
+                when 0 then " (#{command} :drums, clip)"
+                else "; tracks #{tracks.map(&:inspect).join(', ')} play it: #{command} #{tracks[0].inspect}, clip"
+                end
+        ArgumentError.new("#{command} takes a track's or player's name first (a Symbol), not a sound (got a #{what})#{plays}")
+      end
+
       # Library Entry +entry+ given to +command+ (`bg`) for the existing
       # track +name+: a clip or generator entry's clip at its defaults (as
       # `track :x, entry` takes it, so it plays on the track; a

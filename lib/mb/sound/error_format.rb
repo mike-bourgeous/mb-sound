@@ -59,6 +59,8 @@ module MB
           suggestions.replace([hint.call(*e.args.first(1))])
         elsif e.is_a?(NoMethodError) && (hint = node_guess(e) || entry_guess(e) || value_guess(e))
           suggestions.replace([hint])
+        elsif e.instance_of?(ArgumentError) && (hint = arity_guess(e))
+          suggestions.replace([hint])
         end
         message = message.sub(/ for module MB::Sound\z/, '').sub(/ for module MB::Sound(?=\n)/, '')
         [message.rstrip, suggestions.uniq]
@@ -113,6 +115,32 @@ module MB
             'which has no transpose) or v.hz.vibrato(5.5, depth: 30.cents) (vibrato that stays a pitch)'
         },
       }.freeze
+
+      # Methods called without the argument they need, by the method's
+      # name and the end of its file's path, and what was meant (Ruby's
+      # "wrong number of arguments (given 0, expected 1)" names neither
+      # the method nor what goes in): [name, path pattern] => suggestion.
+      # (ux-friction-3: the maintainer's `kit = sf2(path).sampler(voices:
+      # 8)`, then `help sampler` and four show-docs to find its arguments)
+      # (Procs: Playable may load after this file)
+      SAMPLER_SOURCE = -> {
+        'kit.sampler(clip, voices: 8) (sampler plays a source: a clip, midi, or a MIDI file); ' \
+          "on a track, track :drums, kit already plays the kit's clips on #{Playable::VOICES} voices, " \
+          'and track(:drums) { |c| kit.sampler(c, voices: 4) } picks the voices'
+      }
+      ARITY_GUESSES = {
+        [:sampler, %r{/sampler/(?:sf2|instrument)\.rb\z}] => SAMPLER_SOURCE,
+      }.freeze
+
+      # The ARITY_GUESSES suggestion for Ruby's arity ArgumentError +e+
+      # (raised at the called method's def line), or nil.
+      def arity_guess(e)
+        return nil unless e.message.match?(/\Awrong number of arguments \(given 0, expected/)
+
+        loc = e.backtrace_locations&.first or return nil
+        ARITY_GUESSES.each { |(name, path), hint| return hint.call if loc.base_label == name.to_s && loc.path.to_s.match?(path) }
+        nil
+      end
 
       # The NODE_GUESSES suggestion for NoMethodError +e+ on a graph node,
       # or nil.

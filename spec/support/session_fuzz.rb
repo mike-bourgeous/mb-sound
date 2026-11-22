@@ -836,6 +836,17 @@ module SessionFuzz
       body = "knob :cut, (100.hz..5000.hz).at(#{s.pick(%w[600 3000])}.hz)\\n#{body}" if s.knob
       "GraphIO.load(%(graph \#{GraphIO::FORMAT}, name: \"tempo\", kind: :set\\n#{body}\\n), session: Session.current)"
     },
+    ->(s) {
+      # (ux-friction-3, "this is really effing annoying") a synth track
+      # given a one-shot, then a looping clip swapped in on the next bar
+      # while the one-shot plays (it will have ended by then) or as it
+      # ends: the swap starts the track again with the clip, as bg (it
+      # raised ClipsOver, an INVALID song)
+      next if s.swappable.empty?
+
+      t = s.pick(s.swappable)
+      "bg :#{t}, seq(C5, D5).n16, on: :now; after(in: #{s.pick(['1/16r', '1/8r'])}) { swap :#{t}, #{s.pick(MELODIC.select { |c| c.end_with?('.loop') })}, on: :bar }"
+    },
     # (new commands go here, at the end)
   ].freeze
 

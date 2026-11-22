@@ -1,3 +1,5 @@
+require_relative "../../../support/sf2_writer"
+
 RSpec.describe(MB::Sound::PlaybackMethods) do
   before(:each) do
     ENV['OUTPUT_TYPE'] = 'null'
@@ -705,6 +707,79 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         e = (MB::Sound.module_eval('nosuchname_here') rescue $!)
         expect(MB::Sound::ErrorFormat.summary(e)).not_to include('the track')
       end
+    end
+  end
+
+  # (ux-friction-3, the maintainer's note "this is really effing annoying":
+  # `swap :drums, euclid(8, 8)` replaced the loop with a one-bar clip that
+  # played once; `swap :drums, euclid(8, 8).loop` then said the clip had
+  # ended; `swap kit, euclid` named the kit as a player)
+  describe 'swap on a track whose one-shot clip has ended' do
+    before do
+      @session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 1, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120),
+                                        channels: 1, buffer_size: 800, realtime: false, master_gain: 1)
+      in_session do
+        # (a four-second release: the voice rings long after its clip ends)
+        MB::Sound.track(:drums) { |v| v.hz.sine * v.env(0, 0, 1, 4.0).no_velocity }
+        MB::Sound.bg(:drums, MB::Sound.seq(MB::Sound::C3).n16, on: :now)
+      end
+      # (the sixteenth note is over after a quarter second; the tail rings)
+      30.times { @session.process_buffer }
+    end
+
+    after do
+      @session.close
+      MB::Sound.rewind
+    end
+
+    def in_session(&block) = MB::Sound::Session.with_context(session: @session, &block)
+
+    it 'starts the track again with the new clip, as bg, while only the tail rings, saying so' do
+      expect(@session.players.keys).to include(:drums)
+      expect(@session.swap_unheard?(:drums)).to eq(true)
+      loop_clip = MB::Sound.seq(MB::Sound::E3).n8.loop
+      allow(MB::Sound).to receive(:live?).and_return(true)
+      entry = nil
+      expect { entry = in_session { MB::Sound.swap(:drums, loop_clip, on: :bar) } }.to output(
+        /swap :drums: :drums's clip had ended \(only its tail rang\); starting it again with the new clip \(as bg :drums, clip\)/
+      ).to_stdout
+      expect(entry.kind).to eq(:bg)
+      bar = @session.transport.bar
+      @session.process_buffer until @session.transport.bar > bar
+      4.times { @session.process_buffer }
+      expect(@session.arrangement.tracks[:drums].clip).to eq(loop_clip)
+      expect(@session.swap_unheard?(:drums)).to eq(false)
+      # Undone as a bg is: the player that rang out comes back (or none)
+      in_session { MB::Sound.undo }
+      4.times { @session.process_buffer }
+      expect(@session.arrangement.tracks[:drums].clip).not_to eq(loop_clip)
+    end
+
+    it 'says a one-shot clip swapped in plays once' do
+      loop_clip = MB::Sound.seq(MB::Sound::E3).n8.loop
+      in_session { MB::Sound.swap(:drums, loop_clip, on: :now) }
+      4.times { @session.process_buffer }
+      allow(MB::Sound).to receive(:live?).and_return(true)
+      expect { in_session { MB::Sound.swap(:drums, MB::Sound.euclid(8, 8)) } }.to output(
+        /swap :drums: .* plays once \(a one-shot clip; \.loop repeats it\)/
+      ).to_stdout
+      expect { in_session { MB::Sound.swap(:drums, MB::Sound.euclid(3, 8).loop) } }.not_to output(/plays once/).to_stdout
+    end
+
+    it 'says a sound in the name\'s place is not a name, naming the track that plays it' do
+      path = SF2Writer.write(tmp_path('kit.sf2'), samples: [{ name: 's', data: SF2Writer.sine(200, 400) }],
+                                                  instruments: [{ name: 'I', zones: [{ sample_id: 0 }] }],
+                                                  presets: [{ name: 'Standard', bank: 128, program: 0, zones: [{ instrument: 0 }] }])
+      kit = MB::Sound.sf2(path)
+      in_session { MB::Sound.track(:kick, kit) }
+      expect { in_session { MB::Sound.swap(kit, MB::Sound.euclid(3, 8)) } }.to raise_error(
+        ArgumentError, /\Aswap takes a track's or player's name first \(a Symbol\), not a sound \(got a Sampler::SF2::Font\); track :kick plays it: swap :kick, clip\z/
+      )
+      other = MB::Sound.sf2(path)[128, 0]
+      expect { in_session { MB::Sound.swap(other, MB::Sound.euclid(3, 8)) } }.to raise_error(ArgumentError, /not a sound \(got a Sampler::Instrument\) \(swap :drums, clip\)\z/)
+      # (and the sampler's missing source: ux-friction-3's first error)
+      e = (kit.sampler(voices: 8) rescue $!)
+      expect(MB::Sound::ErrorFormat.summary(e)).to include('did you mean kit.sampler(clip, voices: 8)', 'track :drums, kit already plays the kit\'s clips on 8 voices')
     end
   end
 
