@@ -413,6 +413,19 @@ module SessionFuzz
         lines << "at_bar(#{bar}, beat: #{beats}) { unmute :#{t} }"
       end
     end
+    # (fixes-16, the 2026-11-22 soak's seed 789018) everything stopped on
+    # the last bar's last beat, then a tempo ramp half a beat later as the
+    # last scheduled block: the render ends early on that block's frame
+    # (or where the tails went quiet after it), which must be one frame at
+    # any buffer size while the ramp moves the tempo.  The tracks' own
+    # stops let the filters below drop swaps landing after them.  Drawn
+    # last, so every seed keeps the song it made before.
+    if rng.rand < 0.2
+      stops = names.map { |t| "stop :#{t}, fade: 0" }.join('; ')
+      lines << "at_bar(#{bars}, beat: #{beats}) { #{stops}; stop :all, fade: 0 }"
+      curve = pick(rng, [', curve: :smooth', ''])
+      lines << "at_bar(#{bars}, beat: #{beats * 2 + 1}/2r) { tempo #{pick(rng, [90, 180])}, over: #{pick(rng, ['3.beats', '1'])}#{curve}, on: :now }"
+    end
     events = track_events(lines, beats, scene_ends, scene_loops)
     lines = without_swaps_of_stopped(lines, beats, tracks.keys, events)
     lines = without_lost_cues(lines, beats, events, scene_clips.each_with_index.to_h { |c, k| [:"s#{k + 1}", c.keys] })
