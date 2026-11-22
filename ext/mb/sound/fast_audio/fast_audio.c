@@ -41,6 +41,7 @@
 #include "mb_miniaudio.h"
 #include "mb_jack.h"
 #include "mb_conceal.h"
+#include "mb_midi_timed.h"
 
 #define MAX_CHANNELS 64
 #define MAX_BACKENDS 16
@@ -271,6 +272,18 @@ static VALUE ruby_jack_open(VALUE self, VALUE name)
  * cycles this client missed or was called twice for, when an asynchronous
  * server found it late), or nil if it isn't open.
  */
+/*
+ * call-seq: MB::Sound::FastAudio.jack_frame_time -> Integer or nil
+ *
+ * The JACK server's estimate of the current frame time (32 bits, wrapping;
+ * jack_frame_time), or nil if the shared client isn't open.  For timing
+ * JACK MIDI against a clock other than a JACK playback's.
+ */
+static VALUE ruby_jack_frame_time(VALUE self)
+{
+	return mb_jack_is_open() ? UINT2NUM(mb_jack_frame_time()) : Qnil;
+}
+
 static VALUE ruby_jack_info(VALUE self)
 {
 	if (!mb_jack_is_open()) {
@@ -1860,6 +1873,45 @@ static VALUE playback_jack_clock(VALUE self)
 	return h;
 }
 
+/*
+ * call-seq:
+ *   playback.jack_frame_of(ahead) -> Integer or nil
+ *
+ * The JACK frame time (32 bits, wrapping) at which the frame +ahead+
+ * frames past the ring's current write position (the next frame #write
+ * queues is 0; negative for frames already queued) reaches the ports, by
+ * the latest cycle's mapping (see #jack_clock; exact until the next
+ * underrun).  For JackMIDIOutput#write_at, so MIDI leaves with the audio
+ * of the same frame.  Allocates nothing.  nil for miniaudio devices,
+ * before the first cycle, and once closed.
+ */
+static VALUE playback_jack_frame_of(VALUE self, VALUE ahead)
+{
+	struct playback *p = get_playback(self);
+	if (!p->jack || !p->info.ready) {
+		return Qnil;
+	}
+	long long offset = NUM2LL(ahead);
+
+	unsigned s1, s2;
+	uint32_t frame;
+	size_t read_pos;
+	do {
+		s1 = atomic_load_explicit(&p->jack_seq, memory_order_acquire);
+		frame = atomic_load_explicit(&p->jack_frame, memory_order_relaxed);
+		read_pos = atomic_load_explicit(&p->jack_read_pos, memory_order_relaxed);
+		atomic_thread_fence(memory_order_acquire);
+		s2 = atomic_load_explicit(&p->jack_seq, memory_order_relaxed);
+	} while ((s1 & 1) || s1 != s2);
+	if (s1 == 0) {
+		return Qnil;
+	}
+
+	size_t write_pos = atomic_load(&p->write_pos);
+	uint32_t result = frame + (uint32_t)(write_pos - read_pos) + (uint32_t)offset;
+	return UINT2NUM(result);
+}
+
 /* The number of channels sent to the device. */
 static VALUE playback_device_channels(VALUE self)
 {
@@ -3182,6 +3234,14 @@ struct jack_midi {
 	_Atomic size_t messages; // messages that went through
 	_Atomic size_t dropped; // messages that didn't fit (queue or port buffer)
 	_Atomic size_t repeated; // messages of a repeated cycle, not queued again
+	_Atomic size_t too_large; // output messages larger than the port buffer holds
+	_Atomic size_t max_message; // output: the port buffer's room for one event, last cycle
+
+	// Output only: timed short messages (see mb_midi_timed.h), and the
+	// last cycle's frame time (JACK's thread; see midi_out_process)
+	struct mb_midi_timed *timed;
+	uint32_t out_frame;
+	int out_cycled;
 
 	// The last input cycle that had messages (JACK's thread only; see
 	// midi_in_process)
@@ -3319,12 +3379,27 @@ static void midi_in_process(struct mb_jack_unit *unit, uint32_t nframes)
 }
 
 // JACK's thread: queued messages out of the ring into the output port (all
-// at the start of the cycle; what doesn't fit waits for the next cycle)
+// at the start of the cycle; what doesn't fit waits for the next cycle),
+// then the timed messages due in this cycle at their frames (see
+// mb_midi_timed.h).  A message that doesn't fit an empty port buffer never
+// will: it is dropped and counted (stats[:too_large]).  A cycle an
+// asynchronous server runs twice (the same frame time) leaves the port
+// buffer as the first call wrote it (as playback_jack_process does), so
+// nothing sent in it is lost or sent twice.
 static void midi_out_process(struct mb_jack_unit *unit, uint32_t nframes)
 {
 	struct jack_midi *m = unit->user;
+	uint32_t now = mb_jack_last_frame_time();
+	if (m->out_cycled && now == m->out_frame) {
+		atomic_fetch_add_explicit(&m->repeated, 1, memory_order_relaxed);
+		return;
+	}
+	m->out_cycled = 1;
+	m->out_frame = now;
+
 	void *buffer = mb_jack_port_buffer(unit->ports[0], nframes);
 	mb_jack_midi_clear(buffer);
+	atomic_store_explicit(&m->max_message, mb_jack_midi_max_event_size(buffer), memory_order_relaxed);
 
 	size_t rp = atomic_load_explicit(&m->read_pos, memory_order_relaxed);
 	size_t wp = atomic_load_explicit(&m->write_pos, memory_order_acquire);
@@ -3343,6 +3418,12 @@ static void midi_out_process(struct mb_jack_unit *unit, uint32_t nframes)
 		}
 
 		if (mb_jack_midi_write(buffer, 0, bytes, size) != 0) {
+			if (mb_jack_midi_count(buffer) == 0) {
+				// Too large for any cycle: drop it rather than block the queue
+				atomic_fetch_add_explicit(&m->too_large, 1, memory_order_relaxed);
+				rp += MIDI_HEADER + size;
+				continue;
+			}
 			break; // the port buffer is full; try again next cycle
 		}
 		rp += MIDI_HEADER + size;
@@ -3350,6 +3431,11 @@ static void midi_out_process(struct mb_jack_unit *unit, uint32_t nframes)
 	}
 
 	atomic_store_explicit(&m->read_pos, rp, memory_order_release);
+
+	if (m->timed != NULL) {
+		mb_midi_timed_stage(m->timed, now);
+		mb_midi_timed_emit(m->timed, buffer, now, nframes, mb_jack_midi_write);
+	}
 }
 
 static void midi_jack_shutdown(struct mb_jack_unit *unit)
@@ -3375,6 +3461,7 @@ static void jack_midi_free(void *ptr)
 	struct jack_midi *m = ptr;
 	jack_midi_release(m);
 	free(m->data);
+	free(m->timed);
 	if (m->pid == getpid()) {
 		pthread_cond_destroy(&m->ready);
 		pthread_mutex_destroy(&m->lock);
@@ -3385,7 +3472,7 @@ static void jack_midi_free(void *ptr)
 static size_t jack_midi_memsize(const void *ptr)
 {
 	const struct jack_midi *m = ptr;
-	return sizeof(*m) + m->capacity;
+	return sizeof(*m) + m->capacity + (m->timed ? sizeof(*m->timed) : 0);
 }
 
 static const rb_data_type_t jack_midi_type = {
@@ -3480,6 +3567,12 @@ static VALUE jack_midi_initialize(VALUE self, VALUE client_name, VALUE port_name
 	}
 	m->capacity = capacity;
 	m->output = output;
+	if (output) {
+		m->timed = calloc(1, sizeof(struct mb_midi_timed));
+		if (m->timed == NULL) {
+			rb_raise(rb_eNoMemError, "Could not allocate the timed MIDI queue");
+		}
+	}
 	m->unit.process = output ? midi_out_process : midi_in_process;
 	m->unit.shutdown = midi_jack_shutdown;
 	m->unit.user = m;
@@ -3625,6 +3718,12 @@ static VALUE jack_midi_write(VALUE self, VALUE bytes)
 		rb_raise(rb_eArgError, "MIDI messages are limited to %d bytes (got %zu)", MIDI_MAX_MESSAGE, size);
 	}
 
+	size_t room = atomic_load(&m->max_message);
+	if (room != 0 && size > room) {
+		atomic_fetch_add_explicit(&m->too_large, 1, memory_order_relaxed);
+		rb_raise(rb_eArgError, "This JACK MIDI port takes messages of up to %zu bytes per cycle (got %zu)", room, size);
+	}
+
 	size_t wp = atomic_load_explicit(&m->write_pos, memory_order_relaxed);
 	size_t rp = atomic_load_explicit(&m->read_pos, memory_order_acquire);
 	if (m->capacity - (wp - rp) < MIDI_HEADER + size) {
@@ -3678,7 +3777,72 @@ static VALUE jack_midi_stats(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("dropped")), SIZET2NUM(atomic_load(&m->dropped)));
 	rb_hash_aset(h, ID2SYM(rb_intern("repeated")), SIZET2NUM(atomic_load(&m->repeated)));
 	rb_hash_aset(h, ID2SYM(rb_intern("queued")), SIZET2NUM(midi_queued(m)));
+	if (m->output) {
+		struct mb_midi_timed *t = m->timed;
+		rb_hash_aset(h, ID2SYM(rb_intern("too_large")), SIZET2NUM(atomic_load(&m->too_large)));
+		rb_hash_aset(h, ID2SYM(rb_intern("timed_sent")), SIZET2NUM(atomic_load(&t->sent)));
+		rb_hash_aset(h, ID2SYM(rb_intern("timed_late")), SIZET2NUM(atomic_load(&t->late)));
+		rb_hash_aset(h, ID2SYM(rb_intern("timed_max_late")), INT2NUM(atomic_load(&t->max_late)));
+		rb_hash_aset(h, ID2SYM(rb_intern("timed_dropped")), SIZET2NUM(atomic_load(&t->dropped)));
+		rb_hash_aset(h, ID2SYM(rb_intern("timed_pending")), SIZET2NUM(mb_midi_timed_pending(t)));
+	}
 	return h;
+}
+
+static struct jack_midi *get_jack_midi_output(VALUE self)
+{
+	struct jack_midi *m = get_jack_midi(self);
+	jack_midi_check_open(m);
+	if (!m->output) {
+		rb_raise(rb_eIOError, "This is a MIDI input");
+	}
+	return m;
+}
+
+/*
+ * call-seq:
+ *   output.write_at(frame, status, data1, data2) -> true or false
+ *
+ * Queues one short message (a channel message, or a one-byte realtime
+ * message such as clock 0xF8; +data1+ and +data2+ are ignored past the
+ * message's length) to leave on JACK frame time +frame+ (wrapping at 2**32,
+ * as JackMIDIInput's times and Playback#jack_frame_of): in the cycle that
+ * holds it, at its offset, or at the start of the next cycle if it is late.
+ * Messages on one port leave sorted by frame whatever order they were
+ * queued in (equal frames in queue order), after the cycle's #write
+ * messages.  Allocates nothing; for the render thread.  False if the queue
+ * was full (the message is dropped and counted in #stats).  SysEx and other
+ * long messages go through #write.
+ */
+static VALUE jack_midi_write_at(VALUE self, VALUE frame, VALUE status, VALUE data1, VALUE data2)
+{
+	struct jack_midi *m = get_jack_midi_output(self);
+	uint8_t bytes[3] = { NUM2UINT(status) & 0xff, NUM2UINT(data1) & 0x7f, NUM2UINT(data2) & 0x7f };
+	int size = mb_midi_timed_size(bytes[0]);
+	if (size == 0) {
+		rb_raise(rb_eArgError, "write_at takes channel and one-byte system messages (status 0x%02x); use write for SysEx", bytes[0]);
+	}
+	return mb_midi_timed_put(m->timed, (uint32_t)NUM2ULL(frame), bytes, size) == 0 ? Qtrue : Qfalse;
+}
+
+/*
+ * Drops every timed message queued so far and not yet sent (at the next
+ * cycle).  Messages queued afterwards, and #write's, are kept.
+ */
+static VALUE jack_midi_discard_timed(VALUE self)
+{
+	mb_midi_timed_discard(get_jack_midi_output(self)->timed);
+	return Qnil;
+}
+
+/*
+ * The largest message the port's buffer held in the last cycle (its room
+ * for one event when empty), or 0 before the first cycle.  #write raises
+ * for longer messages.
+ */
+static VALUE jack_midi_max_message(VALUE self)
+{
+	return SIZET2NUM(atomic_load(&get_jack_midi(self)->max_message));
 }
 
 /*
@@ -3733,6 +3897,9 @@ static void init_jack_midi(VALUE fast_audio)
 	rb_define_method(output, "closed?", jack_midi_closed, 0);
 	rb_define_method(output, "port_name", jack_midi_port_name, 0);
 	rb_define_method(output, "stats", jack_midi_stats, 0);
+	rb_define_method(output, "write_at", jack_midi_write_at, 4);
+	rb_define_method(output, "discard_timed", jack_midi_discard_timed, 0);
+	rb_define_method(output, "max_message", jack_midi_max_message, 0);
 }
 
 void Init_fast_audio(void)
@@ -3750,6 +3917,7 @@ void Init_fast_audio(void)
 	rb_define_module_function(fast_audio, "boost_thread_priority", ruby_boost_thread_priority, 0);
 	rb_define_module_function(fast_audio, "jack_open", ruby_jack_open, 1);
 	rb_define_module_function(fast_audio, "jack_info", ruby_jack_info, 0);
+	rb_define_module_function(fast_audio, "jack_frame_time", ruby_jack_frame_time, 0);
 	rb_define_module_function(fast_audio, "jack_close", ruby_jack_close, 0);
 	rb_define_module_function(fast_audio, "jack_stall", ruby_jack_stall, 2);
 	rb_define_module_function(fast_audio, "jack_frame_log", ruby_jack_frame_log, 1);
@@ -3766,6 +3934,7 @@ void Init_fast_audio(void)
 	rb_define_method(playback, "initialize", playback_initialize, -1);
 	rb_define_method(playback, "jack_ports", playback_jack_ports, 0);
 	rb_define_method(playback, "jack_clock", playback_jack_clock, 0);
+	rb_define_method(playback, "jack_frame_of", playback_jack_frame_of, 1);
 	rb_define_method(playback, "max_queue", playback_max_queue, 0);
 	rb_define_method(playback, "queue_limit=", playback_set_queue_limit, 1);
 	rb_define_method(playback, "write", playback_write, 1);

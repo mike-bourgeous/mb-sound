@@ -833,6 +833,7 @@ module GraphSweep
     'MB::Sound::InputBufferWrapper' => 'wraps an input stream for window readers, not a graph node in use',
     'MB::Sound::OutputBufferWrapper' => 'wraps an output stream for window writers',
     'MB::Sound::GraphNode::DataShuffler' => 'test/debug helper with no DSL entry point',
+    'MB::Sound::MIDI::OutNode' => "a MIDI out track's graph (silent audio; pure Ruby, no C): destination_spec runs it at 800/367/128/1-frame buffers, destination_jack_spec through JACK; set documents save it as `track :x, midi_out(...)`, not as a graph",
   }.freeze
 
   # Buffer size and count of the Notes reference path pass (Kernels

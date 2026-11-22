@@ -194,6 +194,22 @@ module MB
           raise ArgumentError, "#{head_path}.then takes a block, not an argument: #{Entry.chain_hint(head_path, b)}"
         end
 
+        # Kernel#loop with a block; without one, a generator entry itself,
+        # since its clip loops already (beat-halftime-1: the maintainer's
+        # `L.gen.beat.pop.call.loop` guess, after bg of an entry with no
+        # track stopped at 8 bars; `L.gen.beat.pop.loop` raised Kernel's
+        # "private method"), saying so in the console; other entries raise
+        # with what loops.
+        def loop(&block)
+          return super if block
+          if kind == :generator
+            $stdout.puts "\e[2m#{head_path} loops already (a generator has no end)\e[0m" if MB::Sound.live?
+            return self
+          end
+          hint = kind == :clip ? "#{head_path}.call.loop loops its clip" : "#{head_path} is #{label}; clips loop (seq(C3, E3).loop)"
+          raise NoMethodError, "#{head_path}.loop: #{hint}"
+        end
+
         # A Proc calling the entry (`sig.then(&L.fx.hall)`).
         def to_proc
           method(:call).to_proc
