@@ -361,8 +361,10 @@ module MB
           fx = nil if fx.empty?
           raise ArgumentError, Fx.graph_track_message("track #{name.inspect}, fx:", name, values[0]) if fx && values[0]
         end
-        graph, clip, entry = values
+        graph, clip, entry, voice = values
         patch = InstrumentPatch.patch(entry) if entry
+        # (a sampler instrument plays the track's clips: InstrumentPatch.voice?)
+        patch = InstrumentPatch.voice_patch(voice) if voice
         check_quant(q) if q
         lead = 1.attack if lead == :attack
         check_offset(:lead, lead) unless lead.is_a?(Length::Attack)
@@ -488,7 +490,7 @@ module MB
       # and an instrument or graph, or the +patch+ block.  Nil (after
       # MB::Sound.live_error) for a value that can't be an instrument.
       def track_values(name, values, patch)
-        graph = clip = entry = nil
+        graph = clip = entry = voice = nil
         values.each do |v|
           # (clip entries and clip generators give their clip; a
           # generator's clip plays on its entry's instrument unless the
@@ -504,8 +506,11 @@ module MB
           if v.is_a?(Sequence::Clip) || v.is_a?(Sequence::Kit)
             raise ArgumentError, "track #{name.inspect}: give it one clip (got two)" if clip
             clip = v
+          elsif InstrumentPatch.voice?(v)
+            raise ArgumentError, "track #{name.inspect}: give it one instrument (got two)" if entry || voice
+            voice = v
           elsif InstrumentPatch.instrument?(v)
-            raise ArgumentError, "track #{name.inspect}: give it one instrument (got two)" if entry
+            raise ArgumentError, "track #{name.inspect}: give it one instrument (got two)" if entry || voice
             begin
               entry = InstrumentPatch.entry_for(v, track: name)
             rescue InstrumentPatch::Error => e
@@ -516,7 +521,7 @@ module MB
             graph = v
           end
         end
-        if clip && !graph && !entry && !patch && (inst = Library::Generators.instrument(clip))
+        if clip && !graph && !entry && !voice && !patch && (inst = Library::Generators.instrument(clip))
           begin
             entry = InstrumentPatch.entry_for(inst, track: name)
           rescue InstrumentPatch::Error => e
@@ -524,11 +529,12 @@ module MB
           end
         end
         # (a clip alone plays as a graph, on what plays it: Playable.graph)
-        graph, clip = clip, nil if clip && !graph && !entry && !patch
-        raise ArgumentError, "track #{name.inspect}: give it an instrument or a graph, not both" if entry && graph
+        graph, clip = clip, nil if clip && !graph && !entry && !voice && !patch
+        raise ArgumentError, "track #{name.inspect}: give it an instrument or a graph, not both" if (entry || voice) && graph
+        raise ArgumentError, "track #{name.inspect}: give it a sampler instrument or a patch block, not both (the block can play it: kit.sampler(c))" if voice && patch
         raise ArgumentError, 'Give a track a patch block or a graph, not both' if graph && patch
         raise ArgumentError, "track #{name.inspect}: give it an instrument or a patch block, not both" if entry && patch
-        unless graph || patch || entry
+        unless graph || patch || entry || voice
           if (tr = @tracks[name])
             # (sd-ux-fixes-1, the review's #30: `ruby track(:ghost)` on a
             # track with a patch; track(:name) alone defines, never reads)
@@ -540,7 +546,7 @@ module MB
           raise ArgumentError, "Give track #{name.inspect} a patch block, an instrument, or a graph (track #{name.inspect}, L.inst.dnb.dnb_reese; " \
             "track(#{name.inspect}) { |clip| ... }; track #{name.inspect}, riff, :dnb_reese)"
         end
-        [graph, clip, entry]
+        [graph, clip, entry, voice]
       end
 
       # Rebuilds track +tr+'s playing graph for its redefined patch block

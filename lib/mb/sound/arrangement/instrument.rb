@@ -153,6 +153,43 @@ module MB
           nil
         end
 
+        # True if +value+ is a sampler instrument a track plays its clips
+        # on (a Sampler::Instrument: `sf2(path, preset)`, `sfz(path)`,
+        # `font[128, 0]`; or an SF2::Font, its first preset, as
+        # Playable.graph plays it).  The maintainer's take, 2026-11-21:
+        # `kit = sf2(path)`, `track :drums, kit`, then `fx :drums, ...`:
+        # "Why can I not put effects on a soundfont track?" (it was a graph
+        # track).  Such a track is a patch track, as
+        # `track(:drums) { |c| kit.sampler(c, voices: 8) }`, and prints
+        # back as `track :drums, sf2(...)` (#voice_of; SetWriter).
+        def voice?(value)
+          value.is_a?(Sampler::Instrument) || value.is_a?(Sampler::SF2::Font)
+        end
+
+        # The patch playing a track's clips on sampler instrument +value+
+        # (see #voice?): Playable's voices (one for split instruments).
+        def voice_patch(value)
+          inst = value.is_a?(Sampler::SF2::Font) ? value.instrument : value
+          voices = inst.split ? 1 : Playable::VOICES
+          patch = ->(clip) { inst.sampler(clip, voices: voices) }
+          patch.define_singleton_method(:track_voice) { value }
+          patch.define_singleton_method(:source_location) { nil }
+          patch.define_singleton_method(:inspect) { "#<patch #{inst} (#{voices} voices)>" }
+          patch
+        end
+
+        # The sampler instrument a track's +patch+ plays (see #voice_patch;
+        # through the counting and binding wrappers), or nil.
+        def voice_of(patch)
+          p = patch
+          4.times do
+            return nil if p.nil?
+            return p.track_voice if p.respond_to?(:track_voice)
+            p = p.respond_to?(:unbound_patch) ? p.unbound_patch : (p.respond_to?(:counted_patch) ? p.counted_patch : nil)
+          end
+          nil
+        end
+
         # The Symbol that names +entry+ for `track :x, :name` (it resolves
         # back to the same entry), or nil.
         def symbol_for(entry)

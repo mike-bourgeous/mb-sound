@@ -107,23 +107,13 @@ module MB
         end
 
         # Why +command+ (e.g. "fx :drums") can't put effects on track
-        # +name+, which plays +graph+ (no patch), and what works.  A
-        # SoundFont or sampler instrument given to `track` plays as a graph
-        # (Playable.graph: a demo phrase, clips swapped in), so the message
-        # names the patch block that plays it with an insert (the
-        # maintainer's take, 2026-11-21: `track :drums, sf2(...)`, then
-        # `fx :drums, ->{ it.compress(...) }`: "Why can I not put effects
-        # on a soundfont track?").
-        def graph_track_message(command, name, graph)
-          head = "#{command}: effect inserts go on tracks with an instrument or a patch block, and #{name.inspect} plays a graph"
-          inst = graph.is_a?(Sampler::SF2::Font) ? graph.instrument : graph
-          return "#{head}; a graph track's effects go in its graph (track #{name.inspect}, graph.reverb(...))" unless inst.is_a?(Sampler::Instrument)
-
-          what = graph.is_a?(Sampler::SF2::Font) ? "a SoundFont (#{inst}, the first preset of #{File.basename(graph.path.to_s)})" : "a sampler instrument (#{inst})"
-          source = graph.is_a?(Sampler::SF2::Font) && graph.path ? "sf2(#{graph.path.to_s.inspect})" : 'kit'
-          voices = inst.split ? '' : ", voices: #{Playable::VOICES}"
-          "#{head}: #{what}.  Give it a patch block that plays its clips, then the effect: " \
-            "track(#{name.inspect}) { |c| #{source}.sampler(c#{voices}) }; fx #{name.inspect}, ...#{" (kit: the instrument you gave it)" if source == 'kit'}"
+        # +name+, which plays a graph (no patch), and what works.  (Sampler
+        # instruments and SoundFonts given to `track` are patch tracks, so
+        # they take inserts: InstrumentPatch.voice?; the maintainer's take,
+        # 2026-11-21: "Why can I not put effects on a soundfont track?")
+        def graph_track_message(command, name, _graph)
+          "#{command}: effect inserts go on tracks with an instrument or a patch block, and #{name.inspect} plays a graph: " \
+            "its effects go in its graph (track #{name.inspect}, graph.reverb(...)), or give it a patch block that builds the graph from its clip"
         end
       end
 
