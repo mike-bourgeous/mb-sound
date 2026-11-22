@@ -134,9 +134,9 @@ RSpec.describe(MB::Sound::GraphNode::Flanger, :aggregate_failures) do
     end
 
     it 'flanges each side of a stereo input, with or without spread' do
-      l, r = collect_stereo(MB::Sound.stereo(110.hz.saw, 165.hz.saw).flanger(:jet), 3000)
-      expect(l).to eq(collect(110.hz.saw.flanger(:jet), 3000))
-      expect(r).to eq(collect(165.hz.saw.flanger(:jet), 3000))
+      l, r = collect_stereo(MB::Sound.stereo(110.hz.saw, 165.hz.saw).flanger(:jet, noise: nil), 3000)
+      expect(l).to eq(collect(110.hz.saw.flanger(:jet, noise: nil), 3000))
+      expect(r).to eq(collect(165.hz.saw.flanger(:jet, noise: nil), 3000))
     end
 
     it 'offsets the right LFO by spread cycles' do
@@ -228,6 +228,40 @@ RSpec.describe(MB::Sound::GraphNode::Flanger, :aggregate_failures) do
     expect(RecipeHelpers.max_diff(ref, RecipeHelpers.render(RecipeHelpers.eval_recipe(code), buffers: 20))).to eq(0)
     loaded = MB::Sound::GraphIO.load(MB::Sound::GraphIO.dump(g.()))
     expect(RecipeHelpers.max_diff(ref, RecipeHelpers.render(loaded, buffers: 20))).to eq(0)
+  end
+
+  describe 'noise: (effects-3)' do
+    it 'adds hiss to the feedback loop that follows the input and stops with it' do
+      src = -> { 220.hz.saw.at(0.3) * 2.hz.lfo.square.at(0..1) } # on 0.25 s, off 0.25 s
+      plain = collect(src.().flanger(:jet, noise: nil), 48000)
+      hiss = MB::Sound.with_seed(4) { collect(src.().flanger(:jet, noise: 0.05), 48000) }
+      again = MB::Sound.with_seed(4) { collect(src.().flanger(:jet, noise: 0.05), 48000, [367, 128, 1]) }
+      expect(again).to eq(hiss)
+      d = hiss - plain
+      expect(d[2000...12000].abs.max).to be_between(0.005, 0.1) # while playing
+      expect(d[22000...24000].abs.max).to be < d[12000...14000].abs.max / 20 # fading with the input's envelope
+      # silence in, silence out (no hiss of its own)
+      quiet = collect(MB::Sound.silence(0.5).flanger(:jet, noise: 0.2), 24000)
+      expect(quiet.abs.max).to eq(0)
+      expect(collect(220.hz.saw.flanger(:jet, noise: 0), 4800)).to eq(collect(220.hz.saw.flanger(:jet, noise: nil), 4800))
+    end
+
+    it 'is in the :jet preset at 0.1 since effects-4 (his pick), and :sweep runs 0.5-2 ms' do
+      jet = MB::Sound.with_seed(7) { collect(220.hz.saw.at(0.3).flanger(:jet), 9600) }
+      expect(jet).to eq(MB::Sound.with_seed(7) { collect(220.hz.saw.at(0.3).flanger(:jet, noise: 0.1), 9600) })
+      expect(jet).not_to eq(collect(220.hz.saw.at(0.3).flanger(:jet, noise: nil), 9600))
+      expect(MB::Sound::GraphNode::Flanger.preset_settings(:sweep).slice(:delay, :range)).to eq(delay: 0.001, range: 2.0)
+      expect(collect(220.hz.saw.flanger, 9600)).to eq(collect(220.hz.saw.flanger(:sweep, range: 0.5.ms..2.ms), 9600))
+    end
+
+    it 'takes a node level and stereo, and needs feedback' do
+      out = collect_stereo(220.hz.saw.at(0.3).flanger(:orbit, noise: 0.1.hz.lfo.at(0..0.1)), 9600)
+      out.each { |b| expect(b.isfinite.all?).to eq(true) }
+      expect(out[0]).not_to eq(out[1])
+      expect { 220.hz.saw.flanger(:tape_flange, noise: 0.1) }.to raise_error(ArgumentError, /feedback/)
+      expect { 220.hz.saw.flanger(noise: -0.1) }.to raise_error(ArgumentError, /noise/)
+      expect(220.hz.saw.flanger(:jet, noise: 0.05).to_ruby).to include('flanger(:jet, noise: 0.05)')
+    end
   end
 
   it 'takes nodes for depth, feedback, mix, and the delay' do

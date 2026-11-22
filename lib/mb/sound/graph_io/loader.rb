@@ -162,6 +162,10 @@ module MB
           # lines change the tempo where they land (documents before
           # format 9, read as tempo: and tempo; see GraphIO::FORMAT)
           @old_tempo = false
+          # Whether scales without a root are fixed on the key at load
+          # (documents before format 12, whose rootless scales didn't follow
+          # the session key; see GraphIO::FORMAT)
+          @old_scales = false
           @path = path
           @label = path || '(graph document)'
           @given_inputs = inputs.transform_keys(&:to_sym)
@@ -527,6 +531,7 @@ module MB
               @old_ring = !GraphIO.since?(version, :ring_all_typed_inputs)
               @old_shift = !GraphIO.since?(version, :clip_shift)
               @old_tempo = !GraphIO.since?(version, :tempo_live)
+              @old_scales = !GraphIO.since?(version, :following_scales)
               @comment_notes = GraphIO.since?(version, :metadata)
               @document.read_graph_line(kwargs, offsets: @header_offsets || {})
             when :inputs
@@ -766,11 +771,15 @@ module MB
 
         # The Session's knob for a set document's `knob` line: made, or
         # given the document's options and value if the session has it.
+        # The value is the redeclared knob's default, read through its
+        # Spec as a fresh declaration reads it (a typed value like
+        # 2400.hz, the document's own, as the knob's number; fixes-15:
+        # a second demo declaring :cut in Hz raised a NoMethodError).
         def session_knob(name, value, opts)
           existing = @session.knobs[name]
           k = @session.knob(name, value, **opts)
           raise LoadError.new("#{@label}: knob #{name} can't be made (its name is taken in the session)", path: @path) unless k
-          k.set(value, frame: k.next_frame) if existing && k.target != value
+          k.set(k.spec.default, frame: k.next_frame) if existing && k.target != k.spec.default
           k
         end
 
@@ -1200,6 +1209,9 @@ module MB
             raise error(node, "#{name} raised #{e.class}: #{e.message}")
           end
           check_result(node, result) if receiver.is_a?(Numeric) || result.is_a?(Integer)
+          # (before format 12 a scale without a root was the session key's
+          # root when loaded, a fixed scale; gen-ux-1)
+          result = result.with_root(result.root) if @old_scales && name == :scale && result.is_a?(Scale) && result.follows_key?
           result
         end
 

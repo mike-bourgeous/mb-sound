@@ -13,7 +13,7 @@ inst fx kit seq     → bass│  decay      300ms                            ├
 ▸●dnb_reese    dnb bass   │  release    500ms                            │ 0.2┤⠄⠄⠄⠄⠄⢄⣄⠴⠞⠍⠝⠖⠤⣄⠄⠄⠄⠄⠄⠄⠬⠄⠄⠄⠄⠄⠄⠄⠄⠄⠬⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄
   dnb_sub      dnb bass s…│ FX ───────────────────────────────────────── │    │  ⣀⠤⠚⠉    ⠅  ⠈⠉⠲⢤⣀  ⠨         ⠨
   glass_keys   keys bright│ highpass ×2    post-amp EQ  stereo  cut 150 …│ 0.0┤⠖⠏⠅⠄⠄⠄⠄⠄⠄⠄⠅⠄⠄⠄⠄⠄⠄⠌⠕⠦⢬⡄⠄⠄⠄⠄⠄⠄⠄⠄⠬⠄⠄⠄⠄⠄⠄⣤⠤⠄⠄
-  init         init       │61 plumbing nodes hidden (p shows)            │    │          ⠅         ⠨⠉⠑⠲⣄⡀    ⠨  ⣀⡴⠒⠉⠁
+  init         init       │plumbing hidden (p shows it)                  │    │          ⠅         ⠨⠉⠑⠲⣄⡀    ⠨  ⣀⡴⠒⠉⠁
   jungle_reese jungle bass├─ PREVIEW ──────────────────────────────── 8 ─┤-0.2┤⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠇⠂⠂⠂⠂⠂⠂⠂⠂⠂⠪⠂⠂⠂⠂⠊⠛⠦⢆⣢⠮⠖⠋⠂⠂⠂⠂⠂⠂⠂⠂
                           │A 20ms D 300ms S -4.4dB R 500ms pk -3.1dB     │    └┬─────────┬─────────┬─────────┬─────────┬
                           │1.0┤⢸⣇  ⡇  ⠅   ⡁  ⠅      ⠅⢈     ⠅      ⠅    ⡁ │     0         2         4         6        ms

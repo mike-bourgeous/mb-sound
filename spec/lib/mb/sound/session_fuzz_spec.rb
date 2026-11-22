@@ -443,6 +443,51 @@ RSpec.describe('session fuzzing') do
         'at_bar(1, beat: 4) { unmute :t2 }',
       ], 1,
     ],
+    # (fix-batch35-1114, post-merge batch 35's soak seed 781023: a launch
+    # renames the cue player from the first frame of the span it lands
+    # in, so its pre-mute send woke the muted graph there, up to a buffer
+    # before the launch frame its MAIN share ramps in from;
+    # Cue#cue_main_from.  The bus passes the send through, so a wrong
+    # wake shows as the square's phase from the first sample.)
+    'a muted track launched from CUE with a pre-mute send (seed 781023)' => [
+      :buffer_size, ['bpm 150'], [
+        'track(:t2, q: 1) { |clip| clip.synth(voices: 3) { |v| v.hz.square * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'at_bar(3) { cue :t2, seq(A4, C5).n8.loop }',
+        'at_bar(3, beat: 3) { launch }',
+        'bus(:wet) { |sig| sig }',
+        'at_bar(1, beat: 2) { feed :t2, :wet, -6.db, pre: :mute, on: :beat }',
+        'at_bar(3, beat: 2) { mute :t2 }',
+      ], 3,
+    ],
+    # (fix-fuzz-788022, post-merge batch 39's soak seed 788022: the flow's
+    # relaunch of :s1 on bar 3 beat 2 crossfades from the bg's clip over
+    # the scene's 1/4 bar; the stop landing at the start of the 367-frame
+    # span holding its frame cut the fading-out graph there, 170 frames
+    # early, since a stop for a later frame moved its stop time back to
+    # the crossfade's start; stops split their span since)
+    'a cut stop landing inside a buffer during a scene crossfade (seed 788022)' => [
+      :buffer_size, ['bpm 150', 'knob :busy, 0.5'], [
+        'track(:t1, q: 1/4r) { |kit| tr808(kit) * 0.5 }',
+        'track(:t2, q: 1/4r) { |clip| clip.synth(voices: 3) { |v| v.hz.triangle * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'scene :s1, t2: seq(F3, A3, C4, E4).n4.loop, fade: 1/4r',
+        'at_bar(1) { go :s1, on: :now }',
+        'at_bar(3) { bg :t2, seq(A4, C5).n8.loop, on: :now; cue :t2 }',
+        'at_bar(2, beat: 2) { flow(seed: 98, on: :beat) { generate markov(s1: { s1: 3 }, seed: 56), s1: 2.beats } }',
+        'kept_t2 = []',
+        'at_bar(3, beat: 19/8r) { s = Session.current; s.change(:probe, :t2, s.now) { kept_t2.replace(s.timeline_nodes_of(:t2).grep(MIDI::ClipSource).map { |n| (n.ring_clip || n.pending_clip || n.clip).lineage.last }) }; stop :t2, fade: 0 }',
+      ], 3,
+    ],
+    # (the same with the stop's time between samples: it lands on the
+    # floor sample of its time at any buffer size)
+    'a cut stop landing between samples during a scene crossfade' => [
+      :buffer_size, ['bpm 150'], [
+        'track(:t2, q: 1/4r) { |clip| clip.synth(voices: 3) { |v| v.hz.triangle * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+        'scene :s1, t2: seq(F3, A3, C4, E4).n4.loop, fade: 1/4r',
+        'at_bar(3) { bg :t2, seq(A4, C5).n8.loop, on: :now }',
+        'at_bar(2, beat: 2) { flow(seed: 98, on: :beat) { generate markov(s1: { s1: 3 }, seed: 56), s1: 2.beats } }',
+        'at_bar(3, beat: 2) { after(in: 1/7r) { stop :t2, fade: 0 } }',
+      ], 3,
+    ],
   }.each do |name, (relation, header, lines, bars)|
     it "holds #{relation} for #{name}" do
       expect(SessionFuzz.check(relation, SessionFuzz::Song.new(header: header, lines: lines, bars: bars))).to be_nil
@@ -474,6 +519,15 @@ RSpec.describe('session fuzzing') do
     end
   end
 
+  # (merge train 2026-11-21's soak: seeds 788010/20/30/46 failed :form_start
+  # because the live side's realtime Session had its -1 dBFS safety
+  # limiter on and the offline reference doesn't; a song louder than -1
+  # dBFS, its tr909 kit peaking at 1.01)
+  it 'holds form_start for a song louder than the live safety limiter (seed 788010)', render_budget: { seconds: 30, reason: 'one random song, one relation' } do
+    song = SessionFuzz.generate(Random.new(788010))
+    expect(SessionFuzz.check(:form_start, song)).to be_nil
+  end
+
   it 'swaps a kit only where every scene plays it a grid with those rows (seed 773034)', render_budget: { seconds: 60, reason: 'one random song' } do
     song = SessionFuzz.generate(Random.new(773034), commands: 26)
     expect(song.code).to include('t3: beats(16')
@@ -501,7 +555,9 @@ RSpec.describe('session fuzzing') do
   it 'drops swaps of tracks that may have stopped (seeds 776002, 776003, 776046)', render_budget: { seconds: 90, reason: 'three random songs' } do
     [776002, 776003, 776046].each do |seed|
       song = SessionFuzz.generate(Random.new(seed))
-      expect(song.code).not_to include('swap :'), "seed #{seed}"
+      # (track swaps: the bg graph swaps of gen-ux-1 round 2's command
+      # start or replace their graph, so they may stay)
+      expect(song.code).not_to match(/swap :t\d/), "seed #{seed}"
       expect(SessionFuzz.check(:runs, song)).to be_nil, "seed #{seed}"
     end
 

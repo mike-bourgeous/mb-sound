@@ -115,7 +115,7 @@ RSpec.describe(MB::Sound::UI::ToneCycle, :aggregate_failures) do
     s = lead_session
     src = source_of(s, :saw)
     job = tc::Job.new(seq: 1, key: [1], source: src, input: pr.input(src, 0.5), knobs: [], tone: nil)
-    expect(tc.render(job).error).to match(/no recorded call/)
+    expect(tc.render(job).error).to match(/made outside the voice, so it can't be rebuilt alone/)
     job = job.with(tone: [:top, :synth, 0, :triangle, 3])
     expect(tc.render(job).error).to match(/outside the voice/)
     job = job.with(source: src.with(synth: nil, note: 'pad has no synth voice to copy'))

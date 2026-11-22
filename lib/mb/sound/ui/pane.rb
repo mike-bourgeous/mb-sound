@@ -42,6 +42,20 @@ module MB
           @block = block
         end
 
+        # Stops and forgets the worker threads a pane keeps in its +state+
+        # Hash (a ChartWorker, a PatchRender or ToneCycle Driver's preview
+        # worker): a screen calls it for every placement when it stops, so
+        # no worker outlives its screen (ui-perf-2 round 4: they waited out
+        # their 10 s idle timeout, still registered as yielders).  A screen
+        # started again makes new ones.  Returns +state+.
+        def self.close_workers(state)
+          state.delete_if do |_k, v|
+            next false unless v.is_a?(ChartWorker) || v.is_a?(PatchRender::Driver) || v.is_a?(ToneCycle::Driver)
+            v.close
+            true
+          end
+        end
+
         # Draws the pane: its title, then #draw_body (or the block given to
         # .new, called with the Canvas below the title and the Snapshot).
         # +state+ is a Hash kept for this placement of the pane.

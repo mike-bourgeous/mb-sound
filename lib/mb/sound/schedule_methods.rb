@@ -25,9 +25,10 @@ module MB
       # a bar, or with one, launch points work as for #bg (see LaunchPoint):
       # +in:+ that long from now, +at:+ a position (bar(n)), and +on:+ to
       # align to a grid (`at_bar 9, on: :beat`, `at_bar in: 2.beats`,
-      # `at_bar on: :bar`).  Returns a schedule handle (prints when it runs,
-      # e.g. `at_bar 9 runs 9:1`; #cancel), or nil if that time has already
-      # passed.
+      # `at_bar on: :bar`).  Returns a handle: `.cancel` takes the block
+      # back (`drop = at_bar(9) { go :drop }; drop.cancel`); it prints when
+      # it runs (`at_bar 9 runs 9:1`).  nil if that time has already
+      # passed.  See #cancel (handles or everything) and #reset_scheduler.
       def at_bar(bar = nil, beat: 1, at: nil, on: nil, in: nil, &block)
         raise ArgumentError, 'Pass a block to run' unless block
         point = LaunchPoint.of(binding) or return nil
@@ -78,7 +79,9 @@ module MB
       # Runs the block +bars+ bars (a number, or a Duration like 2.bars) from
       # the next bar line (so `after 1` runs at the next bar).  Launch points
       # work too: `after in: 3.beats` (exactly that long from now), `after
-      # 2, on: :beat`.  Returns a schedule handle (see #at_bar).
+      # 2, on: :beat`.  Returns a handle: `.cancel` takes the block back
+      # (`h = after(2) { stop :pad }; h.cancel`).  See #cancel and
+      # #reset_scheduler.
       def after(bars = nil, at: nil, on: nil, in: nil, &block)
         raise ArgumentError, 'Pass a block to run' unless block
         point = LaunchPoint.of(binding) or return nil
@@ -113,11 +116,13 @@ module MB
 
       # Runs the block every +bars+ bars, on bar +:offset+ + 1 of each group
       # (e.g. `every 4, offset: 3` runs on bars 4, 8, 12, ... for fills),
-      # starting with the next such bar.  +bars+ and +:offset+ may also be
-      # Durations (e.g. `every 2.beats`).  A launch point instead of
-      # +:offset+ sets the first time (`every 1.n4, on: :beat`, `every 4,
-      # at: bar(9)`, `every 2, in: 1.beat`).  Returns a schedule handle (see
-      # #at_bar).
+      # starting with the next such bar.  Returns a handle: `.cancel` stops
+      # the repeats (`ticks = every(1) { ... }; ticks.cancel`); see #cancel
+      # (`cancel` alone stops every scheduled block) and #reset_scheduler.
+      #
+      # +bars+ and +:offset+ may also be Durations (e.g. `every 2.beats`).
+      # A launch point instead of +:offset+ sets the first time (`every
+      # 1.n4, on: :beat`, `every 4, at: bar(9)`, `every 2, in: 1.beat`).
       def every(bars, offset: 0, at: nil, on: nil, in: nil, &block)
         raise ArgumentError, 'Pass a block to run' unless block
         point = LaunchPoint.of(binding) or return nil
@@ -151,18 +156,53 @@ module MB
       end
 
       # Lists the scheduled blocks that haven't run yet (and repeating
-      # ones), soonest first: schedule handles that print when each runs.
+      # ones), soonest first: handles that print when each runs; each has
+      # `.cancel` (`scheduled.first.cancel`; `cancel` alone cancels them
+      # all, #reset_scheduler also stops a song form).  at_marker blocks
+      # still waiting for their marker aren't listed until it is set.
       def scheduled
         Session.current.scheduled
       end
 
       # Cancels scheduled blocks (handles returned by #at_bar, #after,
-      # #every, or their ids; every block they scheduled if none are
-      # given).  Returns the handles cancelled.  `handle.cancel` works too.
+      # #every, FormMethods#at_marker, or their ids; every block they
+      # scheduled if none are given).  Returns the handles cancelled.
+      # `handle.cancel` works too:
+      #
+      #     ticks = every(1.n4) { bg :tick, click }
+      #     ticks.cancel        # or: cancel ticks, or cancel (everything)
       # See #reset_scheduler to also stop a song form and a stuck
       # scheduler.
-      def cancel(*schedules)
-        Session.current.cancel(*schedules)
+      #
+      # With +queued:+ (a track, player, scene, or knob name), cancels the
+      # changes still waiting to land for it instead (+kind:+ narrows them:
+      # :stop, :scene, :knob, ...; `changes` and the queue pane show both):
+      # `cancel queued: :bass, kind: :stop` keeps the bass playing.  One undo
+      # step (undo queues them again).  The set's own changes (a song
+      # form's next section, scene blocks) stay: steer the form (goto,
+      # skip, loop!).  Returns the cancelled journal entries.
+      def cancel(*schedules, queued: nil, kind: nil)
+        if queued.nil?
+          raise ArgumentError, 'cancel kind: goes with queued: (cancel queued: :bass, kind: :stop)' if kind
+          session = Session.current
+          # Everything: scheduled blocks and at_marker blocks still waiting
+          # for their markers (gen-ux-1)
+          return session.cancel + session.markers.cancel_waits if schedules.empty?
+
+          waits, handles = schedules.partition { |x| x.is_a?(Session::Markers::Wait) }
+          waits.each(&:cancel)
+          return (handles.empty? ? [] : session.cancel(*handles)) + waits
+        end
+        raise ArgumentError, 'cancel takes schedule handles or queued:, not both' unless schedules.empty?
+
+        line = "cancel queued: #{queued.inspect}#{", kind: #{kind.inspect}" if kind}"
+        done, kept = Session.current.cancel_queued(queued, kind: kind, label: line)
+        if done.empty?
+          why = kept.empty? ? "nothing queued for #{queued.inspect}#{" of kind #{kind.inspect}" if kind} (changes lists what is)" :
+                              "#{queued.inspect}'s queued #{kept.map(&:kind).uniq.join(', ')} is the song form's own (steer it: goto, skip, loop!)"
+          return MB::Sound.live_error(ArgumentError.new("cancel: #{why}"))
+        end
+        done
       end
 
       # The scheduler's panic button, leaving the players alone (see

@@ -62,7 +62,7 @@ module MB
       #   resonance clips and buzzes (the Korg MS-20's diode-clipper idea on
       #   this 4-pole; not an MS-20 filter emulation).  :stages and
       #   :feedback default to drive 1.  Measurements and renders:
-      #   /app/tmp/listening/four_pole/README.md (round 2).
+      #   /app/workbench/data/bench/sets/four_pole/README.md (round 2).
       # - +mode:+ picks an output tap mix (Oberheim Xpander style): :lp4
       #   (default), :lp2, :bp2, :bp4, :hp2, :hp4.  Compensation only
       #   applies to the lowpass modes.
@@ -371,12 +371,89 @@ module MB
           u * (m[0] + m[1] * h + m[2] * h**2 + m[3] * h**3 + m[4] * h**4)
         end
 
+        # The linear response (#response) as polynomials in z^-1: writes
+        # the numerator's five coefficients into +b+ and the denominator's
+        # into +a+ (Arrays, lowest power first), H(z) = B(z^-1) / A(z^-1),
+        # allocating nothing (the sound-design screen's live filter curve
+        # evaluates them through Plot::Response every frame; ui-wave-perf-1).
+        # Returns +b+.
+        def z_polynomials(b, a)
+          fc = @cutoff.clamp(MIN_CUTOFF, @sample_rate * MAX_CUTOFF_RATIO)
+          g = Math.tan(Math::PI * fc / @sample_rate)
+          k = loop_gain
+          i = 0
+          while i < 5
+            b[i] = 0.0
+            a[i] = 0.0
+            i += 1
+          end
+
+          if diode?
+            scale = if @tuning_number != 0
+                      Tuning.scale(@tuning_number, k * DIODE_INV_EDGE_K) * DIODE_INV_W180
+                    elsif @normalize
+                      self.class.diode_cutoff_scale(k) * DIODE_INV_W180
+                    else
+                      DIODE_INV_W180
+                    end
+            # s = (1 - z^-1) / (c (1 + z^-1)), c = g scale: times (c (1 + z^-1))^4
+            c = g * scale
+            Polynomial.add_pq(a, 1.0, 1.0, -1.0, 4, c, c, 0)
+            Polynomial.add_pq(a, 7.0, 1.0, -1.0, 3, c, c, 1)
+            Polynomial.add_pq(a, 15.0, 1.0, -1.0, 2, c, c, 2)
+            Polynomial.add_pq(a, 10.0, 1.0, -1.0, 1, c, c, 3)
+            Polynomial.add_pq(a, 1.0 + k, 1.0, -1.0, 0, c, c, 4)
+            Polynomial.add_pq(b, 1 + passband_compensation(k) * k, 1.0, -1.0, 0, c, c, 4)
+            return b
+          end
+
+          g *= Tuning.scale(@tuning_number, k * 0.25)
+          # h = q / p, q = g (1 + z^-1), p = (1 + g) - (1 - g) z^-1: times p^4
+          p0 = 1 + g
+          p1 = g - 1
+          Polynomial.add_pq(a, 1.0, p0, p1, 4, g, g, 0)
+          Polynomial.add_pq(a, k, p0, p1, 0, g, g, 4)
+          u = 1 + @compensation * k
+          m = @mix
+          Polynomial.add_pq(b, u * m[0], p0, p1, 4, g, g, 0)
+          Polynomial.add_pq(b, u * m[1], p0, p1, 3, g, g, 1)
+          Polynomial.add_pq(b, u * m[2], p0, p1, 2, g, g, 2)
+          Polynomial.add_pq(b, u * m[3], p0, p1, 1, g, g, 3)
+          Polynomial.add_pq(b, u * m[4], p0, p1, 0, g, g, 4)
+          b
+        end
+
+        # Products of first-order polynomials in z^-1, added into
+        # coefficient Arrays without allocating (FourPole#z_polynomials).
+        module Polynomial
+          BINOMIAL = [[1], [1, 1], [1, 2, 1], [1, 3, 3, 1], [1, 4, 6, 4, 1]].freeze
+
+          # Adds +scale+ (p0 + p1 x)^m (q0 + q1 x)^n into +out+ (index =
+          # power of x; m + n <= 4).
+          def self.add_pq(out, scale, p0, p1, m, q0, q1, n)
+            return out if scale == 0
+            bm = BINOMIAL[m]
+            bn = BINOMIAL[n]
+            i = 0
+            while i <= m
+              pc = bm[i] * p0**(m - i) * p1**i
+              j = 0
+              while j <= n
+                out[i + j] += scale * pc * bn[j] * q0**(n - j) * q1**j
+                j += 1
+              end
+              i += 1
+            end
+            out
+          end
+        end
+
         # The loop gain k for +resonance+ (default: the current #resonance),
         # through the #resonance_curve (or the self-oscillation curve, see
         # .self_oscillate_gain): 0 to #k_max.
         def loop_gain(resonance = @resonance)
           r = resonance.to_f.clamp(0.0, 1.0)
-          return self.class.diode_loop_gain(r, kernel_options[0], @k_max) if diode?
+          return self.class.diode_loop_gain(r, resonance_curve_code, @k_max) if diode?
 
           return self.class.self_oscillate_gain(r, @resonance_curve == :db, @k_max) if @self_oscillate
 
@@ -1111,8 +1188,13 @@ module MB
 
         # The kernel's curve, drive mode, and clip arguments.
         def kernel_options
-          curves = @self_oscillate ? SELF_OSCILLATE_CURVES : RESONANCE_CURVES
-          [curves.fetch(@resonance_curve), DRIVE_MODES.fetch(@drive_mode), CLIPS.fetch(@clip)]
+          [resonance_curve_code, DRIVE_MODES.fetch(@drive_mode), CLIPS.fetch(@clip)]
+        end
+
+        # The kernels' resonance curve number (kernel_options[0], without
+        # building the Array).
+        def resonance_curve_code
+          (@self_oscillate ? SELF_OSCILLATE_CURVES : RESONANCE_CURVES).fetch(@resonance_curve)
         end
 
         # The compensation the kernel uses at loop gain +k+ (the current
@@ -1120,7 +1202,7 @@ module MB
         def passband_compensation(k)
           return @compensation unless diode? && @normalize
           r = @resonance.to_f.clamp(0.0, 1.0)
-          self.class.diode_compensation(k, self.class.lp4_loop_gain(r, kernel_options[0], @k_max), @compensation)
+          self.class.diode_compensation(k, self.class.lp4_loop_gain(r, resonance_curve_code, @k_max), @compensation)
         end
 
         # The kernels' coefficients for cutoff +fc+ and resonance +res+

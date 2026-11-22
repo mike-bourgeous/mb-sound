@@ -21,7 +21,7 @@ module MB
 
           # Query's own methods (words with these names are reached with
           # #[]).
-          OWN = %i[entries names words find each first size length empty? inspect to_s path kind chosen word bench].freeze
+          OWN = %i[entries names words find each first size length empty? inspect to_s path kind chosen word bench call pretty_print].freeze
 
           attr_reader :kind, :chosen, :path
 
@@ -93,7 +93,30 @@ module MB
             "#{@path}: #{@pool.length} entr#{@pool.length == 1 ? 'y' : 'ies'}\n#{lines.join("\n")}"
           end
 
-          def inspect = to_s
+          # Short, for messages and nesting ("#<L.inst.reese: 2 entries
+          # (dnb_reese, jungle_reese)>"); the console prints the table
+          # (#pretty_print: #to_s).
+          def inspect
+            "#<#{@path}: #{@pool.length} entr#{@pool.length == 1 ? 'y' : 'ies'}#{" (#{Heads.some_names(self)})" unless @pool.empty?}>"
+          end
+
+          def pretty_print(q) = q.text(to_s)
+
+          # A Query is several entries: calling it says which to name.
+          def call(*args, **kwargs, &block)
+            Heads.call_word(self, @path, args, kwargs, block)
+          end
+
+          # A word that isn't one here (`L.inst.dnb_reeese`): what is, by
+          # spelling (sd-ux-fixes-1, the review's #17: the NoMethodError
+          # named only `#<...Heads::Query:0x...>`).
+          def method_missing(name, *args, **kwargs, &block)
+            return super unless name.match?(/\A[a-z_][a-z0-9_]*\z/) && !@pool.empty?
+            left = @pool.length > 6 ? "#{@pool.length} entries: `#{@path}` lists them" : "#{@pool.length} entr#{@pool.length == 1 ? 'y' : 'ies'}: #{Heads.some_names(self)}"
+            raise NoMethodError.new("nothing under #{@path} is #{name.inspect} (#{left})#{Library.suggest(name, words)}", name)
+          end
+
+          def respond_to_missing?(_name, _include_private = false) = false
         end
 
         # The root, MB::Sound::L: a head method per kind (HEADS), +all+,
@@ -137,8 +160,22 @@ module MB
         # a Query (several entries) raises with their paths.
         def call_word(found, path, args, kwargs, block)
           return found.call(*args, **kwargs, &block) if found.is_a?(Entry)
-          raise ArgumentError, "#{path} is #{found.size} entries (#{found.first(6).map(&:name).join(', ')}#{found.size > 6 ? ', ...' : ''}); " \
+          raise ArgumentError, "#{path} is #{found.size} entries (#{some_names(found)}); " \
             "name one to call it (#{path}.#{found.first.name}(...))"
+        end
+
+        # Words for +query+ given where one entry goes (a track's or
+        # design's instrument, play): which entries it is and how to name
+        # one.  +what+ names the place ("track :bass").
+        def several(query, what)
+          return "#{what}: nothing under #{query.path}" if query.empty?
+          "#{what}: #{query.path} is #{query.size} entries (#{some_names(query)}); name one (#{query.path}.#{query.first.name})"
+        end
+
+        # The first few entry names of +query+ ("dnb_reese, jungle_reese").
+        def some_names(query)
+          names = query.names
+          "#{names.first(6).join(', ')}#{names.length > 6 ? ', ...' : ''}"
         end
 
         # Tab completions for +text+ (a console word like "L.fx.re" or

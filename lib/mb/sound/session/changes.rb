@@ -61,9 +61,11 @@ module MB
         # back (Undo#restore_player).
         # +hold+ is a Warming::WarmHold while the graph it starts warms in
         # the background (it waits in the queue, past its time if need be,
-        # until the warm-up is done; see Warming).
+        # until the warm-up is done; see Warming).  +given+ is the time its
+        # action gets when a held change was issued for a time already past
+        # (a lead: track launched now), as a change landing at once gets it.
         Change = Struct.new(
-          :seq, :kind, :subject, :time, :action, :entry, :before, :after, :lands, :starts, :graph, :split, :spill, :hold, :follows,
+          :seq, :kind, :subject, :time, :action, :entry, :before, :after, :lands, :starts, :graph, :split, :spill, :hold, :follows, :given,
           keyword_init: true
         )
 
@@ -74,7 +76,7 @@ module MB
         # Change kinds whose subject isn't a player or :master (no undo
         # snapshots; e.g. scene launches, whose players' changes are
         # separate).
-        NO_SNAPSHOT_KINDS = [:scene, :skip, :snap, :rec, :arm, :disarm, :learn, :record, :stop_record].freeze
+        NO_SNAPSHOT_KINDS = [:scene, :skip, :snap, :rec, :arm, :disarm, :learn, :record, :stop_record, :pause, :play_on].freeze
 
         # The Journal of changes made to this Session.
         attr_reader :journal
@@ -182,7 +184,10 @@ module MB
             if (time.nil? || time <= pos) && !hold && !held?(c)
               commit_change(c, land_pos: pos, land_frame: @frame, commits: stamp(pos, frame: @frame), immediate: true)
             else
-              c.time = pos if time.nil? || time < pos # (held: waits for its warm-up)
+              # (held: waits for its warm-up, its action seeing a past time
+              # as if it landed now)
+              c.given = time if hold && time && time < pos
+              c.time = pos if time.nil? || time < pos
               queue_change(c)
             end
           }
@@ -213,6 +218,24 @@ module MB
           }
         end
 
+        # Cancels the queued changes of +subject+ (of +kind+ only, if
+        # given) before they land, as one undo step labeled +label+ (undo
+        # issues them again; ScheduleMethods#cancel's `queued:`, the queue
+        # pane's x).  Changes the set made itself (source :set: a song
+        # form's launches, scene blocks) stay: steer the form instead.
+        # Returns [cancelled entries, kept set entries].
+        def cancel_queued(subject, kind: nil, label: 'cancel')
+          cancelled, kept = @render_lock.synchronize {
+            list = @changes.select { |c| c.subject == subject && (kind.nil? || c.kind == kind) }
+            own, mine = list.partition { |c| c.entry&.source == :set }
+            @changes -= mine
+            mine.each { |c| c.entry = @journal.add(c.entry.with(status: :cancelled)) }
+            [mine, own]
+          }
+          push_step(label, [], [], cancelled: cancelled) unless cancelled.empty?
+          [cancelled.map(&:entry), kept.map(&:entry)]
+        end
+
         # Runs the block under the render lock (between buffers), e.g. to
         # move the timeline and launch what plays there as one step (see
         # Form::Playback#seek).  Returns the block's value.
@@ -241,7 +264,7 @@ module MB
         def transport_record_for(playing)
           {
             frame: @frame, pos: @transport.position, bpm: @transport.bpm,
-            bar_length: @transport.bar_length, playing: playing
+            bar_length: @transport.bar_length, playing: playing, paused: @tp_paused
           }.freeze
         end
 
@@ -249,6 +272,16 @@ module MB
         # or @mutex held, or for an estimate).
         def queued_start?(name = nil)
           @changes.any? { |c| START_KINDS.include?(c.kind) && !c.split && (name.nil? || c.subject == name) && !knob_change?(c) }
+        end
+
+        # True if nothing plays and every queued start waits for a hold
+        # (Warming::WarmHold: graphs still building or warming), so an idle
+        # timeline stays where it is until they land, together, first notes
+        # included (form-start-1; see Warming#group_hold).  Called with the
+        # render lock held.
+        def timeline_idle?
+          return false unless @mutex.synchronize { @players.empty? }
+          @changes.none? { |c| START_KINDS.include?(c.kind) && !c.split && !knob_change?(c) && (c.hold.nil? || c.hold.released?) }
         end
 
         # Lands queued changes whose time has come (at or before the
@@ -328,7 +361,7 @@ module MB
           @landing_frame = land_frame # for ramps that start on the landing sample (see Strip)
           # A past time (e.g. a scheduled block that ran late) is passed on,
           # so launch-aligned clips keep their anchor, as before the queue
-          c.action.call(c.time || land_pos)
+          c.action.call(c.given || c.time || land_pos)
           c.after = undo_snapshot(snapshot_subject(c)) if snapshot
           @landing_frame = nil
 

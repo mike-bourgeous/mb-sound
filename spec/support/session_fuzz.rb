@@ -34,6 +34,13 @@
 # - :meta: the song without its metadata (the `meta` lines and the
 #   `.note(...)`/`.with_meta(...)` calls of the `meta` command, metadata-2)
 #   gives the same mix, bit for bit: metadata never acts as data
+# - :form_start: a flow of the song's first scene started from idle on a
+#   realtime Session (a virtual-clock NullOutput, the render thread
+#   running) whose track builds each let audio render first (as slow
+#   patch builds do live) lands every track on one frame and plays, from
+#   there, what an offline render plays from bar 1, within -80 dB
+#   (form-start-1: a form kept time while its first scene's tracks were
+#   built one by one, so late tracks lost their first notes)
 #
 # Renders use exact_lanes: true (synth lanes freed on the 800-frame grid,
 # so voice allocation is the same at any buffer size; see Synth).
@@ -48,7 +55,7 @@ require_relative 'recipe_helpers'
 require_relative 'carry_check'
 
 module SessionFuzz
-  RELATIONS = %i[runs buffer_size plan timeline warm carry meta].freeze
+  RELATIONS = %i[runs buffer_size plan timeline warm carry meta form_start].freeze
 
   # Relations known to fail for a reason recorded elsewhere, as
   # { relation => [[Regexp on the script, 'reason'], ...] }: skipped, counted.
@@ -87,8 +94,11 @@ module SessionFuzz
     'seq(C4, E4, G4).n8.loop', 'seq(A3, R, C4.n4, E4).n16.loop', 'seq(C3.n4, G3.n8.dotted, Eb3.n16).loop',
     'seq(C5, D5).n8', 'seq(F3, A3, C4, E4).n4.loop', 'seq(G4.n16, B4.n16, D5.n8).loop',
     # Generators steered by the knob :busy (G3: read at each cycle's decision point)
-    'melody(scale(:minor, :a).weights, 8, rest: knob(:busy), vary: true, seed: 2).loop',
-    'motifs(scale(:dorian, :d).weights, 8, density: knob(:busy), mutate: knob(:busy), evolve: 1, seed: 4)',
+    # (a scale without a root: follows the session key, which songs with
+    # wires set; gen-ux-1)
+    'melody(scale(:minor).weights, 8, rest: knob(:busy), vary: true, seed: 2).loop',
+    # (echo on a generator works per cycle, with uneven gaps; gen-ux-1)
+    'motifs(scale(:dorian, :d).weights, 8, density: knob(:busy), mutate: knob(:busy), evolve: 1, seed: 4).echo([3.n32, 1.n16], 2, pitch: 7.st)',
   ].freeze
   DRUMS = [
     "grid(16, kick: 'x...x...', snare: '....x...').loop", "grid(16, cymbal: 'X')", "grid(8, kick: 'x.x.', hat: 'xxxx').loop",
@@ -440,9 +450,10 @@ module SessionFuzz
 
   # +lines+ without the swaps of a track that may have stopped by the time
   # the swap lands (+events+, see #track_events: no start after the stop
-  # landed and by the swap's call): a swap of a track that isn't playing is
-  # a user error by design (PlaybackMethods#swap's guard when it's called,
-  # ClipSwaps' "No background player" where it lands), and those were
+  # landed and by the swap's call): a swap of a track that stops between
+  # its call and its landing is a user error by design (ClipSwaps' "No
+  # background player" where it lands; since gen-ux-1 a swap called on a
+  # track that isn't playing starts it, as bg), and those were
   # generated songs' errors (INVALID).  Swaps land at their call `on: :now`,
   # else within a bar.  Dropped, not drawn otherwise, so every other seed
   # keeps its song (fix-batch23: batch 23's soak had 3 such songs in 48,
@@ -687,6 +698,37 @@ module SessionFuzz
       end
     },
     ->(s) {
+      # (fixes-15, the maintainer's 2026-11-16 note "cannot load tunnel
+      # vision") a set document declaring the song's knob :cut again with
+      # a range and value in Hz, loaded mid-song: the knob takes the typed
+      # value as its number (a NoMethodError before), and what reads it
+      # follows
+      next unless s.knob
+
+      cut = s.pick(['(150.hz..8000.hz).at(2400.hz)', '(100.hz..5000.hz).at(600.hz)'])
+      "GraphIO.load(%(graph \#{GraphIO::FORMAT}, name: \"cut\", kind: :set\\nknob :cut, #{cut}\\n), session: Session.current)"
+    },
+    ->(s) {
+      # (gen-ux-1 round 2, "don't make me type bg first and then swap") a
+      # graph swapped into a bg graph player, or into a name with nothing
+      # playing: it replaces the graph, or starts it, as bg
+      name = s.bg_name
+      swap = "swap :#{name}, #{s.pick(['330.0.hz.triangle * 0.1', '110.0.hz.saw.lp4(700) * 0.08', 'noise.at(0.02).lp4(900)'])}"
+      s.rng.rand < 0.7 ? "bg :#{name}, #{s.pick(HELD)}#{s.on}; after(in: #{s.pick(['2.beats', '1/8r'])}) { #{swap} }" : swap + s.on
+    },
+    ->(s) {
+      # (gen-ux-1 round 2) a track defined over a playing bg graph takes
+      # the name and plays its own sound there (a graph, or a patch with
+      # a clip), or, with nothing to play, leaves the graph playing
+      name = s.bg_name
+      track = case s.rng.rand(3)
+              when 0 then "track :#{name}, 0.05.constant.filter(:lowpass, cutoff: 600)"
+              when 1 then "track(:#{name}, seq(C4, E4).n8.loop) { |c| c.tone.saw.at(0.1) * c.env }"
+              else "track(:#{name}) { |c| c.tone.saw.at(0.1) * c.env }"
+              end
+      "bg :#{name}, #{s.pick(HELD)}#{s.on}; after(in: #{s.pick(['2.beats', '1/8r'])}) { #{track} }"
+    },
+    ->(s) {
       # (racks-r3) a part through a named rack with a slot (or a slot of
       # its own), the slot swapped a beat or two later by spill-over,
       # crossfade, or cut, and sometimes the rack defined again: its
@@ -833,6 +875,105 @@ module SessionFuzz
     mix
   ensure
     MB::Sound::Session::Warming.always = false
+    plan.enabled, plan.precision, plan.rebuilds = old
+    MB::Sound.rewind
+  end
+
+  # Audio a track build lets render first in :form_start's live start
+  # (seconds; a slow patch build).
+  FORM_START_BUILD = 0.05
+
+  # Slows track builds while SessionFuzz.build_delay is set (see
+  # #render_form_start).
+  module SlowBuild
+    def build(clip)
+      SessionFuzz.build_delay&.call
+      super
+    end
+  end
+  MB::Sound::Arrangement::Track.prepend(SlowBuild)
+
+  class << self
+    # A Proc each track build calls first, or nil (see SlowBuild).
+    attr_accessor :build_delay
+  end
+
+  # The song's definitions (header, knobs, tracks, scenes, buses) and a
+  # flow of its first scene for two bars, or nil if it has no track.
+  def form_start_code(song)
+    defs = song.lines.grep(/\A(knob |track[( ]|scene |bus\()/)
+    return nil if defs.none? { |l| l.start_with?('track') } || defs.none? { |l| l.start_with?('scene :s1') }
+    [(song.header + defs).join("\n"), 'flow(seed: 1, warm_up: false) { s1 2 }']
+  end
+
+  # :form_start (see the file comment): nil if it holds, :skip if the
+  # song has no tracks, else a failure message.
+  def form_start_problem(song)
+    defs, start = form_start_code(song)
+    return :skip if defs.nil?
+
+    ref = render("#{defs}\n#{start}", 2)
+    got, lands = render_form_start(defs, start, ref.first.length)
+    return "the first section's tracks landed on frames #{lands.inspect}, not together" if lands.values.uniq.length > 1
+    return :skip if lands.empty?
+
+    from = lands.values.first
+    got = got.map { |c| c[from...[from + ref.first.length, c.length].min] }
+    compare(ref, got, tolerance: 1e-4 * [peak(ref), 1e-2].max, label: "the first section started live from idle (slow track builds) vs offline")
+  end
+
+  # Starts +start+ (a flow) on a realtime Session after +defs+, with the
+  # render thread running and each track build letting FORM_START_BUILD
+  # seconds of audio render first; renders until +frames+ past the
+  # tracks' landing.  Returns the mix and { track => landing frame }.
+  def render_form_start(defs, start, frames)
+    MB::Sound.rewind
+    MB::Sound.seed(1)
+    plan = MB::Sound::Plan
+    old = [plan.enabled, plan.precision, plan.rebuilds]
+    plan.enabled = true
+    plan.precision = :fast
+    plan.rebuilds = :inline
+    out = Class.new(MB::Sound::NullOutput) {
+      def written = @written ||= []
+      def write(data)
+        written << data.map(&:dup)
+        super
+      end
+    }.new(channels: 2, sleep: :virtual, buffer_size: 800)
+    # (no live-only output stages: a realtime Session's -1 dBFS safety
+    # limiter and monitor trim aren't in the offline reference; songs
+    # louder than -1 dBFS failed the relation, merge train 2026-11-21)
+    s = MB::Sound::Session.new(output: out, transport: MB::Sound::Sequence::Transport.new(bpm: 120), master_gain: 1, channels: 2, buffer_size: 800, realtime: true, raise_errors: true,
+                               safety_limiter: false, monitor: false)
+    s.exact_lanes = true
+    lands = nil
+    MB::Sound::Session.with_context(session: s) do
+      RecipeHelpers.eval_recipe(defs)
+      s.ensure_running
+      MB::Sound::Internal.wait_audio(s, 0.05)
+      first = s.journal.next_seq
+      SessionFuzz.build_delay = -> { out.consume(FORM_START_BUILD) }
+      begin
+        RecipeHelpers.eval_recipe(start)
+      ensure
+        SessionFuzz.build_delay = nil
+      end
+      starts = -> { s.journal.changes.select { |e| e.seq >= first && e.kind == :bg } }
+      400.times do
+        break if starts.().all? { |e| e.status == :landed }
+        MB::Sound::Internal.wait_audio(s, 0.05)
+      end
+      lands = starts.().to_h { |e| [e.subject, e.lands.frame] }
+      target = (lands.values.max || 0) + frames
+      400.times do
+        break if out.written.sum { |d| d[0].length } >= target
+        MB::Sound::Internal.wait_audio(s, 0.05)
+      end
+    end
+    [out.written.transpose.map { |c| Numo::DFloat.cast(SpecBuffers.join(c)) }, lands]
+  ensure
+    s&.close
     plan.enabled, plan.precision, plan.rebuilds = old
     MB::Sound.rewind
   end
@@ -1025,6 +1166,8 @@ module SessionFuzz
       # denormal tails: tolerance 1e-20)
       plain, got = trim_silent(plain, got)
       compare(plain, got, tolerance: 1e-20, label: "#{plans.length} carried rebuild#{'s' unless plans.length == 1} vs none#{" (up to frame #{fresh}, where a sleeping track's rebuild started fresh)" if fresh}")
+    when :form_start
+      form_start_problem(song)
     when :timeline
       parts = timeline_parts(song)
       return :skip if parts.empty?

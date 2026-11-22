@@ -105,7 +105,18 @@ module MB
       #     tuning b4: 480
       #     play B4.tone.at(0.5) # exactly 480 Hz
       #     at_bar(9) { tuning a4: 432 }
-      def tuning(**reference)
+      def tuning(_note = nil, _frequency = nil, **reference)
+        unless _note.nil? && _frequency.nil?
+          # (ux-friction-1 round 2: the maintainer's `tuning A4, 480`)
+          key = begin
+            Note.new(Scale.root_number(_note)).name.downcase
+          rescue StandardError
+            'a4'
+          end
+          hz = _frequency.is_a?(Numeric) && _frequency.real? ? _frequency.inspect : 440
+          raise ArgumentError, "tuning takes the note as a keyword: tuning #{key}: #{hz} (or note: and frequency:)"
+        end
+
         context = MB::Sound::Session.context
         current = Tuning.current
 

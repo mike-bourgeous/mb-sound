@@ -16,12 +16,14 @@ module PlotBoundary
   REQUIRES = %w[numo/narray zlib tmpdir mb/term].freeze
 
   ADAPTERS = {
-    "the plot kernels in fast_ui (decimate, polyline, area, project) and its Grid subclass: the kernels would move into the gem's own extension, linked only against mb-term's fast_term" => [
+    "the plot kernels in fast_ui (decimate, polyline, area, project, wave, response_db, trace, copy) and its Grid subclass: the kernels would move into the gem's own extension, linked only against mb-term's fast_term" => [
       'mb/sound/plot.rb: require_relative fast_ui',
       'mb/sound/plot/mark.rb: FastUI', 'mb/sound/plot/raster.rb: FastUI', 'mb/sound/plot/text.rb: FastUI', 'mb/sound/plot/text.rb: FastUI::Grid',
+      'mb/sound/plot/wave.rb: FastUI', 'mb/sound/plot/response.rb: FastUI', 'mb/sound/plot/live.rb: FastUI',
     ],
     "the plot kernels' and cell grid's one switch (MB::Sound::Kernels, kernels-1): an extracted plot gem would keep a registry of its own that mb-sound's drives, as mb-term's Grid.native is" => [
       'mb/sound/plot/live.rb: Kernels', 'mb/sound/plot/mark.rb: Kernels', 'mb/sound/plot/raster.rb: Kernels', 'mb/sound/plot/text.rb: Kernels',
+      'mb/sound/plot/wave.rb: Kernels', 'mb/sound/plot/response.rb: Kernels',
     ],
     "plot.rb loads mb-sound's previews (MB_SOUND_SIDE); mb-sound would require them itself" => [
       'mb/sound/plot.rb: require_relative plot/panels', 'mb/sound/plot.rb: require_relative plot/presets',
@@ -33,7 +35,7 @@ end
 
 RSpec.describe('plot boundary') do
   it 'covers the plot files except the previews of mb-sound' do
-    expect(PlotBoundary::FILES.length).to eq(18)
+    expect(PlotBoundary::FILES.length).to eq(20)
     expect(PlotBoundary::FILES).to include('mb/sound/plot.rb', 'mb/sound/plot/text.rb', 'mb/sound/plot/live.rb')
     PlotBoundary::MB_SOUND_SIDE.each { |f| expect(File.exist?(File.join(BoundaryCheck::LIB, f))).to eq(true), "#{f} is gone" }
   end

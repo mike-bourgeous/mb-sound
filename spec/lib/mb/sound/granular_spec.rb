@@ -142,4 +142,24 @@ RSpec.describe(MB::Sound::GraphNode::Grains, :aggregate_failures) do
   it 'is a plan boundary' do
     expect(core(noise.grains).plan_unsupported_reason).to match(/boundary/)
   end
+
+  # (fix-batch36-1114: grains started fresh on a carry, so grain_pad's
+  # rebuilds crossfaded)
+  it 'adopts a running cloud: sounding grains, onset phase, playhead, and random stream' do
+    plain = render(noise.grains(seed: 4, density: 150, size: 0.03, spread: 0.3, pitch_spread: 2), 6000)
+    a = noise.grains(seed: 4, density: 150, size: 0.03, spread: 0.3, pitch_spread: 2)
+    first = render(a, 2500, 500)
+    b = noise.grains(seed: 77, density: 150, size: 0.03, spread: 0.3, pitch_spread: 2)
+    expect(core(b).carry_fits?(core(a))).to eq(true)
+    expect(core(b).active_grains).to eq(0)
+    core(b).carry_adopt(core(a))
+    expect(core(b).active_grains).to be > 0
+    expect(core(a).active_grains).to eq(0)
+    rest = render(b, 3500, 367)
+    expect([first[0] + rest[0], first[1] + rest[1]]).to eq(plain)
+
+    expect(core(noise.grains(max_grains: 8)).carry_fits?(core(a))).to eq(false)
+    expect(core(ramp.grains).carry_fits?(core(noise.grains))).to eq(true) # (the same length and channels)
+    expect(core(ones.grains).carry_fits?(core(a))).to eq(false)
+  end
 end

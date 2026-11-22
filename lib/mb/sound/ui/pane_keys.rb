@@ -55,7 +55,7 @@ module MB
       # Preview (a live unjournaled knob move), a Commit (a gesture's
       # line, from the Session), an Ask (a value to type on a prompt
       # line, handed to key_<answer>), a Paste (a line onto the REPL's
-      # prompt, not run).
+      # prompt, not run), a Focus (into another pane).
       module PaneKeys
         def self.included(base)
           base.extend(ClassMethods)
@@ -64,8 +64,15 @@ module MB
         # A pane's kind from its class (Panes::Meters => :meters), nil for
         # nil or an anonymous class.
         def self.kind_of(pane)
-          pane&.class&.name&.split('::')&.last&.downcase&.to_sym
+          return nil if pane.nil?
+          c = pane.class
+          return KINDS[c] if KINDS.key?(c)
+          KINDS[c] = c.name&.split('::')&.last&.downcase&.to_sym
         end
+
+        # .kind_of by class (asked every frame by the painter's pane rates;
+        # sd-ux-fixes-1).
+        KINDS = {}.compare_by_identity
 
         module ClassMethods
           # Declares (or extends) the kind's keymap.
@@ -127,9 +134,11 @@ module MB
 
         # A live, unjournaled knob move a pane key asks for (a step of a
         # held-key gesture; UI::TurnGesture): the screen calls
-        # Session#preview_turn.  A Commit follows.
-        Preview = Data.define(:knob, :value) do
-          def self.[](knob, value) = new(knob: knob, value: value)
+        # Session#preview_turn.  A Commit follows.  +note+, if given, is
+        # what the status line says (the tracks pane's "drums at -3 dB"),
+        # else the knob and its value.
+        Preview = Data.define(:knob, :value, :note) do
+          def self.[](knob, value, note = nil) = new(knob: knob, value: value, note: note&.freeze)
         end
 
         # The end of a held-key gesture on +knob+: the screen runs
@@ -146,9 +155,13 @@ module MB
         # whose result it handles like a key's.  Esc cancels.  With
         # +changed+ (find-as-you-type: the library picker's /), each edit of
         # the line also calls key_<+changed+>(state, text so far), and Esc
-        # calls it with the starting text again.
-        Ask = Data.define(:prompt, :text, :answer, :changed) do
-          def self.[](prompt, text, answer, changed: nil) = new(prompt: prompt.freeze, text: text.to_s.freeze, answer: answer, changed: changed)
+        # calls it with the starting text again.  With +select+ the starting
+        # text is shown selected and the first printable key replaces it
+        # (the inspector's value prompt: typing 3000.hz over the old value,
+        # not after it; sd-ux-fixes-1); without, typing edits it (a bind
+        # line, a find to narrow).
+        Ask = Data.define(:prompt, :text, :answer, :changed, :select) do
+          def self.[](prompt, text, answer, changed: nil, select: false) = new(prompt: prompt.freeze, text: text.to_s.freeze, answer: answer, changed: changed, select: select)
         end
 
         # Console Ruby a pane key puts on the REPL's line, not run (the
@@ -157,6 +170,22 @@ module MB
         # for the status line.
         Paste = Data.define(:code, :note) do
           def self.[](code, note = nil) = new(code: code.freeze, note: note&.freeze)
+        end
+
+        # Another pane a pane key goes into (tracks-enter-1: the tracks
+        # pane's Enter takes its track into the knobs pane, and the knobs
+        # pane's Esc comes back): the screen focuses +pane+ (a pane name or
+        # kind on screen; with +rows+, a pane of that kind put in for a
+        # while where none is, as a jump letter's temporary pane), goes
+        # into its mode, then calls its key_<+action+>(state, *+args+, the
+        # asking pane's name) when +action+ is given, handling what that
+        # returns like a key's result.  +leave+ takes the asking pane away
+        # if a jump or a Focus put it in for a while.  UI state only: no
+        # line runs, nothing is journaled.  +note+ for the status line.
+        Focus = Data.define(:pane, :action, :args, :rows, :leave, :note) do
+          def self.[](pane, action = nil, *args, rows: nil, leave: false, note: nil)
+            new(pane: pane, action: action, args: args.freeze, rows: rows, leave: leave, note: note&.freeze)
+          end
         end
 
         # The pane's keymap (its kind's), or nil.
@@ -168,6 +197,25 @@ module MB
 
         # The pane's NAV jump letter, or nil.
         def jump = self.class.jump
+
+        # What `e` says in each pane's keys (EDIT_HELP; one wording).
+        EDIT_HELP = "this row's line onto the console to edit (not run)"
+
+        # e (ui-phase1-1, the 2026-11-21 plan's "every key is a console line
+        # he can read and learn from"): the console line the picked row's
+        # main action would run goes onto the REPL's prompt, unrun (a
+        # Paste: the screen goes to the REPL with it typed in), so it can
+        # be edited and run by hand.  One implementation: a pane says which
+        # line is its row's with `edit_line(state)`, returning a Run or a
+        # Turn (its code goes on the prompt) or a String (why there is
+        # none: flashed).  Bound as `on 'e', :edit_line, help:
+        # PaneKeys::EDIT_HELP` in the panes whose modes have e free.
+        def key_edit_line(state)
+          r = respond_to?(:edit_line) ? edit_line(state) : nil
+          return r if r.is_a?(String)
+          return "#{name}: no line to edit here" unless r.respond_to?(:code)
+          Paste[r.code, 'on the console line: edit it, Enter runs it']
+        end
 
         # Runs the key_<action> method for a keymap binding.  Returns its
         # result (a String flashes), or a note if the pane has none.

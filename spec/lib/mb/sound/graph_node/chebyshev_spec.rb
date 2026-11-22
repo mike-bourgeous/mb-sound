@@ -88,6 +88,8 @@ RSpec.describe(MB::Sound::GraphNode::Chebyshev, :aggregate_failures) do
 
   it 'rejects bad arguments' do
     expect { 1.constant.chebyshev(h16: 1) }.to raise_error(ArgumentError, /h16/)
+    # (his h21: read "did you mean :h2?")
+    expect { 1.constant.chebyshev(h2: 1, h21: -17) }.to raise_error(ArgumentError, 'chebyshev: harmonics go up to h15 (got :h21)')
     expect { 1.constant.chebyshev(*Array.new(16, 0.1)) }.to raise_error(ArgumentError, /at most 15/)
     expect { 1.constant.chebyshev(0, 0) }.to raise_error(ArgumentError, /nonzero/)
     expect { 1.constant.chebyshev(:fuzzz) }.to raise_error(ArgumentError, /fuzzz/)

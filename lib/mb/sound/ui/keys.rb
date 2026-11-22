@@ -82,6 +82,9 @@ module MB
           doc 'Ctrl-BkSp Ctrl-Del', 'delete the word before, after the cursor'
           doc 'Ctrl-S-Del', 'delete to the end of the line'
           doc 'PgUp PgDn', 'history search (Reline; your inputrc decides)'
+          doc 'Alt-Up Alt-Down', 'step the number at the cursor and run the line again (UI::NudgeKeys)'
+          doc 'Alt-S-Up/Down Ctrl-Alt-Up/Down', 'a fine step (one more decimal), a coarse step (10)'
+          doc 'Alt-S-Left/Right', 'the cursor to the previous, next number'
           doc 'Ctrl-C Ctrl-Z', 'interrupt, hide the tiles'
         end
 
@@ -162,9 +165,20 @@ module MB
 
         # A screen's status-line hints from its keymap ("q Esc quit  Space
         # pause ..."): the first words of each help line.
+        # Kept per keymap until its bindings change (the status line reads
+        # them every frame; sd-ux-fixes-1: about 11k objects/s of the idle
+        # inspector's 145k).
         def self.hints(map)
-          map.help_groups.flat_map { |_, lines| lines.map { |k, what| "#{k} #{what.split(/[(;]/).first.strip}" } }.join('  ')
+          groups = map.help_groups
+          hit = HINTS[map]
+          return hit[1] if hit && hit[0].equal?(groups)
+          text = groups.flat_map { |_, lines| lines.map { |k, what| "#{k} #{what.split(/[(;]/).first.strip}" } }.join('  ').freeze
+          HINTS[map] = [groups, text].freeze
+          text
         end
+
+        # .hints by keymap (identity, weak): [help groups, text].
+        HINTS = ObjectSpace::WeakMap.new
 
         # What the UI keys do where the tiled screen isn't up: [key, in the
         # band, with no UI].  Every key the tiles read from the REPL has a
@@ -176,6 +190,8 @@ module MB
           ['Alt-PgUp Alt-PgDn', 'the terminal\'s own (scrollback: Shift-PgUp)', 'the terminal\'s own'],
           ['Ctrl-BkSp Ctrl-Del', 'delete the word before, after', 'delete the word before, after'],
           ['Ctrl-S-Del', 'delete to the end of the line', 'delete to the end of the line'],
+          ['Alt-Up Alt-Down', 'step the number at the cursor, run the line again (Esc then Up/Down too)', 'step the number at the cursor, run the line again (Esc then Up/Down too)'],
+          ['Alt-S-Left/Right', 'the cursor to the previous, next number', 'the cursor to the previous, next number'],
           ['Ctrl-C', 'interrupt', 'interrupt'],
           ['Ctrl-Z', 'nothing (the band stays; ui off)', 'nothing (Reline ignores it)'],
         ].freeze

@@ -43,6 +43,16 @@ RSpec.describe(MB::Sound::UI::Picker, :aggregate_failures) do
     expect(names(:inst, 'walking')).to eq([]) # (a clip's tag: not an instrument)
   end
 
+  # sd-ux-fixes-1 (the review's #23: the marker overwrote the last row's
+  # family text, "dn +48")
+  it 'gives a longer list\'s last row to "+N more", leaving every entry\'s text whole' do
+    lines = draw(ui_fake_snapshot, {}, w: 40, h: 6)
+    expect(lines.last).to eq('  +3 more') # (5 instruments, 2 rows shown)
+    entries = lines[-3..-2]
+    expect(entries.map { |l| l[/[a-z_]+/] }).to eq(%w[dnb_reese dnb_sub])
+    expect(entries.join).not_to include('+')
+  end
+
   it 'names the likely action per kind: a load into the track, an audition, a line to edit' do
     a = described_class.action(entry(:dnb_reese), track: :bass, patch: true)
     expect(a).to have_attributes(kind: :run, code: 'track :bass, L.inst.dnb_reese')
@@ -121,6 +131,40 @@ RSpec.describe(MB::Sound::UI::Picker, :aggregate_failures) do
     expect(st[:query]).to eq('') # (Esc: the find as it was)
     feed.('q')
     expect(@tiles.tiler.layout).to eq(before)
+  end
+
+  # sd-ux-fixes-1 (the review's #4): the pane kept the line editor's own
+  # String as its query and cache key, which the editor changed in place, so
+  # the cache always hit and the list lagged the find by up to 2 s (KEEP)
+  it 'shows the list for the find so far on every frame, each key in its own frame' do
+    @term = UIHelpers::FakeTerminal.new(24, 80)
+    @tiles = ui::Tiles.new(layout: ui.tiles_layout_named(:sound), input: @term.slave, output: @term.slave, repl: :none,
+                           probe: false, size: [24, 80], clock: -> { 0.0 }, source: -> { ui_fake_snapshot },
+                           keyboard: ui::Keyboard.new(out: UIHelpers::NullKeyboardOut.new))
+    @tiles.start(thread: false)
+    @tiles.jump(:picker)
+    @tiles.refresh(0.0)
+    feed = ->(bytes) { @term.write(bytes); 10.times { @tiles.pump(0.01) }; @tiles.refresh(0.0) }
+    feed.('/')
+    st = @tiles.instance_variable_get(:@states)[:picker]
+    typed = +''
+    held = []
+    'reese'.each_char do |ch|
+      feed.(ch)
+      typed << ch
+      held << st[:query]
+      want = names(:inst, typed)
+      expect(want).not_to be_empty
+      shown = @tiles.to_text
+      expect(st[:query]).to eq(typed)
+      expect(shown).to include(want.first.to_s), "after #{typed.inspect}"
+      (names(:inst, '') - names(:inst, typed)).first(3).each { |gone| expect(shown).not_to include(" #{gone}"), "#{gone} after #{typed.inspect}" }
+    end
+    feed.("\x7f") # (Backspace)
+    expect(st[:query]).to eq('rees')
+    # (the queries the pane kept stay as they were: never the editor's live String)
+    expect(held).to eq(%w[r re ree rees reese])
+    expect(held).to all(be_frozen)
   end
 
   # e on a real console (Pry on the tiles' pty): the action's line typed

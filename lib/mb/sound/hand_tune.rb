@@ -15,6 +15,15 @@ module MB
 
       module_function
 
+      # For `tune A4, 480` (a note where tune's track goes; ux-friction-1
+      # round 2), a clause naming the reference-pitch command, else ''.
+      def tuning_hint(track, frequency = nil)
+        return '' unless track.is_a?(Pitch)
+
+        hz = frequency.is_a?(Numeric) && frequency.real? ? frequency.inspect : 440
+        "; for the reference pitch, tuning #{track.is_a?(Note) ? track.name.downcase : 'a4'}: #{hz} (the note as a keyword)"
+      end
+
       # One note of graph document +path+ rendered offline (a private
       # Session at the current tempo, master at 0 dB) with +values+ ({
       # param => value }) for +seconds+: an Array of SFloats (one per
@@ -161,6 +170,7 @@ module MB
           ].join("\n")
         end
 
+        include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
         def inspect = "#<HandTune::Inference #{track}: #{disagreements.length} of #{steps.length} steps disagree>"
       end
 
@@ -257,6 +267,7 @@ module MB
           [keep, what, opened&.to_s, pair&.to_s, lose, "turn by ear, ab (or b) to compare, S (save_fit #{track.inspect}) saves your knobs into the fit, ui.note 'what you hear', take.save :tmp, 'tuned #{track}'"].compact.join("\n")
         end
 
+        include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
         def inspect = "#<HandTune::Opened #{track.inspect}: #{fit ? fit.name : instrument&.name}#{pair ? ", reference #{pair.source}" : ''}>"
       end
 
@@ -270,7 +281,7 @@ module MB
       # them) plays as itself, its knobs to turn by ear (no retune or
       # refine).  Returns an Opened.
       def tune(track, code, ref: nil, play: nil, as: nil, fresh: false, **params)
-        raise ArgumentError, "tune names a track: tune :kick, code, ref: 'kick.wav', tune: (30.0..110.0).at(51.3), ..." unless track.is_a?(Symbol)
+        raise ArgumentError, "tune names a track: tune :kick, code, ref: 'kick.wav', tune: (30.0..110.0).at(51.3), ...#{HandTune.tuning_hint(track, code)}" unless track.is_a?(Symbol)
         code = Library::Audition.entry_for(code) if code.is_a?(Symbol)
         session = Session.current
         before = unsaved(session, track) # (turns not in the file: tune may carry or drop them)

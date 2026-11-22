@@ -14,8 +14,45 @@ module MB
         when Weights then x
         when Scale, Chord then x.weights
         when Array then Weights.tones(*x)
-        else raise ArgumentError, "Expected Weights, a Scale, a Chord, or an Array of notes (got #{x.inspect})"
+        else raise ArgumentError, "Expected Weights, a Scale, a Chord, or an Array of notes (got #{x.inspect})#{source_hint(x)}"
         end
+      end
+
+      # What a wrong source in a scale's place probably meant, as a clause
+      # starting with "; " (ux-friction-1 round 2: the maintainer's
+      # `motifs(:minor)`, `motifs(C0..C2)`, and `motifs(chord(0, 5, 7))`),
+      # or ''.
+      def self.source_hint(x)
+        if (x.is_a?(Symbol) || x.is_a?(String)) && Scale.names.include?(x.to_sym)
+          "; a mode by name is a scale: scale(#{x.to_sym.inspect}) (scale(#{x.to_sym.inspect}, :a) on A)"
+        elsif x.is_a?(Range)
+          "; a Range of notes goes in range:, after the notes to draw from (scale, range: #{x.begin}..#{x.end})"
+        elsif x.is_a?(MIDI::Transform::Spec) && x.to_s.start_with?('chord(')
+          "; #{x} is the MIDI chord transform: a chord's notes are chord(:min, root: :a), tones(C3, F3, G3), or [C3, F3, G3]"
+        else
+          ''
+        end
+      rescue StandardError
+        ''
+      end
+
+      # For a +range+ in which +source+ (a Scale, Weights, Harmony) has no
+      # notes, a clause naming the scale and its nearest notes below and
+      # above (ux-friction-1 round 2: the maintainer's `range: A1..A1` on C
+      # phrygian, which has A♭ and B♭ but no A), or ''.
+      def self.empty_range_hint(source, range)
+        return '' unless range.is_a?(Range) && (source.is_a?(Scale) || source.is_a?(Weights) || source.is_a?(Harmony))
+
+        lo = Scale.root_number(range.begin).floor
+        hi = Scale.root_number(range.end).ceil
+        near = notes_of(motif_field(source, range: (lo - 12)..(hi + 12)))
+        below = near.select { |n| n < lo }.max
+        above = near.select { |n| n > hi }.min
+        names = [below, above].compact.map { |n| Note.new(n).name }
+        what = source.is_a?(Scale) && source.name ? " (#{Note.new(source.root).name.sub(/-?\d+\z/, '')} #{source.name})" : ''
+        "#{what}#{names.empty? ? '' : "; the nearest are #{names.join(' and ')}"}: widen the range, or move the scale's root"
+      rescue StandardError
+        ''
       end
 
       # The Field of +source+ at clip +position+ (whole notes): Fields and

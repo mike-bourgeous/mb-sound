@@ -304,9 +304,22 @@ module MB
 
         # Returns the raster to a #snapshot.
         def restore(snap)
-          @dots[true, true] = snap[0]
+          restore_dots(snap[0])
           @colors.replace(snap[1])
           @color_ids.replace(snap[2])
+        end
+
+        # (#restore_dots is the :plot_copy kernel: #restore_dots_c, FastUI.copy
+        # without allocating, or the Ruby mirror #restore_dots_ruby.)
+        def restore_dots_c(dots)
+          FastUI.copy(@dots, dots) || restore_dots_ruby(dots)
+          nil
+        end
+
+        # The Ruby mirror of FastUI.copy.
+        def restore_dots_ruby(dots)
+          @dots[true, true] = dots
+          nil
         end
 
         # Paints a block of color indexes +ids+ (Numo::Integer, rows x cols)
@@ -333,6 +346,7 @@ module MB
 
       Kernels.register :plot_decimate, on: Geometry.singleton_class, as: :decimate, c: :decimate_c, ruby: :decimate_ruby, covers: %w[FastUI.decimate]
       Kernels.register :plot_monotonic, on: Geometry.singleton_class, as: :monotonic?, c: :monotonic_c, ruby: :monotonic_ruby, covers: %w[FastUI.monotonic]
+      Kernels.register :plot_copy, on: Raster, as: :restore_dots, c: :restore_dots_c, ruby: :restore_dots_ruby, state: %i[@dots], covers: %w[FastUI.copy]
       Kernels.register :plot_polyline, on: Raster, as: :polyline, c: :polyline_c, ruby: :polyline_ruby, state: %i[@dots], covers: %w[FastUI.polyline]
     end
   end

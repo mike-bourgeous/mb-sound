@@ -106,6 +106,32 @@ RSpec.describe(MB::Sound::GraphNode::Rotary, :aggregate_failures) do
     gaps.each { |g| expect(g).to be_within(0.004).of(1 / 6.7) }
   end
 
+  # effects-3: the effects-2 Bench's "slow, fast, slow" panel used
+  # `16.bars.lfo.square`, a 16-bar cycle (8 bars slow, 8 fast), in a 9-bar
+  # clip, so it only sped up at its very end; an 8-bar cycle switches after
+  # 4 bars.  This pins the tempo-synced speed node switching on its bar.
+  it 'switches speed on the bar from a tempo-synced square (slow 4 bars, fast 4, slow)' do
+    speed = 8.bars.lfo.square.with_phase(0.5).at(0..1) # 120 BPM: slow 0-8 s, fast 8-16 s
+    horn = mod.rotor_rate(speed, *mod::HORN_SPEEDS, mod::HORN_RAMP, 48000)
+    h = collect(horn, 48000 * 20)
+    expect(h[48000 * 8 - 10]).to be_within(1e-4).of(0.8)
+    expect(h[48000 * 8 + 24000]).to be_within(0.05).of(0.8 + 5.9 / 2) # half way up half a second after bar 5
+    expect(h[48000 * 10]).to be_within(1e-3).of(6.7)
+    expect(h[48000 * 16 - 10]).to be_within(1e-3).of(6.7)
+    expect(h[48000 * 18]).to be_within(1e-3).of(0.8) # down in 1.6 s
+
+    # and in the sound: the horn's level swings at 0.8 Hz before bar 5, 6.7 Hz after
+    speed = 8.bars.lfo.square.with_phase(0.5).at(0..1)
+    l, _ = collect_stereo(5000.hz.sine.at(0.5).rotary(speed: speed, doppler: 0), 48000 * 14)
+    [[48000, 48000 * 7, 1 / 0.8], [48000 * 10, 48000 * 14 - 2400, 1 / 6.7]].each do |from, to, period|
+      el = envelope(l[from...to], 48)
+      peaks = el.each_index.select { |k| k > 0 && k < el.length - 1 && el[k] >= el[k - 1] && el[k] > el[k + 1] && el[k] > 0.49 }
+      gaps = peaks.each_cons(2).map { |a, b| (b - a) * 48 / 48000.0 }
+      expect(gaps).not_to be_empty
+      gaps.each { |g| expect(g).to be_within(0.01 * period + 0.002).of(period) }
+    end
+  end
+
   it 'holds the rotors still with speed: :stop' do
     l, r = collect_stereo(5000.hz.sine.at(0.5).rotary(speed: :stop, spread: 0.25), 48000)
     el = envelope(l[4800..], 480)

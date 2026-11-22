@@ -176,6 +176,12 @@ module MB
           console, dsl = rows.partition.with_index { |_, i| names[i][1] == :console }
           d.heading('Commands').rows(console) unless console.empty?
           d.heading('Node and value methods').rows(dsl) unless dsl.empty?
+          # (ux-friction-1 round 2: from :unison he couldn't find .unison's own page)
+          first = names.find { |_, kind| kind == :dsl }&.first || names.first&.first
+          if first
+            how = names.any? { |_, kind| kind == :dsl } ? "help .#{first}" : "help :#{first}"
+            d.note("Each one's page (arguments, examples): #{how}#{names.any? { |_, k| k == :dsl } && names.any? { |_, k| k == :console } ? ", help :#{names.find { |_, k| k == :console }.first}" : ''}")
+          end
           extra_sections(d)
           # (its aliases' too: help note is the pitch topic, and ui.note's
           # entry shows there)
@@ -379,6 +385,34 @@ module MB
             end
           end
           blocks.reject { |b| b.first == :blank }
+        end
+      end
+
+      # `help Owner#name` for a method the owner doesn't have (see
+      # Help.owner_method_page): what was asked, and the names it might be
+      # (+spelled+: the owner's methods spelled like it; +others+: [label,
+      # DocIndex::Entry] pairs of other owners of the name).
+      class MissPage
+        include Page
+        include Text
+
+        def title = @text
+
+        def initialize(text, owner, spelled, others)
+          @text = text
+          @owner = owner
+          @spelled = spelled
+          @others = others
+        end
+
+        def to_s
+          d = Doc.new
+          d.title("help #{@text}")
+          name = @text[/[#.]([^#.]+)\z/, 1]
+          d.para(@owner ? "#{@owner} has no method #{name}." : "No class or module named #{@text[/\A[^#.]+(?=[#.][^#.]+\z)/]}.")
+          rows = @spelled.map { |s| ["help #{s}", ''] } + @others.map { |label, e| ["help #{label}", e.summary] }
+          d.heading('Did you mean').rows(rows, max_label: 40) unless rows.empty?
+          d.to_s
         end
       end
 

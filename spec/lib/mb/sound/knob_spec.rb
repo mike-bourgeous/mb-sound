@@ -627,6 +627,29 @@ RSpec.describe(MB::Sound::GraphNode::Knob) do
       expect(render(session, 800)[-1]).to be_within(0.01).of(800 + 2500) # halfway in octaves and linearly
     end
 
+    # sd-ux-fixes-1 (the review's #25: recall and xfade printed 8-17
+    # `#<turn ...>` lines, snaps every knob of every snapshot)
+    it 'prints the console\'s recall and xfade as one line each, and snaps as a table' do
+      MB::Sound::Session.with_context(session: session) do
+        MB::Sound.snap(:dark)
+        session.turn(:cut, 6400)
+        MB::Sound.snap(:bright)
+        render(session, 800)
+        r = MB::Sound.recall(:dark)
+        expect(r.length).to eq(2) # (still the entries, an Array)
+        expect(r.pretty_inspect).to match(/\Arecall :dark: 2 knobs land \S+ (\(queued\) )?\(cut, mix\)\n\z/)
+        expect(MB::Sound.xfade(:dark, :bright, 0.3).inspect).to match(/\A#<xfade :dark, :bright: 2 knobs land \S+ (\(queued\) )?\(cut, mix\)>\z/)
+        snaps = MB::Sound.snaps
+        expect(snaps[:dark]).to eq({ cut: 100.0, mix: 0.0 })
+        expect(snaps.pretty_inspect).to eq(":dark    2 knobs: cut 100, mix 0\n:bright  2 knobs: cut 6400, mix 0\n")
+      end
+    end
+
+    it 'shows a knob value in the CODE pane without float noise' do
+      k = MB::Sound::UI::KnobValue.new(name: :mix, value: 0.1 + 0.2, spec: @mix.spec)
+      expect(MB::Sound::UI::Panes::Code.knob_line(k)).to eq('knob :mix, 0.3, smooth: 0.0')
+    end
+
     it 'crossfades by a knob' do
       session.snap(:dark)
       session.turn(:cut, 6400)

@@ -138,11 +138,46 @@ module MB
           # name the clip, or reach the signal; omnibus15)
           call = what.start_with?('track ') ? "track(#{what.delete_prefix('track ')})" : what
           hint = BlockHints.hint(error, call: call, param: 'clip')
+          near = patch_suggestion(error)
           PatchError.new(
-            "#{what}: the patch raised #{error.class}: #{error.message.lines.first.to_s.chomp} " \
+            "#{what}: the patch raised #{error.class}: #{error.message.lines.first.to_s.chomp}#{" (did you mean #{near}?)" if near} " \
             "(#{where ? "at #{where}, " : ''}built from #{from}); nothing was changed#{hint ? "; #{hint}" : ''}",
             track: name, original: error
           ).tap { |pe| pe.set_backtrace(error.backtrace || []) }
+        end
+
+        # A spelling +error+ suggests, or nil (sd-ux-fixes-1, the review's
+        # #18: `sawz` and `resonanse:` got no did-you-mean inside the
+        # PatchError, which keeps only the first line of the message): a
+        # NameError's corrections (`.saw` for a method, the name for a
+        # variable), or for an unknown keyword the method's keywords nearest
+        # it (`resonance:`), the method found by the error's first frame.
+        def patch_suggestion(error)
+          if error.is_a?(NameError) && error.respond_to?(:corrections)
+            c = error.corrections.first(3)
+            return nil if c.empty?
+            return c.map { |x| ".#{x}" }.join(' or ') if error.is_a?(NoMethodError)
+            return c.join(' or ')
+          end
+          return nil unless error.is_a?(ArgumentError) && (m = error.message.match(/unknown keywords?: (.+)/))
+          bad = m[1].scan(/:?(\w+)/).flatten
+          keys = keywords_of(error.backtrace_locations&.first&.label) or return nil
+          found = bad.filter_map { |b| DidYouMean::SpellChecker.new(dictionary: keys.map(&:to_s)).correct(b).first&.then { |k| "#{k}:" } }
+          found.empty? ? nil : found.uniq.join(' and ')
+        rescue StandardError
+          nil
+        end
+
+        # The keyword names of the method a backtrace label names
+        # ("MB::Sound::GraphNode::FilterMethods#lp4"), or nil.
+        def keywords_of(label)
+          m = label.to_s.match(/\A([A-Z][\w:]*)([#.])(\w+[?!=]?)\z/) or return nil
+          owner = Object.const_get(m[1])
+          meth = m[2] == '#' ? owner.instance_method(m[3]) : owner.method(m[3])
+          keys = meth.parameters.filter_map { |type, name| name if %i[key keyreq].include?(type) }
+          keys.empty? ? nil : keys
+        rescue NameError
+          nil
         end
 
         # The first line of +error+'s backtrace in the file the patch was

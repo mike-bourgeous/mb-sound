@@ -57,6 +57,16 @@
 #     })
 #     melody(h, 8, range: A3..A5, vary: true).to_ruby   # prints the generator back as Ruby
 #
+# Following the session key (gen-ux-1): a scale without a root, no source,
+# or a progression moves with `key` on the cycle the change lands on:
+#     key :a, :minor
+#     chords = progression(:i, :VI, :III, :VII)            # a chord a bar on degrees of the key
+#     bg :lead, ambient_koto_voice(motifs(chords, 8, range: A3..A5, around: E4))
+#     bg :bowls, ambient_bowl_voice(strikes(chords.over(A2..A3), every: 1.n4, chance: 0.3, gap: 3))
+#     key :d, at: bar(9)                                   # the lead and its chords move to D minor at bar 9
+#     at_bar(17) { key :f, :lydian }                        # then F lydian (VI is now a D minor chord)
+#     bg :bells, ambient_rin_voice(motifs(scale(:phrygian), 4, step: 1.n16, range: A4..A6))   # phrygian on the key's root
+#
 # The parts are in the library (L.gen; `L.gen.generative_demo` lists them):
 #     play L.gen.koto_motif                                   # the lead, 8 bars on the koto
 #     bg :lead, ambient_koto_voice(L.gen.koto_motif(seed: 3))  # another seed: another tune

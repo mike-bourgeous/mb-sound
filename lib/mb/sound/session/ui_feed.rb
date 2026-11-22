@@ -11,8 +11,14 @@ module MB
         # A player, bus, or master chain as the UI sees it: +name+, +kind+
         # (:player, :bus, :master), +state+ (:playing, :starting,
         # :stopping, :fading, :ringing, :muted, :asleep), and +cpu+ (seconds
-        # its graph took since the feed last read it).
-        UIPart = Data.define(:name, :kind, :state, :cpu)
+        # its graph took since the feed last read it); for players, +muted+
+        # and +soloed+ (its own `mute`/`solo` flags; knobs-pane-keys-1, the
+        # tracks pane's m and s keys).
+        UIPart = Data.define(:name, :kind, :state, :cpu, :muted, :soloed) do
+          def initialize(name:, kind:, state:, cpu:, muted: false, soloed: false)
+            super
+          end
+        end
 
         # The terminal UI feed attached to this Session (see UI::Feed), or
         # nil.
@@ -46,7 +52,7 @@ module MB
             p = list.find(&:current?) || list.first
             cpu = 0.0
             list.each { |q| cpu += q.cpu || 0.0; q.cpu = 0.0 }
-            out << UIPart.new(name: name, kind: :player, state: ui_player_state(p), cpu: cpu)
+            out << UIPart.new(name: name, kind: :player, state: ui_player_state(p), cpu: cpu, muted: @muted.include?(name), soloed: @soloed.include?(name))
           end
 
           (@buses || {}).each_value do |b|

@@ -271,6 +271,21 @@ RSpec.describe MB::Sound::Library do
       expect(log.first).to eq('mb-sound: save :quarter (replaced)')
       expect(log.length).to eq(5)
     end
+
+    # sd-ux-fixes-1 (the review's #3): `save :ghost_lead, :lead` printed
+    # "Saved" and wrote a document whose body was `:lead`
+    it 'refuses a name or anything else that isn\'t a graph, saying what save takes, and writes nothing' do
+      expect { MB::Sound.save(:ghost_lead, :lead) }.to raise_error(ArgumentError, /save :ghost_lead, \.\.\.: :lead is a name; save takes a graph .*`ruby set` prints its track :lead line.*nothing was saved/)
+      expect { MB::Sound.save!(:ghost_lead, 'lead') }.to raise_error(ArgumentError, /save! :ghost_lead, \.\.\.: "lead" isn't a graph/)
+      track = MB::Sound::Arrangement::Track.new(name: :lead)
+      expect { MB::Sound.save(:ghost_lead, track) }.to raise_error(ArgumentError, /track :lead is a track .*not a graph/)
+      expect(File.exist?(File.join(user, 'ghost_lead.mbg.rb'))).to eq(false)
+      live = MB::Sound.live?
+      MB::Sound.live = true
+      expect { expect(MB::Sound.save(:ghost_lead, :lead)).to be_nil }.to output(/:lead is a name/).to_stderr
+    ensure
+      MB::Sound.live = live
+    end
   end
 
   describe 'collect and promote' do
@@ -386,6 +401,25 @@ RSpec.describe MB::Sound::Library do
       expect(220.hz.saw.then(&l.fx.hall)).to be_a(MB::Sound::GraphNode::Reverb)
       expect(l.fx.reverb.plate.head_path).to eq('L.fx.reverb.plate') # (resonator :plate too)
       expect(l.fx.hall.head_path).to eq('L.fx.hall')
+    end
+
+    # sd-ux-fixes-1 (the review's #17)
+    it 'say which entries a misspelled or ambiguous path is, wherever one entry goes' do
+      expect { l.inst.dnb_reeese }.to raise_error(NoMethodError, /nothing under L\.inst is :dnb_reeese \(\d+ entries: `L\.inst` lists them\)\nDid you mean\?  :dnb_reese/)
+      expect { l.inst.reese.dnb_reeese }.to raise_error(NoMethodError, /nothing under L\.inst\.reese is :dnb_reeese \(2 entries: dnb_reese, jungle_reese\)/)
+      expect(l.inst.reese.inspect).to eq('#<L.inst.reese: 2 entries (dnb_reese, jungle_reese)>')
+      expect(l.inst.reese.pretty_inspect).to start_with('L.inst.reese: 2 entries') # (the console's table)
+      expect { l.inst.reese.(1) }.to raise_error(ArgumentError, /L\.inst\.reese is 2 entries \(dnb_reese, jungle_reese\); name one to call it/)
+      session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
+      MB::Sound::Session.with_context(session: session) do
+        # In the session: play reads the session's sample rate before it checks
+        # the sound, and the default Session opens the real output device
+        # (batch 34: DeviceOutput::Unavailable when no earlier example had set one).
+        expect { MB::Sound.play(l.inst.reese) }.to raise_error(MB::Sound::Playable::Unplayable, /\Aplay: L\.inst\.reese is 2 entries .*name one \(L\.inst\.reese\.dnb_reese\)/)
+        expect { MB::Sound.track(:bass, l.inst.reese) }.to raise_error(ArgumentError, /\Atrack :bass: L\.inst\.reese is 2 entries/)
+      end
+    ensure
+      session&.close
     end
 
     it 'name note effects mfx and audio-to-notes/control racks analyze (maintainer, 2026-10-30)' do

@@ -15,6 +15,47 @@ RSpec.describe('MB::Sound::FastUI', :aggregate_failures) do
     expect(out.lines.last.to_s.strip).to eq('3'), out
   end
 
+  # FastUI.wave (ui-wave-perf-1; mirror Plot::Wave.draw_ruby, compared in
+  # plot/wave_spec.rb): placements past every edge, rectangles larger than
+  # the grid, one-cell grids, NaN and infinite samples, a marker past the
+  # end, and wrong argument types (for memcheck: every cell write in bounds)
+  it 'draws waves into grids at any placement without writing outside them' do
+    data = [Numo::SFloat.linspace(-2, 2, 3001), Numo::SFloat[Float::NAN, 1, Float::INFINITY, -Float::INFINITY], Numo::SFloat[0.5], Numo::SFloat[]]
+    [[1, 1], [7, 3], [40, 12]].each do |gw, gh|
+      g = MB::Sound::Plot::Text::NativeCells.new(gw, gh)
+      data.each do |d|
+        [[-5, -2, 10, 4], [0, 0, gw, gh], [gw - 1, gh - 1, 50, 20], [-60, 0, 30, 3], [3, -9, 4, 8], [0, 0, 0, 5]].each do |x, y, w, h|
+          [-1, 0, 7, 10_000].each do |mark|
+            expect(fast.wave(g, d, x, y, w, h, -1.0, 1.0, 0xffffff, mark, 0x808080)).to be_nil
+          end
+        end
+      end
+      expect(g.lines(:none).length).to eq(gh)
+    end
+    g = MB::Sound::Plot::Text::NativeCells.new(4, 4)
+    expect { fast.wave(g, Numo::DFloat[1, 2], 0, 0, 4, 4, -1.0, 1.0, 0, -1, 0) }.to raise_error(ArgumentError, /SFloat/)
+    expect { fast.wave(g, Numo::SFloat.zeros(4, 2), 0, 0, 4, 4, -1.0, 1.0, 0, -1, 0) }.to raise_error(ArgumentError, /1D/)
+    expect { fast.wave(Object.new, Numo::SFloat[1], 0, 0, 4, 4, -1.0, 1.0, 0, -1, 0) }.to raise_error(TypeError)
+  end
+
+  # FastUI.response_db (ui-wave-perf-1; mirror Plot::Response.db_ruby,
+  # compared in plot/response_spec.rb): sizes 0, 1, and many, the longest
+  # coefficient lists, views, and wrong arguments (for memcheck)
+  it 'writes filter responses into SFloats of any size and checks its arguments' do
+    b = Array.new(16) { |i| 1.0 / (i + 1) }
+    a = Array.new(16) { |i| i == 0 ? 1.0 : 0.01 * i }
+    [0, 1, 2, 257].each do |n|
+      out = Numo::SFloat.new(n)
+      expect(fast.response_db(out, b, a, 48000.0, 20.0, 23976.0, -60.0)).to equal(out)
+      expect(out.to_a).to all(be >= -60.0) if n > 0
+    end
+    view = Numo::SFloat.zeros(20)[2...12]
+    expect { fast.response_db(view, [1.0], [1.0, 0.5], 48000.0, 20.0, 2000.0, -60.0) }.not_to raise_error
+    expect { fast.response_db(Numo::SFloat.zeros(20)[(0..19) % 2], [1.0], [1.0], 48000.0, 20.0, 2000.0, -60.0) }.to raise_error(ArgumentError, /contiguous/)
+    expect { fast.response_db(Numo::SFloat.new(4), [1.0, 'x'], [1.0], 48000.0, 20.0, 2000.0, -60.0) }.to raise_error(TypeError)
+    expect { fast.response_db(Numo::SFloat.new(4), Array.new(17, 1.0), [1.0], 48000.0, 20.0, 2000.0, -60.0) }.to raise_error(ArgumentError)
+  end
+
   # Values with NaNs comparable by eq (NaN never equals NaN)
   def comparable(v)
     case v
@@ -152,6 +193,42 @@ RSpec.describe('MB::Sound::FastUI', :aggregate_failures) do
     end
   end
 
+  describe '.trace' do
+    it 'writes what project then regular decimate give into its buffers, for SFloat and DFloat samples, and declines what it cannot take' do
+      ys = Numo::SFloat.new(803).rand(-1, 1)
+      ys[7] = Float::NAN
+      dx = MB::Sound::FastUI.project(Numo::DFloat.new(803).seq, 0, 0.0, 802.0, false, 159.0, false)
+      [false, true].each do |ends|
+        [ys, ys.cast_to(Numo::DFloat)].each do |y|
+          dy = MB::Sound::FastUI.project(Numo::DFloat.cast(y), 0, -1.0, 2.0, false, 47.0, true)
+          ex, ey = MB::Sound::FastUI.decimate(dx, dy, 160, true, ends)
+          ox = Numo::DFloat.zeros(ex.length)
+          oy = Numo::DFloat.zeros(ey.length)
+          expect(MB::Sound::FastUI.trace(ox, oy, dx, y, 0, -1.0, 2.0, false, 47.0, true, 160, ends)).to eq(true)
+          expect(ox.to_a).to eq(ex.to_a)
+          expect(oy.to_a.map { |v| v.nan? ? :nan : v }).to eq(ey.to_a.map { |v| v.nan? ? :nan : v })
+        end
+      end
+      short = Numo::DFloat.zeros(3)
+      expect(MB::Sound::FastUI.trace(short, short, dx, ys, 0, -1.0, 2.0, false, 47.0, true, 160, false)).to be_nil
+      expect(MB::Sound::FastUI.trace(short, short, dx, ys[0...100], 0, -1.0, 2.0, false, 47.0, true, 160, false)).to be_nil
+      expect { MB::Sound::FastUI.trace(short) }.to raise_error(ArgumentError)
+    end
+  end
+
+  describe '.copy' do
+    it 'copies equal-shaped contiguous arrays and declines others' do
+      a = Numo::UInt16.zeros(4, 6)
+      b = Numo::UInt16.new(4, 6).seq
+      expect(MB::Sound::FastUI.copy(a, b)).to eq(true)
+      expect(a).to eq(b)
+      expect(MB::Sound::FastUI.copy(a, Numo::UInt16.zeros(6, 4))).to be_nil
+      expect(MB::Sound::FastUI.copy(a, Numo::Int16.zeros(4, 6))).to be_nil
+      expect(MB::Sound::FastUI.copy(a, b[true, 0..2])).to be_nil
+      expect(MB::Sound::FastUI.copy(Numo::UInt16.zeros(0), Numo::UInt16.zeros(0))).to eq(true)
+    end
+  end
+
   describe '.monotonic' do
     it 'agrees with Geometry.monotonic_ruby' do
       [
@@ -211,6 +288,70 @@ RSpec.describe('MB::Sound::FastUI', :aggregate_failures) do
     end
   end
 
+  describe 'GVLYield' do
+    let(:gy) { MB::Sound::FastUI::GVLYield }
+
+    after {
+      gy.yielders.each { |t| gy.remove(t) }
+      gy.priority = nil
+    }
+
+    it 'runs its hook only while a priority thread and a yielder are set' do
+      other = Thread.new { sleep }
+      expect(gy).not_to be_active
+      expect(gy.add(Thread.current)).to eq(true)
+      expect(gy.add(Thread.current)).to eq(true)
+      expect(gy.yielders).to eq([Thread.current])
+      expect(gy).not_to be_active
+      gy.priority = other
+      expect(gy.priority).to equal(other)
+      expect(gy).to be_active
+      expect(gy.remove(Thread.current)).to eq(true)
+      expect(gy.remove(Thread.current)).to eq(false)
+      expect(gy).not_to be_active
+      expect { gy.add(1) }.to raise_error(TypeError)
+      expect { gy.priority = :x }.to raise_error(TypeError)
+      expect(gy.stats.keys).to eq(%i[kicks retries yields wakeups late_1ms late_2ms late_max_ns])
+    ensure
+      other&.kill&.join
+    end
+
+    it 'reuses the slots of yielders that ended without a priority thread (no hook saw them exit)' do
+      # (graph warming's workers in a non-realtime Session: after 16 of
+      # them no thread could join; spec:quick 2026-11-16)
+      20.times do
+        t = Thread.new { Thread.stop }
+        Thread.pass until t.stop?
+        expect(gy.add(t)).to eq(true)
+        t.wakeup
+        t.join
+      end
+      expect(gy.yielders).to eq([])
+      expect(gy.add(Thread.current)).to eq(true)
+      expect(gy.yielders).to eq([Thread.current])
+    end
+
+    it 'hands the GVL from a busy yielder to the priority thread when it wakes' do
+      done = false
+      waiter = Thread.new { 20.times { sleep 0.002 }; done = true }
+      gy.priority = waiter
+      gy.add(Thread.current)
+      before = gy.stats[:yields]
+      t0 = MB::U.clock_now
+      # Ruby code that never blocks (a timeslice, 10-100 ms, without yielding)
+      x = 0
+      x += 1 until done || MB::U.clock_now - t0 > 20
+      elapsed = MB::U.clock_now - t0
+      waiter.join
+      # (Valgrind serializes threads: the busy thread's own timeslice may
+      # come first, so no handover is counted there)
+      expect(gy.stats[:yields]).to be > before unless SPEC_MEMCHECK
+      # (20 wakes: about 0.05 s when each gets the GVL at once, 0.2-2 s when
+      # each waits out a timeslice; Valgrind serializes threads)
+      expect(elapsed).to be < 0.5 unless SPEC_MEMCHECK
+    end
+  end
+
   describe 'GVLProbe' do
     let(:probe) { MB::Sound::FastUI::GVLProbe }
 
@@ -247,6 +388,44 @@ RSpec.describe('MB::Sound::FastUI', :aggregate_failures) do
       probe.start([Thread.current])
       expect { probe.waits(1) }.to raise_error(IndexError, /No GVLProbe slot 1/)
       expect(probe.waits(0)).to eq([])
+    end
+
+    describe 'stacks' do
+      after {
+        probe.stacks_stop
+        probe.stacks_drain
+      }
+
+      def hold_in_c(seconds) = MB::Sound::FastLatency.spin(seconds)
+
+      it 'records where the thread holding the GVL is, natively and in Ruby, while the waiter waits past the threshold',
+         memcheck_skip: 'Valgrind serializes threads (the waiter never waits); stacks_drain on an empty ring still runs in the next example' do
+        probe.stacks_drain
+        waiter = Thread.new { 10.times { sleep 0.002 } }
+        probe.start([waiter, Thread.current])
+        probe.stacks_start(0.01, 0, true, 0.01)
+        sleep 0.001
+        hold_in_c(0.06)
+        waiter.join
+        probe.stacks_stop
+        st = probe.stacks_drain
+
+        expect(st).not_to be_empty
+        s = st.first
+        expect(s).to include(holder: 1, wait_ns: be >= 10_000_000)
+        expect(s[:c]).not_to be_empty
+        expect(s[:c].join(' ')).to include('fast_latency')
+        expect(s[:ruby].first(3).join(' ')).to include('spin').and include('hold_in_c')
+      end
+
+      it 'records nothing while no watched thread waits long, and stops cleanly' do
+        probe.start([Thread.current])
+        expect(probe.stacks_start(0.01)).to eq(true)
+        sleep 0.03
+        probe.stacks_stop
+        expect(probe.stacks_drain).to eq([])
+        expect(probe.stacks_stop).to be_nil
+      end
     end
 
     describe 'log' do

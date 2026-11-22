@@ -33,6 +33,7 @@ module MB
             "#{target.name}: #{pass ? 'pass' : "fail (#{reasons.join('; ')})"}"
           end
 
+          include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
           def inspect = "#<Check #{self}>"
         end
 

@@ -20,12 +20,13 @@ module MB
           # plan_* methods are always left out.
           EXEMPT = {
             'MB::Sound::Tone' => {
-              reason: 'readers and sampling internals (the library reads them while sampling)',
+              reason: 'readers and sampling internals (the library reads them while sampling), and per_band_copy, ' \
+                      'per_harmonic\'s copies of a tone (graphs print the per_harmonic value)',
               names: %i[
                 advance compute fm_feedback_amount fm_feedback_gain frequency last_freq noise_seed output_gain
                 phase phi period period_samples random_advance reset_input reset_to sample_frame state
                 sync_source table timeline to_midi to_note wave_type wavelength amplitude amplitude_set range seed
-                phase_mod scan pivot warp_pivot sync_switch param_info
+                phase_mod scan pivot warp_pivot sync_switch param_info per_band_copy
               ],
             },
             'MB::Sound::Pitch' => {

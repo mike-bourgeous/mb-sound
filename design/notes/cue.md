@@ -52,6 +52,7 @@ Launching what was cued (omnibus15, from the maintainer's take of 2026-10-27: `c
 1. the players named `:x` on MAIN stop there, crossfading out over `fade:` (default the 5 ms declick);
 2. `:"x/cue"` is renamed `:x` (the same Player and graph: envelopes, delays, clips carry on);
 3. its MAIN gain ramps 0 -> 1 and its CUE gain 1 -> 0 over the same `fade:` (CUE stays at 1 if `:x` is pre-listened).
+The rename itself takes effect from the first frame of the span the launch lands in; what depends on the frame reads the MAIN ramp instead: a muted `:x` with a pre-mute send wakes on the ramp's start (`Cue#cue_main_from`), not the span's start (fix-batch35-1114, SessionFuzz seed 781023: it woke up to a buffer early, so 367- and 800-frame renders differed).
 Scenes (`Arrangement::Cue#cue_scene`, `#launch_cued_scene`): `cue :drop` cues each patch track the scene gives a new clip; `launch :drop` launches those cues at each track's launch point (`tr.q`, else the scene's `q:`, else `quant`), adopting their clips, then runs `go :drop`, which leaves them alone (already playing that clip) and changes the rest.
 
 For tracks the Arrangement adopts the cued clip as the track's clip (`Arrangement::Cue#adopt_cue`), so scenes and listings know what the track plays.  `launch` with nothing cued raises (live: `live_error`).

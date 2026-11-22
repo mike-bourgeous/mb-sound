@@ -669,7 +669,10 @@ module MB
       # Changes the waveform type to a band-limited sawtooth (a rising
       # ramp; see BandLimit; #asaw is the naive, aliased version).  Graphs
       # print it as saw (the official name since ux-fix-1, 2026-10-18;
-      # ramp and sawtooth are aliases).
+      # ramp and sawtooth are aliases).  It starts in the middle (0),
+      # rising, and jumps from +1 to -1 halfway through each cycle: as a
+      # bar-synced LFO (`1.bar.lfo.saw`) on beat 3.  #drumramp starts at
+      # the bottom and jumps at the cycle's start (the downbeat).
       def saw
         set_wave(:ramp, true)
       end
@@ -1017,6 +1020,12 @@ module MB
       # Changes the waveform type to ramp, with phase set so the oscillator
       # starts at the bottom instead of the middle of its ramp.  This allows
       # using #drumramp oscillators to play beats in time with each other.
+      # The same as `saw.with_phase(0.5)`: it starts at -1, rises through
+      # the cycle, and jumps back at the next cycle's start, so a
+      # bar-synced LFO jumps on the downbeat (a plain #saw starts at 0 and
+      # jumps halfway, on beat 3 of a bar).
+      #
+      #     bg 110.hz.saw.at(-16.db).lp4(1.bar.lfo.drumramp.at(150..2000))
       def drumramp
         ramp.with_phase(-0.5)
       end
@@ -1184,6 +1193,17 @@ module MB
 
         durations = amplitude.is_a?(Range) ? [amplitude.begin, amplitude.end].count { |v| v.is_a?(Sequence::Duration) } : 0
         raise ArgumentError, 'Use a Range of Durations (e.g. 3.n16..5.n16), not a single Duration' if amplitude.is_a?(Sequence::Duration)
+        if amplitude.is_a?(Range) && durations == 0 && !(amplitude.begin.is_a?(Numeric) && amplitude.end.is_a?(Numeric))
+          # (ux-friction-1 round 2: `.at(D3..B6)` raised NoMethodError 'to_f' for a Note)
+          if amplitude.begin.is_a?(Interval) && amplitude.end.is_a?(Interval)
+            # (his `detune: 3.bar.lfo.at(5.cents..60.cents)`: unison's detune node is in semitones)
+            lo, hi = [amplitude.begin, amplitude.end].map { |i| MB::M.sigfigs(i.to_semitones.to_f, 6) }
+            raise ArgumentError, "#at takes a Range of numbers, not Intervals (got #{amplitude.inspect}); in semitones that is .at(#{lo}..#{hi}), " \
+                                 'as a detune node takes (1.cents is 0.01)'
+          end
+          raise ArgumentError, "#at takes a Range of numbers (Hz for a cutoff: .at(150..2000); got #{amplitude.inspect}); " \
+                               'for a sweep in notes, .at(D3.number..B6.number).freq'
+        end
         raise ArgumentError, 'Both ends of a Range must be Durations, or neither' if durations == 1
         raise ArgumentError, 'A phasor outputs cycles (0...1) and has no amplitude; scale it with arithmetic' if phasor? && !@in_or_at
         GraphNode::ArithmeticMethods.check_at(amplitude) unless @in_or_at
@@ -1272,10 +1292,17 @@ module MB
       # wave (0 to 1; whole cycles wrap): 0 starts oscillators at 0 and
       # rising (or at the top half of the cycle for a square wave), 0.25 at
       # the top of a sine.  +phase+ may also be an MB::Sound::Phase (e.g.
-      # `1.2.radians`, Phase.degrees(90)).
+      # `1.2.radians`, Phase.degrees(90)).  A saw starts in its middle and
+      # jumps at 0.5, so `with_phase(0.5)` puts its jump on the start (the
+      # downbeat of a bar-synced LFO; #drumramp is that saw); 0.5 starts a
+      # square low, 0.75 a sine or triangle at its bottom.  Tempo-synced
+      # tones keep the offset through timeline jumps.
       #
       # Example: 123.hz.with_phase(0.25)
+      #     1.bar.lfo.saw.with_phase(0.5).at(150..2000)   # 150 on each downbeat, rising
       def with_phase(phase)
+        # (a graph document's param becomes its number; effects-3)
+        phase = GraphNode.build_setting(phase)
         phase = Phase.cycles(phase)
         raise ArgumentError, "A starting phase must be a number of cycles or a Phase (got #{phase.inspect})" unless phase.is_a?(Numeric)
 
@@ -1283,6 +1310,20 @@ module MB
           @phase = phase
           @start_cycles = nil
         end
+      end
+
+      # Band +index+'s copy of this tone for MB::Sound#per_harmonic's tone
+      # form (`per_harmonic(0.2.hz.lfo, phase: 0...1)`; MB::Sound::PerHarmonic):
+      # a new Tone with this tone's settings and a fresh state, reading the
+      # same inputs through new branches, its random phase and noise seeds
+      # derived from this tone's (seed + 1 + index, as unison copies do),
+      # +phase+ cycles added to its starting phase, and its frequency times
+      # +rate+ (a tone with a fixed frequency).  With +copy: false+ this
+      # tone (a fresh one, e.g. a Pitch's) takes the spreads itself.  Copies
+      # carry no recipe: graphs print the per_harmonic value.
+      def per_band_copy(index, phase: nil, rate: nil, copy: true)
+        t = copy ? dup.reset_band_copy(index) : self
+        t.spread_band(phase, rate)
       end
 
       # Adds the given other +tone+ as a frequency modulator for this tone,
@@ -1729,11 +1770,43 @@ module MB
       # Durations have their own #lfo for tempo-synced LFOs (see
       # Sequence::Duration#lfo).
       #
+      # Where each shape starts (measured, 2026-11-21; a bar-synced LFO
+      # starts so on each downbeat; phases in cycles):
+      #
+      #     sine (default), triangle, parabola: 0, rising; top at 1/4, bottom at 3/4
+      #     square: top (+1); drops to the bottom at 1/2
+      #     saw (ramp): 0 (the middle), rising; jumps from top to bottom at 1/2
+      #     drumramp (= saw.with_phase(0.5)): bottom (-1), rising; jumps at the cycle's end
+      #
+      # So `1.bar.lfo.ramp.at(150..2000)` reads 1075 on the downbeat and
+      # jumps to 150 on beat 3; `1.bar.lfo.drumramp.at(150..2000)` starts
+      # at 150 on the downbeat and jumps there.  #with_phase moves any
+      # shape's start (0.5 half a cycle).
+      #
       # Example:
       #     play 220.hz.saw.at(1).filter(:lowpass, cutoff: 0.25.hz.triangle.lfo.at(200..2000), quality: 4)
+      #     bg 110.hz.saw.at(-16.db).lp4(1.bar.lfo.drumramp.at(150..2000))   # rises each bar, jumps on the downbeat
       def lfo
         configure { @lfo = true }
         or_at(1)
+      end
+
+      # Why Tone#freewheel refused a tone that isn't tempo-synced
+      # (ux-friction-1 round 2: the maintainer's `0.2.hz.lfo...freewheel`).
+      FREEWHEEL_ONLY_SYNCED = 'Only tempo-synced tones (e.g. 4.bars.lfo) can freewheel; ' \
+                              'a Hz LFO (0.2.hz.lfo) already runs free of the timeline'
+
+      # Raises for options given to Sequence::Duration#lfo, which takes
+      # none (ux-friction-1 round 2: the maintainer's
+      # `2.bars.lfo(unipolar: true)` said only "wrong number of
+      # arguments").  Tone#lfo and Pitch#lfo keep no parameters: the
+      # literal binder reads node methods' parameters (a keyword rest made
+      # it pass `frequency:` to lfo).
+      def self.lfo_takes_no_options(args, keys)
+        given = [*args.map(&:inspect), *keys.map { |k, v| "#{k}: #{v.inspect}" }].join(', ')
+        raise ArgumentError, "lfo takes no options (got #{given}): the rate comes before it (2.bars.lfo, 0.2.hz.lfo), the shape after it (.ramp), " \
+                             'and the range in .at(150..2000), which maps the whole -1..1 swing (no unipolar needed); ' \
+                             'a synth voice\'s v.lfo(5, unipolar: true) is the LFO that takes options'
       end
 
       # Locks this tone's phase to the timeline of +tempo+ (a
@@ -1768,7 +1841,7 @@ module MB
       # Sequence::TempoNode#freewheel), so every tone made from the same
       # tempo pitch freewheels.
       def freewheel(free = true)
-        raise ArgumentError, 'Only tempo-synced tones (e.g. 4.bars.lfo) can freewheel' if @tempo.nil?
+        raise ArgumentError, FREEWHEEL_ONLY_SYNCED if @tempo.nil?
 
         @tempo.freewheel(free)
         self
@@ -1863,6 +1936,11 @@ module MB
         @advance
       end
 
+      # True for a tone that is all noise (#noise with blend true or 1:
+      # MB::Sound.noise), whose frequency and phase set nothing you hear
+      # (the inspector hides them; sd-ux-fixes-1).
+      def noise_only? = @noise == 1.0
+
       # The maximum random addition to the phase advance per Hz per sample,
       # in cycles (see #noise).
       def random_advance
@@ -1931,6 +2009,7 @@ module MB
         state = @state
         state.last_freq = freq.is_a?(Numeric) ? freq : freq[-1]
         state.last_width = width.is_a?(Numo::NArray) ? width[-1] : width
+        state.last_scan = scan.is_a?(Numo::NArray) ? scan[-1] : scan if @table
         state.last_pivot = pivot[-1] if pivot.is_a?(Numo::NArray)
 
         buf.not_inplace!
@@ -2197,6 +2276,66 @@ module MB
         raise "Cannot compare dynamic frequencies" unless f1.is_a?(Numeric) && f2.is_a?(Numeric)
 
         f1 <=> f2
+      end
+
+      protected
+
+      # Turns a #dup of a tone into a fresh copy (see #per_band_copy): graph
+      # node bookkeeping (GraphNode::IvarPreset's variables: names, recipe,
+      # Tee, plan membership) and running state cleared, inputs re-branched,
+      # seeds derived from the original's.
+      def reset_band_copy(index)
+        GraphNode::IvarPreset.ivars_for(self.class).each { |iv| instance_variable_set(iv, nil) }
+        instance_variables.each do |iv|
+          v = instance_variable_get(iv)
+          case v
+          when GraphNode::Tee::Branch then instance_variable_set(iv, v.owner_tee.add_branch)
+          when GraphNode::Knob::Reader then instance_variable_set(iv, v.knob.get_sampler)
+          end
+        end
+
+        @state = nil
+        @kernel = nil
+        @advance = nil
+        @started = nil
+        @start_cycles = nil
+        @osc_buf = nil
+        @sync_bufs = nil
+        @sync_flip = 0
+        @truncated = false
+        @quiet_resets = GraphNode::FrozenView::Key.new
+        @quiet_locks = GraphNode::FrozenView::Key.new
+        @random_advance = nil
+        @gain = nil
+        @offset = nil
+        @sync_reset = nil
+        @fade_band = nil
+        @osc_view_buf = nil
+        @osc_view = nil
+        @upstream_inputs = nil
+        @plan_wavetables = nil
+        @plan_fast_shapes = nil
+        @seed += 1 + index if @seed
+        @noise_seed += 1 + index if @noise_seed
+        Plan.changed(self)
+        self
+      end
+
+      # Adds +phase+ cycles to the starting phase and multiplies the
+      # frequency by +rate+ (each nil for no change; see #per_band_copy).
+      def spread_band(phase, rate)
+        unless rate.nil?
+          unless @frequency.is_a?(Numeric)
+            raise ArgumentError, "rate: spreads a tone with a fixed frequency (#{self} follows a node or the tempo); " \
+              'give per_harmonic a list of tones instead (per_harmonic(1.bar.lfo, 2.bars.lfo))'
+          end
+          raise ArgumentError, "rate: must be positive and finite (got #{rate})" unless rate > 0 && rate.finite?
+
+          f = @frequency * rate
+          configure { set_frequency(f) }
+        end
+        with_phase(@phase + phase) unless phase.nil?
+        self
       end
 
       private

@@ -63,6 +63,10 @@ module MB
         def undo? = !@undo.empty?
         def redo? = !@redo.empty?
 
+        # The layout the next #undo goes back to (nil: none), so a caller
+        # can tell whether a change was an undo step.
+        def undo_layout = @undo.last
+
         # Splits +name+ along +axis+ (:cols puts the new pane beside it,
         # like vim's Ctrl-W v; :rows below it, Ctrl-W s), halving its
         # space.  The new pane is +new_name+ (default :empty1, :empty2,

@@ -148,7 +148,9 @@ module MB
           raise ArgumentError, "normalize must be :power, :peak, or a number (got #{normalize.inspect})"
         end
         unless spread.respond_to?(:sample) || (spread.is_a?(Numeric) && (0..1).cover?(spread))
-          raise ArgumentError, "Unison spread must be 0..1 or a graph node (got #{spread.inspect})"
+          # (ux-friction-1 round 2: his `spread: 0..1` read "must be 0..1 ... (got 0..1)")
+          moving = spread.is_a?(Range) ? "; 1 is the widest, and an LFO moves it: spread: 4.bars.lfo.at(#{spread.begin}..#{spread.end})" : ''
+          raise ArgumentError, "Unison spread must be a number from 0 to 1 or a graph node (got #{spread.inspect})#{moving}"
         end
         unless mix.respond_to?(:sample) || (mix.is_a?(Numeric) && (0..GraphNode::ChannelMixer::Unison::MAX_MIX).cover?(mix))
           raise ArgumentError, "Unison mix must be 0..2 or a graph node (got #{mix.inspect})"

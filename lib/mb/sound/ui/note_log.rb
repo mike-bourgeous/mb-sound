@@ -59,6 +59,7 @@ module MB
             ["#{entries.length} UI note#{'s' unless entries.length == 1} on #{day} (#{path}):", *entries.map { |t, x| "  #{t}  #{x}" }].join("\n")
           end
 
+          include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
           def inspect = to_s
         end
 

@@ -60,6 +60,20 @@ RSpec.describe(MB::Sound::DropoutProbe) do
       expect(r[:components][:gvl_by]).to include('ui' => be > 40)
     end
 
+    it 'gives the whole GVL wait when it ran past the window before the gap' do
+      # (his 2026-11-21 session: each wait was 77-132 ms, the reports said
+      # 41-45 ms, the part inside the 60.7 ms window)
+      w = build.(cpu: 1.0)
+      s = stall_start.(w)
+      threads = [{ thread: 'render', holder: 'main', a: s + 0.5 * ms, b: s + 1 * ms, c: s + 99 * ms }]
+      r = described_class.classify(ctx(w, s + 45 * ms, threads: threads))
+      expect(r[:cause]).to eq(:gvl)
+      expect(r[:components][:gvl_wait_ms]).to eq(98.0)
+      expect(r[:components][:gvl_wait_by]).to eq('main')
+      expect(r[:components][:gvl_ms]).to be < 50
+      expect(r[:detail]).to match(/waited 98\.0 ms for the GVL in one wait \(4\d\.\d of it .*\), held by main/)
+    end
+
     it 'blames GC on another thread over the GVL wait it caused, and GC on the render thread over its CPU' do
       w = build.(cpu: 1.0)
       s = stall_start.(w)
@@ -187,5 +201,39 @@ RSpec.describe(MB::Sound::DropoutProbe) do
     expect(d['short_ms']).to be > 0
     expect(File.read(json.sub(/\.json\z/, '.csv')).lines.length).to be >= 2
     expect(File.read(json.sub(/\.json\z/, '.txt'))).to include('Likely causes:', 'render overrun')
+  end
+
+  # (his 2026-11-21 session: the console's thread held the GVL in C code,
+  # beyond Ruby's timeslice; stacks: says where)
+  it 'with stacks:, records where the thread holding the GVL was while the render thread waited',
+     memcheck_skip: 'Valgrind serializes threads; GVLProbe stacks run in fast_ui_spec' do
+    output = MB::Sound::DeviceOutput.new(channels: 1, backends: [:null], latency: 0.03, buffer_size: 512, adaptive: false)
+    session = MB::Sound::Session.new(output: output)
+    json = tmp_path('dropouts.json')
+    begin
+      session.add(0.1.constant, name: :quiet)
+      Thread.pass until session.running?
+      probe = described_class.start(session, json: json, system: false, quiet: true, settle: 0.3, startup: 0, stacks: 0.01)
+      expect(probe.inspect).to match(/\A#<MB::Sound::DropoutProbe probe running [\d.]+ s, 0 dropouts -> .*dropouts\.json>\z/)
+      sleep 0.3
+      MB::Sound::FastLatency.spin(0.12) # (this thread is Thread.main: the probe watches it as 'main')
+      t = MB::U.clock_now
+      sleep 0.01 while probe.dropouts.empty? && MB::U.clock_now - t < 5
+      probe.stop
+    ensure
+      session.close
+      MB::Sound.rewind
+    end
+
+    st = probe.stacks
+    expect(st).not_to be_empty
+    expect(st.map { |s| s[:holder] }).to include('main')
+    expect(st.flat_map { |s| s[:ruby] }.join("\n")).to include('spin')
+    d = probe.dropouts.find { |x| x[:result][:cause] == :gvl }
+    expect(d).not_to be_nil
+    expect(d[:result][:components][:gvl_wait_ms]).to be > 100
+    text = File.read(json.sub(/\.json\z/, '.txt'))
+    expect(text).to include('Where GVL holders were while the render thread waited', 'in one wait')
+    expect(JSON.parse(File.read(json))['stacks']).not_to be_empty
   end
 end

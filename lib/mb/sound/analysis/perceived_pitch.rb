@@ -37,6 +37,7 @@ module MB
         # +why+ (:best, :octave_up, :octave_down, :peak).
         Candidate = Data.define(:midi, :pitch, :score, :why) do
           def to_s = "#{Analysis.note_label(pitch.frequency)} #{format('%.2f', score)}#{why == :best ? '' : " (#{why.to_s.tr('_', ' ')})"}"
+          include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
           def inspect = "#<PerceivedPitch::Candidate #{self}>"
         end
 

@@ -23,6 +23,7 @@ module MB
             "design #{track.inspect}: #{what}, #{play}; #{k}#{row ? "; #{row} picked" : ''}"
           end
 
+          include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
           def inspect = "#<#{self}>"
         end
 
@@ -35,8 +36,9 @@ module MB
         SOUND_LAYOUTS = %i[sound tuning].freeze
 
         class << self
-          # The last track designed (`design` alone opens it again).
-          attr_reader :last
+          # The last track designed (`design` alone opens it again).  Set
+          # back by ui.perf :capture after its temporary track.
+          attr_accessor :last
 
           # The screen up before the first `design` ([:tiles, name], [:band,
           # name], or [:none]), for `design off`.

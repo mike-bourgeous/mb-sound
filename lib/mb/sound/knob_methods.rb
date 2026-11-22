@@ -114,9 +114,29 @@ module MB
         }
       end
 
-      # The snapshots: name => { knob => value }.
+      # The snapshots: name => { knob => value } (a Hash), printed as a
+      # compact table, one line a snapshot.
       def snaps
-        Session.current.snapshots
+        Snapshots[Session.current.snapshots]
+      end
+
+      # #snaps' Hash, printed one line a snapshot with its first knob values
+      # (sd-ux-fixes-1, the review's #25: it dumped every knob of every
+      # snapshot).
+      class Snapshots < Hash
+        # The table's lines.
+        def lines
+          return ['no snapshots (snap :name remembers the knobs)'] if empty?
+          width = keys.map { |k| k.inspect.length }.max
+          map { |name, values|
+            shown = values.first(5).map { |k, v| "#{Session::Name[k].leaf} #{GraphNode::Knob.number(v)}" }
+            "#{name.inspect.ljust(width)}  #{values.length} knob#{'s' unless values.length == 1}: #{shown.join(', ')}#{values.length > 5 ? ', ...' : ''}"
+          }
+        end
+
+        def to_s = lines.join("\n")
+        def inspect = "#<snaps #{keys.map(&:inspect).join(' ')}>"
+        def pretty_print(q) = q.text(to_s)
       end
 
       # Turns every knob in snapshot +name+ back (see #turn for +over:+ and
@@ -125,7 +145,7 @@ module MB
       # the journal entries.
       def recall(name, at: nil, on: nil, in: nil, over: nil, curve: nil, only: nil, except: nil)
         point = LaunchPoint.of(binding) or return nil
-        knob_entries(session_command(name, label: "recall #{name.inspect}") { |session, time|
+        knob_entries("recall #{name.inspect}", session_command(name, label: "recall #{name.inspect}") { |session, time|
           session.recall(name, at: point, over: over, curve: curve, start_time: point.given? ? nil : time, only: only, except: except)
         })
       end
@@ -136,7 +156,7 @@ module MB
       # as #crossfade.
       def xfade(a, b, amount = 0.5, at: nil, on: nil, in: nil, over: nil, curve: nil)
         point = LaunchPoint.of(binding) or return nil
-        knob_entries(session_command(a, label: "xfade #{a.inspect}, #{b.inspect}") { |session, time|
+        knob_entries("xfade #{a.inspect}, #{b.inspect}", session_command(a, label: "xfade #{a.inspect}, #{b.inspect}") { |session, time|
           session.xfade(a, b, amount, at: point, over: over, curve: curve, start_time: point.given? ? nil : time)
         })
       end
@@ -206,10 +226,35 @@ module MB
       end
 
       # Journal entries for the changes a command returned.
-      def knob_entries(value)
+      def knob_entries(label, value)
         return value unless value.is_a?(Array) && value.all?(Session::Changes::Change)
         session = Session.current
-        value.map { |c| session.journal[c.seq] }
+        KnobEntries.new(label, value.map { |c| session.journal[c.seq] })
+      end
+
+      # The journal entries of a recall or xfade (an Array), printed as one
+      # line (sd-ux-fixes-1, the review's #25: 8-17 `#<turn ...>` lines a
+      # recall): "recall :dark: 8 knobs land 17:3 (cut, res, drive, ...)".
+      class KnobEntries < Array
+        def initialize(label, entries)
+          super(entries)
+          @label = label
+        end
+
+        # The one line.
+        def summary
+          return "#{@label}: no knobs" if empty?
+          names = map { |e| e.subject.is_a?(Symbol) ? Session::Name[e.subject].leaf : e.subject }
+          lands = map(&:lands).uniq
+          when_text = lands.length == 1 ? "#{length == 1 ? 'lands' : 'land'} #{lands.first}" : "land #{lands.first}..#{lands.last}"
+          states = map(&:status).uniq
+          queued = states == [:queued] ? ' (queued)' : ''
+          "#{@label}: #{length} knob#{'s' unless length == 1} #{when_text}#{queued} (#{names.first(6).join(', ')}#{length > 6 ? ', ...' : ''})"
+        end
+
+        def inspect = "#<#{summary}>"
+        def to_s = summary
+        def pretty_print(q) = q.text(summary)
       end
     end
   end

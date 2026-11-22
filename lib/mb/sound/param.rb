@@ -94,7 +94,7 @@ module MB
       # The names in the names table (Param.names), aliases included.
       NAME_KEYS = %i[
         cutoff frequency freq resonance reso quality q drive mix detune voices attack decay sustain release
-        gain threshold pan width rate depth feedback
+        gain threshold pan width rate depth feedback morph
       ].freeze
 
       # Setting names that are times (Param.time_entry): attack, decay,
@@ -131,6 +131,7 @@ module MB
           "(#{Param.literal(range)}).at(#{Param.literal(default)})"
         end
 
+        include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
         def inspect = "#<Param::Ranged #{to_ruby}>"
         def to_s = to_ruby
 
@@ -197,6 +198,31 @@ module MB
           leaf = Session::Name[name.to_sym].leaf.to_s
           m = leaf.match(TIME_NAME) or return nil
           names[%w[decay release].include?(m[2]) ? m[2].to_sym : :attack]
+        end
+
+        # The unit of a knob with Knob::Spec +spec+ (or nil) driving a param
+        # named +name+: the spec's unit, else what the names table implies
+        # for the spec's name or +name+ ('Hz' for a cutoff, 's' for an
+        # attack or a sweep_time: #time_entry), else nil.  A preset's cutoff
+        # param is a plain number in Hz, so the inspector shows "Hz" and a
+        # typed 3000.hz turns it to 3000 (sd-ux-fixes-1; UI::Panes.unit_of,
+        # Session::Knobs).
+        def implied_unit(spec, name = nil)
+          return spec.unit if spec&.unit
+          (spec.respond_to?(:name) ? name_unit(spec.name) : nil) || name_unit(name)
+        end
+
+        # 'Hz' or 's' for a setting named +name+ by the names table (see
+        # #implied_unit), or nil.
+        # Kept per name (the inspector asks every frame).
+        def name_unit(name)
+          name = name.to_sym if name.is_a?(String)
+          return nil unless name.is_a?(Symbol)
+          units = (@name_units ||= {})
+          return units[name] if units.key?(name)
+          e = name_entry(name) || time_entry(name)
+          b = e && e[:range].begin
+          units[name] = b.is_a?(MB::Sound::Pitch) ? 'Hz' : b.is_a?(MB::Sound::Length) ? 's' : nil
         end
 
         # The type of value +v+: an ArgTypes type, :boolean, :string, or
@@ -415,6 +441,10 @@ module MB
             rate: [0.01.hz..50.hz, 'Modulation rate'],
             depth: [0.0..1.0, 'Modulation depth'],
             feedback: [-1.0..1.0, 'Feedback gain'],
+            # (a formant's vowels, a wavetable's frames: 0 the first, 1 the
+            # last; sd-ux-fixes-1, the review's #21: a bound morph got the
+            # 0..4x fallback, 0..2)
+            morph: [0.0..1.0, 'Morph position, 0 the first shape or vowel to 1 the last'],
           }
           table = rows.to_h { |n, (range, desc, curve)| [n, { range: range, curve: curve, description: desc }.compact.freeze] }
           NAME_ALIASES.each { |a, n| table[a] = table[n] }
@@ -716,6 +746,7 @@ module MB
       end
 
       def to_s = help_line
+      include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
       def inspect = "#<MB::Sound::Param #{to_ruby}>"
 
       # Value equality (see Param.value_key).

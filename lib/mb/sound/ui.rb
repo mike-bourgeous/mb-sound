@@ -4,7 +4,9 @@ require_relative 'ui/snapshot'
 require_relative 'ui/bus_meter'
 require_relative 'ui/poll'
 require_relative 'ui/inspect'
+require_relative 'ui/yielding'
 require_relative 'ui/patch_render'
+require_relative 'ui/chart_worker'
 require_relative 'ui/tone_cycle'
 require 'mb/term'
 require_relative 'ui/canvas'
@@ -13,23 +15,28 @@ require_relative 'ui/density'
 require_relative 'ui/listing'
 require_relative 'ui/pane'
 require_relative 'ui/pane_keys'
+require_relative 'ui/turn_gesture'
+require_relative 'ui/carried_values'
+require_relative 'ui/knob_turns'
 require_relative 'ui/panes'
 require_relative 'ui/tree_text'
 require_relative 'ui/session_panes'
-require_relative 'ui/turn_gesture'
-require_relative 'ui/knob_turns'
 require_relative 'ui/set_panes'
 require_relative 'ui/player_panes'
 require_relative 'ui/buffer_feed'
 require_relative 'ui/sound_panes'
+require_relative 'ui/wave_view'
 require_relative 'ui/picker'
 require_relative 'ui/note_log'
 require_relative 'ui/pane_files'
 require_relative 'ui/layout'
 require_relative 'ui/follow'
 require_relative 'ui/pacer'
+require_relative 'ui/terminal_profile'
 require_relative 'ui/pane_rates'
 require_relative 'ui/frame_rate'
+require_relative 'ui/perf'
+require_relative 'ui/file_watch'
 require_relative 'ui/signals'
 require_relative 'ui/band'
 require_relative 'ui/reline_guard'
@@ -38,6 +45,7 @@ require_relative 'ui/design'
 require_relative 'ui/tuner'
 require_relative 'ui/library_popup'
 require_relative 'ui/prompt'
+require_relative 'ui/nudge_keys'
 require_relative 'ui/messages'
 require_relative 'ui/warm_up'
 require_relative 'ui/chrome'
@@ -84,6 +92,10 @@ module MB
 
         # The tiled screen on screen (or last shown), or nil.
         attr_reader :tiles
+
+        # True while `ui.smooth` is on: every-buffer snapshots, frames timed
+        # to them, and echo wake (see Facade#smooth).
+        def smooth? = Feed.every_buffer && FrameRate.snapshot_timed && Tiles.echo_wake ? true : false
 
         # The binding the console evaluates in (set before each line by
         # the hook from .install_pry!): the palette evaluates there.
@@ -525,6 +537,55 @@ module MB
           end
         end
 
+        # Prepended to Pry::Pager: no pager while a tiled screen hosts the
+        # REPL pane (sd-ux-fixes-1, the review's #5: a result taller than
+        # the pane, `snaps` or `design` at 80x24, opened Pry's pager in
+        # the pane and the next typed lines went into it; the console's Pry
+        # copied Pry.config.pager when it started, so only its own config
+        # turns it off).  Output prints as it comes; the pane's scrollback
+        # (Alt-PgUp) has it all.  Back to the pager once the tiles go.
+        module NoPagerInTiles
+          private
+
+          def best_available
+            return PryPages.buffered_pager.new(pry_instance.output) if PryPages.tiles_own_repl?
+            super
+          end
+        end
+
+        # A pager that doesn't page: the output written at once when the
+        # result is done, as Pry's SystemPager does for output under a page
+        # (a NullPager writes every piece pp prints separately, each a trip
+        # through the REPL pane's reader).  Pry's NullPager subclass, made
+        # when first used (Pry loads after mb-sound).
+        module BufferedWrites
+          def initialize(out)
+            super
+            @text = +''
+          end
+
+          def write(str)
+            @text << str
+          end
+
+          def close
+            @out.write(@text) unless @text.empty?
+            @text = +''
+          end
+        end
+
+        # The pager class of NoPagerInTiles (see BufferedWrites).
+        def self.buffered_pager
+          @buffered_pager ||= Class.new(::Pry::Pager::NullPager) { include BufferedWrites }
+        end
+
+        # True while a tiled screen is up and hosts the console (its REPL
+        # pane).
+        def self.tiles_own_repl?
+          screen = UI.screen
+          screen.is_a?(Tiles) && screen.active? && !screen.hidden? && !screen.host.nil?
+        end
+
         # True if Pry command +line+'s +text+ goes to +tiles+' page pane.
         def self.to_page?(line, text, tiles)
           return true if ALWAYS.include?(line.split(' ', 2).first)
@@ -536,6 +597,7 @@ module MB
           return if @installed
           ::Pry::Command.prepend(CommandLine)
           ::Pry::Pager.prepend(ToPage)
+          ::Pry::Pager.prepend(NoPagerInTiles)
           @installed = true
         end
       end
@@ -667,6 +729,12 @@ module MB
           messages.clear
         end
         nil
+      end
+
+      class << self
+        # The last UI::Perf `ui.perf` started (kept after it stops, for
+        # its report).
+        attr_accessor :last_perf
       end
 
       # The screen on (the tiled screen or the band), or nil.

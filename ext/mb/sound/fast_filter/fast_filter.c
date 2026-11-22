@@ -3,7 +3,7 @@
  * diode ladder (ruby_diode_ladder below), the state-variable filter,
  * ruby_svf below, the filter bank (GraphNode::FilterBank and Formant),
  * ruby_filter_bank (mb_filter_bank.h), and a phaser's allpass chain,
- * ruby_phaser).
+ * ruby_phaser, with a self-oscillating loop in ruby_phaser_osc).
  *
  * four_pole: a 4-pole resonant lowpass in the style of the CEM3379 (and
  * CEM3320): four one-pole OTA-C stages in a cascade with resonance feedback
@@ -717,6 +717,294 @@ static VALUE ruby_resonance_curve(VALUE self, VALUE r)
 }
 
 // Exposes the self-oscillation curves' loop gain for specs.
+/*
+ * phaser_osc: ruby_phaser's chain with a self-oscillating loop (effects-4:
+ * the maintainer's phaser plug-in "whistle", feedback -100%; generalized
+ * in effects-5).  The feedback path saturates the chain's output
+ * (level * tanh(Y / level)) and runs it through a bandpass (a TPT
+ * state-variable filter, Q PHASER_OSC_Q, unity gain at its center) tuned
+ * to one resonance of the chain, so the loop gain is |k| at that mode and
+ * below 1 at the others: above |k| = 1 the loop oscillates on that one
+ * mode at a level the saturator sets (proportional to +level+), input or
+ * not.
+ *
+ * Modes: with negative feedback the chain's phase must be an odd multiple
+ * of -180 degrees, the dry-mixed phaser's notches: mode m (0 the lowest)
+ * is at tan(pi f / rate) = g tan((2m + 1) pi / (2 stages)); with positive
+ * feedback a whole number of turns, the peaks between the notches: mode m
+ * at g tan((m + 1) pi / stages) (DC and Nyquist left out).  +mode+ is a
+ * signal input (effects-5), clamped to 0 and the modes there are
+ * (stages / 2 or stages / 2 - 1; NaN reads as 0); a fraction tunes the
+ * bandpass between two modes.  The bandpass center is clamped below
+ * rate * FP_MAX_CUTOFF_RATIO.
+ *
+ * +tuned+ (effects-5): when true, +center+ is the mode's frequency (the
+ * whistle's pitch at the sweep's middle) instead of the stages': the
+ * stages' center is atan(tan(pi center / rate) / T) rate / pi, T the
+ * mode's tangent above (center clamped like fc first).
+ *
+ * The loop, zero-delay: the chain is Y = A u + B, the bandpass of the
+ * saturated output w = P L tanh(Y / L) + Q0 (TPT SVF, linear in its
+ * input), and u = x + k w, so Y = C1 + C2 L tanh(Y / L) with
+ * C1 = A (x + k Q0) + B and C2 = A k P (|C2| < 0.14: P <= R / (R + 1)),
+ * solved by PHASER_OSC_NEWTON Newton steps from the last Y.  While |k| > 1
+ * and the bandpass is silent (|s1| + |s2| < PHASER_OSC_QUIET L), its first
+ * state gets PHASER_OSC_KICK L so the oscillation starts from silence, at
+ * the mode: once per mode (the nearest whole mode) until |k| falls to 1
+ * or below (effects-5: a loop that can't sustain itself, between two
+ * modes or at 2 stages with positive feedback, used to be kicked again
+ * each time it fell quiet, a faint tick train).  +feedback+ is clamped to +-PHASER_OSC_MAX_FEEDBACK, +level+
+ * (L, a signal input) to PHASER_OSC_MIN_LEVEL..PHASER_OSC_MAX_LEVEL (NaN
+ * reads as 1); at level 1 the loop is the effects-4 loop bit for bit.
+ *
+ * +state+: the stages' states, the bandpass's two, the last Y, the
+ * samples since the last flush grid point, and the kick's mark (the
+ * nearest whole mode + 1 of the last kick, 0 when armed; stages + 5
+ * values).  Exact Ruby mirror: MB::Sound::GraphNode::Phaser.process_osc_ruby.
+ */
+#define PHASER_OSC_MAX_FEEDBACK 1.25
+#define PHASER_OSC_Q 4.0
+#define PHASER_OSC_NEWTON 3
+#define PHASER_OSC_QUIET 1e-9
+#define PHASER_OSC_KICK 1e-3
+#define PHASER_OSC_MIN_LEVEL 1e-6
+#define PHASER_OSC_MAX_LEVEL 1e4
+
+// The tangent of mode +mode+'s chain phase step (see phaser_osc) for
+// negative (+negative+ true) or positive feedback.
+static inline double phaser_mode_tangent(double mode, long stages, int negative)
+{
+	double m = mode >= 0.0 ? mode : 0.0; // (NaN: 0)
+	if (negative) {
+		double last = (double)(stages / 2 - 1);
+		m = m < last ? m : last;
+		return tan((2.0 * m + 1.0) * M_PI / (2.0 * stages));
+	}
+	long count = stages / 2 - 1;
+	if (count <= 0) {
+		return 1.0;
+	}
+	double last = (double)(count - 1);
+	m = m < last ? m : last;
+	return tan((m + 1.0) * M_PI / stages);
+}
+
+static VALUE ruby_phaser_osc(int argc, VALUE *argv, VALUE self)
+{
+	if (argc != 14) {
+		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 14)", argc);
+	}
+	VALUE out = argv[0], x = argv[1], sweep = argv[2], center = argv[3], range = argv[4], depth = argv[5];
+	VALUE feedback = argv[6], dry = argv[7], wet = argv[8], state = argv[9], rate_v = argv[10], mode = argv[11];
+	VALUE level = argv[12];
+	int tuned = RTEST(argv[13]);
+
+	if (CLASS_OF(out) != numo_cSFloat || RNARRAY_NDIM(out) != 1 || !RTEST(nary_check_contiguous(out))) {
+		rb_raise(rb_eArgError, "The output must be a contiguous 1D SFloat");
+	}
+	if (CLASS_OF(state) != numo_cDFloat || RNARRAY_NDIM(state) != 1 ||
+			RNARRAY_SHAPE(state)[0] < 7 || RNARRAY_SHAPE(state)[0] > PHASER_MAX_STAGES + 5 ||
+			!RTEST(nary_check_contiguous(state))) {
+		rb_raise(rb_eArgError, "The oscillating phaser state must be a contiguous DFloat of 7 to %d values (one per stage, two bandpass states, the last output, the flush grid count, and the kick mark)", PHASER_MAX_STAGES + 5);
+	}
+	rb_check_frozen(out);
+	rb_check_frozen(state);
+
+	double rate = NUM2DBL(rate_v);
+	if (!(rate > 0) || !isfinite(rate)) {
+		rb_raise(rb_eArgError, "Sample rate must be positive and finite");
+	}
+	if (RB_FLOAT_TYPE_P(mode) || RB_INTEGER_TYPE_P(mode)) {
+		if (!(NUM2DBL(mode) >= 0)) {
+			rb_raise(rb_eArgError, "The oscillation mode must be at least 0");
+		}
+	}
+
+	size_t length = RNARRAY_SHAPE(out)[0];
+	struct mb_signal xs, sws, cs, rs, ds, fs, drs, ws, ms, ls;
+	mb_signal_input(&x, length, "The input", &xs);
+	mb_signal_input(&sweep, length, "Sweep", &sws);
+	mb_signal_input(&center, length, "Center", &cs);
+	mb_signal_input(&range, length, "Range", &rs);
+	mb_signal_input(&depth, length, "Depth", &ds);
+	mb_signal_input(&feedback, length, "Feedback", &fs);
+	mb_signal_input(&dry, length, "Dry", &drs);
+	mb_signal_input(&wet, length, "Wet", &ws);
+	mb_signal_input(&mode, length, "Mode", &ms);
+	mb_signal_input(&level, length, "Level", &ls);
+
+	long stages = (long)RNARRAY_SHAPE(state)[0] - 5;
+	double *st = (double *)(nary_get_pointer_for_write(state) + nary_get_offset(state));
+	float *op = mb_sfloat_ptr(out);
+
+	double pi_over_rate = M_PI / rate;
+	double fc_max = rate * FP_MAX_CUTOFF_RATIO;
+	double half_ln2 = 0.5 * log(2.0);
+	double g2_max = mb_tan_pade(fc_max * pi_over_rate);
+	double r2 = 1.0 / PHASER_OSC_Q; // (2R, R = 1 / (2 Q))
+
+	double s1 = st[stages];
+	double s2 = st[stages + 1];
+	double yl = st[stages + 2];
+	long fk = 0;
+	if (st[stages + 3] >= 0 && st[stages + 3] < MB_FLUSH_GRID) {
+		fk = (long)st[stages + 3];
+	}
+	double kicked = st[stages + 4];
+
+	// (the modes' tangents, negative and positive feedback, for the last mode)
+	double last_mode = NAN;
+	double tan_neg = 1.0, tan_pos = 1.0;
+	double last_cw = NAN, last_tan = NAN, base = 0.0;
+	double last_fc = NAN;
+	double g = 0.0, gg = 0.0, alpha = 0.0, beta = 0.0, a_all = 0.0;
+	for (size_t i = 0; i < length; i++) {
+		double k = mb_signal_at(&fs, i);
+		if (!(k >= -PHASER_OSC_MAX_FEEDBACK)) {
+			k = isnan(k) ? 0.0 : -PHASER_OSC_MAX_FEEDBACK;
+		} else if (k > PHASER_OSC_MAX_FEEDBACK) {
+			k = PHASER_OSC_MAX_FEEDBACK;
+		}
+
+		double md = mb_signal_at(&ms, i);
+		if (!(md >= 0.0)) {
+			md = 0.0;
+		}
+		if (md != last_mode) {
+			last_mode = md;
+			tan_neg = phaser_mode_tangent(md, stages, 1);
+			tan_pos = phaser_mode_tangent(md, stages, 0);
+		}
+		double tan_mode = k < 0.0 ? tan_neg : tan_pos;
+
+		double lv = mb_signal_at(&ls, i);
+		if (!(lv >= PHASER_OSC_MIN_LEVEL)) {
+			lv = isnan(lv) ? 1.0 : PHASER_OSC_MIN_LEVEL;
+		} else if (lv > PHASER_OSC_MAX_LEVEL) {
+			lv = PHASER_OSC_MAX_LEVEL;
+		}
+
+		double cw = mb_signal_at(&cs, i);
+		if (tuned) {
+			if (!(cw >= PHASER_MIN_HZ)) {
+				cw = PHASER_MIN_HZ;
+			} else if (cw > fc_max) {
+				cw = fc_max;
+			}
+			if (cw != last_cw || tan_mode != last_tan) {
+				last_cw = cw;
+				last_tan = tan_mode;
+				base = atan(tan(cw * pi_over_rate) / tan_mode) / pi_over_rate;
+			}
+			cw = base;
+		}
+
+		double fc = cw * exp(half_ln2 * mb_signal_at(&rs, i) * mb_signal_at(&ds, i) * mb_signal_at(&sws, i));
+		if (!(fc >= PHASER_MIN_HZ)) {
+			fc = PHASER_MIN_HZ;
+		} else if (fc > fc_max) {
+			fc = fc_max;
+		}
+		if (fc != last_fc) {
+			last_fc = fc;
+			g = mb_tan_pade(fc * pi_over_rate);
+			gg = g / (1.0 + g);
+			alpha = 2.0 * gg - 1.0;
+			beta = 2.0 * (1.0 - gg);
+			a_all = 1.0;
+			for (long j = 0; j < stages; j++) {
+				a_all = a_all * alpha;
+			}
+		}
+
+		double xd = mb_signal_at(&xs, i);
+		double xi = xd;
+		if (fabs(k) > 1.0) {
+			double mark = floor(md + 0.5) + 1.0;
+			if (kicked != mark && fabs(s1) + fabs(s2) < PHASER_OSC_QUIET * lv) {
+				// (into the bandpass, so the kick starts at the mode)
+				s1 = s1 + PHASER_OSC_KICK * lv;
+				kicked = mark;
+			}
+		} else {
+			kicked = 0.0;
+		}
+
+		double g2 = g * tan_mode;
+		if (g2 > g2_max) {
+			g2 = g2_max;
+		}
+		double dd = 1.0 + r2 * g2 + g2 * g2;
+		double p = r2 * g2 / dd;
+		double q0 = r2 * (s1 - g2 * ((r2 + g2) * s1 + s2) / dd);
+
+		double b = 0.0;
+		for (long j = 0; j < stages; j++) {
+			b = alpha * b + beta * st[j];
+		}
+		double c1 = a_all * (xi + k * q0) + b;
+		double c2 = a_all * k * p;
+		double y = yl;
+		for (int n = 0; n < PHASER_OSC_NEWTON; n++) {
+			double t = tanh(y / lv);
+			double f = y - c2 * (lv * t) - c1;
+			double fp = 1.0 - c2 * (1.0 - t * t);
+			y = y - f / fp;
+		}
+		double sat = lv * tanh(y / lv);
+		double w = p * sat + q0;
+
+		double u = xi + k * w;
+		for (long j = 0; j < stages; j++) {
+			double s = st[j];
+			double v = (u - s) * gg;
+			double lp = v + s;
+			st[j] = lp + v;
+			u = 2.0 * lp - u;
+		}
+
+		// (the bandpass takes the saturated output)
+		double hp = (sat - (r2 + g2) * s1 - s2) / dd;
+		double v1 = g2 * hp;
+		double bp = v1 + s1;
+		s1 = bp + v1;
+		double v2 = g2 * bp;
+		double lpo = v2 + s2;
+		s2 = lpo + v2;
+		yl = u;
+
+		op[i] = (float)(mb_signal_at(&drs, i) * xd + mb_signal_at(&ws, i) * u);
+
+		if (++fk >= MB_FLUSH_GRID) {
+			fk = 0;
+			for (long j = 0; j < stages; j++) {
+				mb_flush_value(&st[j]);
+			}
+			mb_flush_value(&s1);
+			mb_flush_value(&s2);
+			mb_flush_value(&yl);
+		}
+	}
+	st[stages] = s1;
+	st[stages + 1] = s2;
+	st[stages + 2] = yl;
+	st[stages + 3] = (double)fk;
+	st[stages + 4] = kicked;
+
+	RB_GC_GUARD(x);
+	RB_GC_GUARD(sweep);
+	RB_GC_GUARD(center);
+	RB_GC_GUARD(range);
+	RB_GC_GUARD(depth);
+	RB_GC_GUARD(feedback);
+	RB_GC_GUARD(dry);
+	RB_GC_GUARD(wet);
+	RB_GC_GUARD(mode);
+	RB_GC_GUARD(level);
+
+	return out;
+}
+
 static VALUE ruby_self_osc_gain(VALUE self, VALUE r, VALUE db, VALUE k_max)
 {
 	return rb_float_new(fp_self_osc_gain(NUM2DBL(r), RTEST(db), NUM2DBL(k_max)));
@@ -732,6 +1020,7 @@ void Init_fast_filter(void)
 	rb_define_module_function(fast_filter, "svf", ruby_svf, 7);
 	rb_define_module_function(fast_filter, "filter_bank", ruby_filter_bank, 6);
 	rb_define_module_function(fast_filter, "phaser", ruby_phaser, 11);
+	rb_define_module_function(fast_filter, "phaser_osc", ruby_phaser_osc, -1);
 	rb_define_module_function(fast_filter, "tan", ruby_tan, 1);
 	rb_define_module_function(fast_filter, "tanh", ruby_tanh, 1);
 	rb_define_module_function(fast_filter, "secant", ruby_secant, 2);

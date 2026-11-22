@@ -112,6 +112,15 @@ module MB
           @clock = nil # (see Clocked)
           @carried_meta = nil # (Meta::Carrier, through Named)
           @provenance = nil # (Provenance::Readers, through Named: an importer's)
+          # (set later, all nil until used, so every clip keeps one object
+          # shape: #named, #derive_from, a recipe's record (Recipe), a loaded
+          # document (GraphIO::Loader); otherwise a `:performance` warning,
+          # "Clip reached 8 shape variations")
+          @name = nil
+          @source = nil
+          @derivation = nil
+          @graph_recipe = nil
+          @graph_io_document = nil
           @events = events.sort_by(&:start).freeze
           @values = values&.uniq&.freeze
           @performed = !!performed
@@ -1281,10 +1290,12 @@ module MB
         # cycle 0) and to every cycle a generator makes, like #map_clip for
         # transforms that work on whole lists (ratchet, truncate, permute,
         # ghost chords): every clip transform works per cycle on generator
-        # clips (maintainer decision 5, 2026-10-16).
-        def map_cycles(length: @length, values: @values, controls: @controls, &map)
+        # clips (maintainer decision 5, 2026-10-16).  +extra_cycles+: how
+        # many cycles past a generator's reach the map may move events (see
+        # Generative::Producer#cycle_mapped).
+        def map_cycles(length: @length, values: @values, controls: @controls, extra_cycles: 0, &map)
           variations = @variations.map { |v|
-            v.block.is_a?(Generative::Producer) ? Variation.new(name: v.name, block: v.block.cycle_mapped(map)) : v
+            v.block.is_a?(Generative::Producer) ? Variation.new(name: v.name, block: v.block.cycle_mapped(map, extra_cycles: extra_cycles)) : v
           }
           with_events(map.call(@events, 0), length: length, variations: variations, values: values, controls: controls)
         end

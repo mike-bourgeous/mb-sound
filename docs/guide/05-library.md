@@ -144,7 +144,7 @@ whole story, `lesson :chop` walks through it):
 ```ruby
 stop :drums, fade: 0
 brk = breakbeat(:jungle).slices(16)
-bg :break, brk.chop(0, 1, 4, 2, 8, 9, 4, 6).loop.sampler(brk).at(-16.db)
+bg :break, brk.chop(0, 1, 4, 2, 8, 9, 4, 6).loop.sampler(brk).at(-14.db)
 ```
 
 `chop` takes slice numbers in the order to play them, one per

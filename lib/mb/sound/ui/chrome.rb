@@ -142,6 +142,25 @@ module MB
         # +w+), any note after it (" 3 t 60/s ").
         def badge(f, nav:, w:)
           return '' unless f.number
+          # (kept per frame, a Data, with the arguments: a full repaint
+          # paints every badge, and each pane key repaints; ui-perf-2
+          # round 3)
+          m = BADGES[f]
+          return m[2] if m && m[0] == nav && m[1] == w
+          b = badge_text(f, nav, w).freeze
+          BADGES[f] = [nav, w, b].freeze
+          b
+        end
+
+        # #badge's and #title_text's texts by frame (weak, by identity).
+        BADGES = ObjectSpace::WeakMap.new
+        TITLES = ObjectSpace::WeakMap.new
+
+        # Blank rows by width (#title_row).
+        BLANK_ROWS = Hash.new { |h, w| h[w] = (' ' * w).freeze }
+
+        # (#badge's text)
+        def badge_text(f, nav, w)
           short = "#{f.number}#{nav && f.jump ? " #{f.jump}" : ''}#{f.note ? " #{f.note}" : ''}"
           long = " #{short} #{f.name} "
           return long if nav && f.focused && long.length + 2 <= w
@@ -162,13 +181,22 @@ module MB
             end
           end
           return unless f.title
+          t = title_text(f, right) or return
+          grid.put_run(x0 + r.x + 1, y, t, MB::Term::Cells.pack(Theme.rgb(f.focused ? :key : :title)), nil, MB::Term::Cells::BOLD)
+        end
+
+        # The title set into the rule for room +right+ (" TRACKS ", cut with
+        # an ellipsis), or nil when too narrow; kept per frame and room.
+        def title_text(f, right)
+          m = TITLES[f]
+          return m[1] if m && m[0] == right
           t = " #{f.title.to_s.upcase} "
           if t.length + 2 > right # (cut with an ellipsis, as title rows are, rather than dropped)
             room = right - 4
-            return if room < 3
-            t = " #{f.title.to_s.upcase[0, room - 1]}… "
+            t = room < 3 ? nil : " #{f.title.to_s.upcase[0, room - 1]}… "
           end
-          grid.put_run(x0 + r.x + 1, y, t, MB::Term::Cells.pack(Theme.rgb(f.focused ? :key : :title)), nil, MB::Term::Cells::BOLD)
+          TITLES[f] = [right, t&.freeze].freeze
+          TITLES[f][1]
         end
 
         # The title row inside the pane ("TRACKS" at the left, as panes drew
@@ -176,7 +204,7 @@ module MB
         def title_row(grid, f, nav, x0, y0)
           r = f.rect
           y = y0 + r.y
-          grid.put_run(x0 + r.x, y, ' ' * r.w, nil, nil, 0)
+          grid.put_run(x0 + r.x, y, BLANK_ROWS[r.w], nil, nil, 0)
           right = r.w
           if f.number
             b = badge(f, nav: nav, w: r.w)

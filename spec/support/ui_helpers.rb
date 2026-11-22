@@ -239,9 +239,19 @@ module UIHelpers
 
   # A terminal for headless :tiles specs: a pty pair whose slave is the
   # "real" terminal the screen owns, and a MB::Term::VT reading the master (what
-  # the screen wrote), answering its queries.
+  # the screen wrote), answering its queries.  Terminals still open after
+  # an example are closed by the hook at the end of this file.
   class FakeTerminal
     attr_reader :vt, :master, :slave
+
+    # Thread name of each terminal's reader (spec/support/ui_thread_guard.rb).
+    READER_NAME = 'spec FakeTerminal reader'
+
+    @open = []
+    class << self
+      # Terminals not yet closed.
+      attr_reader :open
+    end
 
     def initialize(rows, cols)
       require 'pty'
@@ -251,7 +261,9 @@ module UIHelpers
       @lock = Mutex.new
       @bytes = 0
       @replies = [] # the last few [time, bytes] the VT answered (for #wait_input_idle's failures)
+      FakeTerminal.open << self
       @reader = Thread.new do
+        Thread.current.name = READER_NAME
         loop do
           d = @master.readpartial(65_536)
           @lock.synchronize do
@@ -369,6 +381,7 @@ module UIHelpers
     end
 
     def close
+      FakeTerminal.open.delete(self)
       @master.close rescue nil
       @slave.close rescue nil
       @reader.join(1)
@@ -467,10 +480,29 @@ module UIHelpers
     tiles = UI::Tiles.new(layout: UI.tiles_layout_named(layout), input: term.slave, output: term.slave, repl: :thread,
                           pry: { prompt: prompt, color: false, correct_indent: false }, probe: false, **opts)
     tiles.start
+    UIHelpers.screens << tiles
     [tiles, term]
+  end
+
+  # Screens #ui_tiles started in this example (stopped after it).
+  @screens = []
+  class << self
+    attr_reader :screens
+  end
+
+  # Stops the screens #ui_tiles started and closes the FakeTerminals an
+  # example left open (ui-perf-2 round 4: facade_spec left a running tiled
+  # screen, whose painter's Thread.pass calls and allocations failed
+  # band_spec and meta_invariance_spec later in the same process).  Safe
+  # after an example's own stop and close.
+  def self.close_screens
+    screens.each { |t| t.stop rescue nil }
+    screens.clear
+    FakeTerminal.open.dup.each(&:close)
   end
 end
 
 RSpec.configure do |c|
   c.include UIHelpers
+  c.after(:each) { UIHelpers.close_screens }
 end

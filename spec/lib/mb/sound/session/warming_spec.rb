@@ -169,6 +169,27 @@ RSpec.describe(MB::Sound::Session::Warming) do
       s&.close
     end
 
+    # (form-start-1: a held start doesn't move an idle timeline, so a
+    # scene's tracks land where it stood, first notes included)
+    it 'keeps an idle timeline where it is while the start waits, landing it there' do
+      s, gate = background_session
+      MB::Sound::Session.with_context(session: s) do
+        MB::Sound.track(:a) { |c| c.gate * 0.5 }
+        MB::Sound.scene(:x, a: MB::Sound.seq(MB::Sound::C4).n4.loop)
+        MB::Sound.go(:x)
+        run(s, 20)
+        expect(s.transport.position).to eq(0)
+        expect(s.idle?).to eq(false) # (wait and PlaybackEnd still see a start coming)
+        2.times { gate << true }
+        wait_released(s, :a)
+        mix = run(s, 1)
+        expect(s.journal.changes.find { |e| e.subject == :a }.lands.to_s).to eq('1:1')
+        expect(mix[0][0]).to eq(0.5) # (the first note, from its first sample)
+      end
+    ensure
+      s&.close
+    end
+
     it 'lands a change whose time passed meanwhile on its launch point\'s next alignment' do
       s, gate = background_session
       MB::Sound::Session.with_context(session: s) do

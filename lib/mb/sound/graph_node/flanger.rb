@@ -38,7 +38,13 @@ module MB
 
         # The settings GraphNode#flanger takes (besides a preset name or
         # rate).
-        KEYS = %i[rate depth delay range feedback mix dry wet spread shape phase sweep law through_zero interpolation].freeze
+        KEYS = %i[rate depth delay range feedback mix dry wet spread shape phase sweep law through_zero interpolation noise seed].freeze
+
+        # How fast the input's envelope falls for +noise:+ (a
+        # Dynamics::SimpleEnvelopeFollower: instant rise, this many dB per
+        # NOISE_DECAY_S), so the hiss follows the playing.
+        NOISE_DECAY_DB = -20.0
+        NOISE_DECAY_S = 0.1
 
         preset_family :flanger, kind: :effect, label: 'flanger preset', keys: KEYS,
           about: 'Flangers: sig.flanger(:jet)',
@@ -47,19 +53,20 @@ module MB
 
         param :rate, 0.2, range: 0.01..20.0, unit: 'Hz', description: 'LFO rate (Hz, or a musical length per cycle: 2.bars)'
         param :depth, 1.0, range: 0.0..1.0, description: 'Share of the range the LFO sweeps (0 holds the delay)'
-        param :delay, 0.002, range: 0.0001..0.03, unit: 's', description: 'Sweep center delay (seconds or a length: 2.ms)'
-        param :range, 4.0, range: 0.0..8.0, unit: 'octaves', description: 'Sweep width in octaves of delay at depth 1'
+        param :delay, 0.001, range: 0.0001..0.03, unit: 's', description: 'Sweep center delay (seconds or a length: 2.ms)'
+        param :range, 2.0, range: 0.0..8.0, unit: 'octaves', description: 'Sweep width in octaves of delay at depth 1'
         param :feedback, 0.5, range: -MAX_FEEDBACK..MAX_FEEDBACK, description: 'Feedback around the delay (negative: hollow, metallic)'
         param :mix, 0.5, range: 0.0..1.0, description: 'Dry/wet crossfade, linear (0.5 deepest notches)'
         param :spread, 0.0, range: 0.0..1.0, unit: 'cycles', description: "Right LFO's phase offset from the left (0.5 opposite); stereo out"
         param :shape, :triangle, range: ModulationLfo::SHAPES, description: 'LFO shape'
         param :phase, 0.0, range: 0.0..1.0, unit: 'cycles', description: "Left LFO's starting phase"
         param :law, :octaves, range: LAWS, description: 'Sweep law: :octaves (even in pitch) or :linear (even in time)'
+        param :noise, nil, range: 0.0..0.5, description: "Hiss in the feedback loop, scaled by the input's envelope (BBD-style; needs feedback)"
 
-        preset :sweep, rate: 0.2, depth: 1.0, delay: 0.002, range: 4.0, feedback: 0.5, mix: 0.5, spread: 0.0, shape: :triangle,
-          tags: %i[classic medium], about: 'A classic flanger: 0.5-8 ms swept by a slow triangle, medium feedback (the defaults)'
-        preset :jet, rate: 0.08, depth: 1.0, delay: 0.0025, range: 5.0, feedback: 0.85, mix: 0.5, spread: 0.0, shape: :triangle,
-          tags: %i[resonant whoosh drums], about: 'A resonant jet-plane whoosh: strong feedback, a slow five-octave sweep'
+        preset :sweep, rate: 0.2, depth: 1.0, delay: 0.001, range: 2.0, feedback: 0.5, mix: 0.5, spread: 0.0, shape: :triangle,
+          tags: %i[classic medium], about: 'A classic flanger: 0.5-2 ms swept by a slow triangle, medium feedback (the defaults; comby on drums too)'
+        preset :jet, rate: 0.08, depth: 1.0, delay: 0.0025, range: 5.0, feedback: 0.85, mix: 0.5, spread: 0.0, shape: :triangle, noise: 0.1,
+          tags: %i[resonant whoosh drums], about: 'A resonant jet-plane whoosh: strong feedback, a slow five-octave sweep, hiss breathing in the loop'
         preset :sheen, rate: 0.35, depth: 1.0, delay: 0.004, range: 1.5, feedback: 0.2, mix: 0.35, spread: 0.25, shape: :sine,
           tags: %i[gentle subtle stereo], about: 'A gentle stereo shimmer: a narrow sweep around 4 ms, light feedback, mostly dry'
         preset :steel, rate: 0.15, depth: 1.0, delay: 0.001, range: 3.0, feedback: -0.85, mix: 0.5, spread: 0.0, shape: :triangle,
@@ -90,7 +97,7 @@ module MB
             raise ArgumentError, 'flanger: give the rate once (positional or rate:)' if !rate.nil? && options.key?(:rate)
             options = options.merge(rate: rate) unless rate.nil?
           end
-          s = { dry: 1, wet: 1, phase: 0.0, sweep: nil, law: :octaves, through_zero: false,
+          s = { dry: 1, wet: 1, phase: 0.0, sweep: nil, law: :octaves, through_zero: false, noise: nil, seed: nil,
                 interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION }.merge(preset_settings(preset))
           s.delete(:delay) if options[:range].is_a?(Range)
           s.merge!(options)
@@ -122,31 +129,53 @@ module MB
           end
           raise ArgumentError, "flanger sweep: is a node (-1..1; got #{sweep.inspect})" if sweep && !sweep.respond_to?(:sample)
           tz = GraphNode.build_flag?(s[:through_zero], default: false)
+          noise = s[:noise]
+          noise = GraphNode.build_setting(noise) unless noise.nil? || noise.respond_to?(:sample)
+          noise = nil if noise.is_a?(Numeric) && noise == 0
+          unless noise.nil? || noise.respond_to?(:sample) || (noise.is_a?(Numeric) && noise.real? && noise > 0)
+            raise ArgumentError, "flanger noise: is a level above 0 (a number or a node; got #{noise.inspect})"
+          end
+          if noise && feedback.is_a?(Numeric) && feedback == 0
+            raise ArgumentError, 'flanger noise: rides the feedback loop, so it needs feedback: (not 0)'
+          end
+          seed = noise ? (GraphNode.build_setting(s[:seed]) || MB::Sound.next_seed) : nil
+          raise ArgumentError, "flanger seed: is an Integer (got #{seed.inspect})" unless seed.nil? || seed.is_a?(Integer)
 
           l, r = StereoDelayMethods.sides(input, 'flanger')
           stereo = !l.equal?(r) || input.is_a?(Channels) && input.channel_count == 2 || spread != 0
           make = ->(side, offset) {
             sw = sweep || ModulationLfo.tone(s[:rate], shape: s[:shape], phase: phase + offset, sample_rate: sample_rate, what: 'flanger')
             time = delay_time(sw, center, octaves, s[:depth], law)
-            side_out(side, time, center, feedback, dry, wet, tz, s[:interpolation], sample_rate)
+            hiss = noise && hiss(side, noise, seed + (offset == 0 ? 0 : 1), sample_rate)
+            side_out(side, time, center, feedback, dry, wet, tz, s[:interpolation], sample_rate, hiss)
           }
 
           return make.(l, 0.0) unless stereo
           Channels.new([make.(l, 0.0), make.(r, spread)])
         end
 
+        # White noise (seeded with +seed+) times +level+ times the
+        # envelope of +side+ (instant rise, NOISE_DECAY_DB per NOISE_DECAY_S):
+        # the hiss #flanger's +noise:+ adds inside the feedback loop.
+        def self.hiss(side, level, seed, sample_rate)
+          follower = Dynamics::SimpleEnvelopeFollower.new(sample_rate: sample_rate, decay_db: NOISE_DECAY_DB, decay_s: NOISE_DECAY_S)
+          env = side.get_sampler.aabs.filter(follower)
+          MB::Sound.noise(seed: seed) * env * level
+        end
+
         # One side: +side+ through the swept delay (+time+, seconds) with
         # +feedback+, mixed with the dry signal (delayed by +center+ for
-        # +through_zero+).
-        def self.side_out(side, time, center, feedback, dry, wet, through_zero, interpolation, sample_rate)
+        # +through_zero+); +hiss+ (a node, or nil) joins the feedback loop.
+        def self.side_out(side, time, center, feedback, dry, wet, through_zero, interpolation, sample_rate, hiss = nil)
           fb = feedback.is_a?(Numeric) && feedback == 0 ? false : feedback
-          return side.delay(time, feedback: fb, dry: dry, wet: wet, smooth: false, interpolation: interpolation) unless through_zero
+          insert = hiss && ->(d) { d + hiss }
+          return side.delay(time, feedback: fb, dry: dry, wet: wet, smooth: false, interpolation: interpolation, &insert) unless through_zero
 
           # The dry signal waits for the sweep's center (whole samples for
           # a fixed center, read directly), so the wet passes it
           ref = center.is_a?(Numeric) ? (center * sample_rate).round.samples : center
           d = Chorus.scale(side.delay(ref, smooth: false), dry)
-          w = Chorus.scale(side.delay(time, feedback: fb, wet: 1, smooth: false, interpolation: interpolation), wet)
+          w = Chorus.scale(side.delay(time, feedback: fb, wet: 1, smooth: false, interpolation: interpolation, &insert), wet)
           return w || side * 0 if d.nil?
           return d if w.nil?
           DelayMethods.ring_sum(w, d)

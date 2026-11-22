@@ -61,6 +61,7 @@ module MB
 
           def declarations = GraphIO.parse(text).declarations
 
+          include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
           def inspect = "#<Take::Reader::Version #{track.inspect} #{name} line #{line}>"
         end
 
@@ -165,6 +166,7 @@ module MB
             [head, *events.map { |r| "  #{r}" }, ("changed: #{ch.join('; ')}" unless ch.empty?)].compact.join("\n")
           end
 
+          include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
           def inspect = "#<#{to_s.lines.first.strip}>"
         end
 

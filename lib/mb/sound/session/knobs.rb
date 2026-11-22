@@ -286,8 +286,17 @@ module MB
 
           fresh.each { |k| follow_rack_knob(k) if k.rack_knob&.follow }
           joined.each_value { |k| k.listen(knob_midi) if k.cc && !k.listening }
+          note_knob_readers(player, joined.keys) if player
           joined
         end
+
+        # The Session knobs each player's graph read when it last joined
+        # ({ player name => [knob names] }, frozen; replaced, never changed,
+        # so threads read it without a lock): what "this track's knobs"
+        # means beyond the knobs named under it (tracks-enter-1: the tracks
+        # pane's Enter shows them in the knobs pane).  Names of knobs gone
+        # since may stay; readers filter by the knobs that exist.
+        def knob_readers = @knob_readers
 
         # Drops the rack knobs of players that are gone (see
         # Racks#prune_knob_instances): forgotten players' instances leave
@@ -385,7 +394,17 @@ module MB
           check_turn_keywords(keys)
           point = LaunchPoint.of(binding) or return nil
           k = knob!(name)
+          if value.nil? && keys.empty? && follow.nil? && over.nil? && from.nil?
+            # (ux-friction-1 round 2: the maintainer's `turn :'a/envelope'`
+            # with no value, after `turn :'a/drive'` said only "got nil")
+            return MB::Sound.live_error(ArgumentError.new(
+              "turn #{k.name.inspect} takes a value: it is at #{knob_info[k.name]} now (turn #{k.name.inspect}, #{GraphNode::Knob.number(k.range.end)} sets it)"
+            ))
+          end
           if !build && @arrangement&.build_knob?(k.name) && !(rebuilds = @arrangement.build_knob_tracks(k.name)).empty?
+            # (3000.hz for a build knob's cutoff: its number; see #knob_value)
+            typed = value.is_a?(MB::Sound::Pitch) || !(value.nil? || value.is_a?(Numeric) || value.respond_to?(:sample))
+            value = (knob_value(k, value) or return nil) if typed && keys.empty? && follow.nil?
             unless keys.empty? && over.nil? && follow.nil? && from.nil? && value.is_a?(Numeric)
               now = k.value.to_f == k.value.round ? k.value.round : k.value
               return MB::Sound.live_error(ArgumentError.new("#{k.name.inspect} is read when #{rebuilds.join(', ')} build#{'s' if rebuilds.length == 1}, so it takes plain values (turn #{k.name.inspect}, #{now}): each turn rebuilds"))
@@ -400,9 +419,12 @@ module MB
             raise ArgumentError, "Turn #{k.name.inspect} with keyframes (0 => a, 1.n8 => b) or a value, not both" unless value.nil? && over.nil? && follow.nil? && from.nil?
             return turn_keys(k, keys, curve, point, start_time)
           end
-          return turn_keys(k, { 0 => value }, nil, point, start_time) if gesture_for?(k, value, over, follow, point)
-          value = follow unless follow.nil?
-          value = knob_value(k, value)
+          return turn_keys(k, { 0 => value.to_f }, nil, point, start_time) if gesture_for?(k, value, over, follow, point)
+          asked = !follow.nil?
+          value = follow if asked
+          given = value
+          value = knob_value(k, value, follow: asked)
+          return nil if value.nil? && !given.nil? # (a unit value it can't read, refused live)
           check_turn_value(k, value)
           raise ArgumentError, "from: needs over: (a ramp)" if from && !over
           raise ArgumentError, "from: must be a number (got #{from.inspect})" unless from.nil? || (from.is_a?(Numeric) && from.real?)
@@ -411,7 +433,14 @@ module MB
           time = start_time ? start_time.to_r : launch_time(point, [], default: nil)
           data = turn_data(value, over, curve).merge(from ? { from: from } : {}).merge(smooth.nil? ? {} : { smooth: smooth })
           knob_change(k, time, data) { |kn, frame, t|
-            apply_turn(kn, value, frame, t, over: over, curve: curve, smooth: smooth, from: from)
+            # (a take replaying a level gesture's line, `level :drums,
+            # -10.0.db`: the raw steps it recorded; see #gesture_line)
+            raw = over.nil? && value.is_a?(Numeric) ? replayed_gesture(k.name, t) : nil
+            if raw
+              raw.each { |off, v| kn.set(v, frame: frame + off) }
+            else
+              apply_turn(kn, value, frame, t, over: over, curve: curve, smooth: smooth, from: from)
+            end
           }
         end
 
@@ -427,6 +456,11 @@ module MB
           tracks = []
           pairs.each do |name, value|
             k = knob!(control_name(name))
+            # (3000.hz for a cutoff: its number; see #knob_value)
+            unless value.is_a?(Numeric) || value.nil?
+              value = knob_value(k, value)
+              next if value.nil?
+            end
             unless value.is_a?(Numeric)
               raise ArgumentError, "turn several knobs to plain numbers (#{k.name.inspect} got #{value.inspect}); ramps and keyframes take one knob: turn #{k.name.inspect}, ..."
             end
@@ -518,12 +552,18 @@ module MB
         end
         private :play_gesture
 
-        # True if a plain turn of +k+ to +value+ is a live one-step
-        # gesture's line (see #gesture_line).
+        # True if a plain turn of +k+ to +value+ is a live gesture's line
+        # (see #gesture_line): a one-step gesture's value, or the one value
+        # its line printed (a level gesture's `level :drums, -10.0.db`: the
+        # gain that dB text gives, equal to the line's value however the
+        # last step's gain rounds).
         def gesture_for?(k, value, over, follow, point)
           return false unless value.is_a?(Numeric) && over.nil? && follow.nil? && !point.given?
           g = @render_lock.synchronize { @knob_gestures[k.name] } or return false
-          g.steps == [[0, value.to_f]]
+          v = value.to_f
+          return true if g.steps == [[0, v]]
+          f = g.fitted
+          !f.nil? && f.curve.nil? && f.keys.length == 1 && f.keys[0][0] == 0 && f.keys[0][1] == v
         end
 
         # Remembers every knob's value (or where it is heading, while it
@@ -663,10 +703,24 @@ module MB
         # 1.n8 => 0.4, 1.n4 => 0.62`; stepped knobs (Knob#choose) keep their
         # steps (`curve: :step`).  The take keeps the raw steps (see
         # #turn_keys).  Nil without a gesture.
+        #
+        # A player's level knob (:"drums/level", Faders) prints its final
+        # value as a `level` line instead, in dB as #level gives it
+        # (`level :drums, -10.0.db`; knobs-pane-keys-1, the maintainer's
+        # 2026-11-21 "one `level` line on release"): that line, matching the
+        # gesture (#gesture_for?), is the gesture's journal entry, its one
+        # undo step, and its take line, whose replay plays the raw steps
+        # (the sweep heard), as for any knob.
         def gesture_line(name, tolerance: Gesture::TOLERANCE)
           k = knob!(name)
           g = @render_lock.synchronize { @knob_gestures[k.name] } or return nil
           steps = @render_lock.synchronize { g.steps.map(&:dup) }
+          nm = Name[k.name]
+          if nm.level? && !steps.empty?
+            db = level_db(steps.last[1])
+            @render_lock.synchronize { g.fitted = Gesture.new([[0, db.to_f]]) }
+            return "level #{nm.owner.inspect}, #{RubyValue.to_ruby(db)}"
+          end
           fitted = Gesture.fit(steps, k.spec, tolerance: tolerance, stepped: k.stepped?)
           @render_lock.synchronize { g.fitted = fitted }
           fitted.to_ruby(g.name, per_sample: g.per_sample, rate: clock_rate)
@@ -727,9 +781,19 @@ module MB
           @knob_frame = nil
           @knob_midi = nil
           @knob_gestures = {}
+          @knob_readers = {}.freeze
           @committing_gesture = nil
           @alias_noted = nil
           @clamp_warned = nil
+        end
+
+        # Keeps +names+ as the knobs player +name+'s graph reads
+        # (#knob_readers), a new frozen Hash when they changed.
+        def note_knob_readers(name, names)
+          @knob_lock.synchronize {
+            return if @knob_readers[name] == names
+            @knob_readers = @knob_readers.merge(name => names.freeze).freeze
+          }
         end
 
         def knob_suggestion(name, define: false)
@@ -775,6 +839,11 @@ module MB
           message = "turn #{k.name.inspect}, #{n.(value)}: limited to #{n.(value.to_f.clamp(r.begin, r.end))} (knob #{k.name.inspect} goes #{n.(r.begin)}..#{n.(r.end)}#{"; #{desc}" if desc}; " \
                     "knob #{k.name.inspect}, #{n.(k.spec.default)}, range: #{widened(r, value)} widens it)"
           MB::Sound.live_error(Param::Error.new(message)) unless MB::Sound.live?
+          # (every time, for a screen running the turn: the inspector's
+          # turn line says "limited to" after the warning's first time;
+          # sd-ux-fixes-1, the review's #16; UI::Tiles#run_turn_line)
+          notes = Thread.current[:mb_sound_clamp_notes]
+          notes << "limited to #{n.(value.to_f.clamp(r.begin, r.end))} (#{k.name} goes #{n.(r.begin)}..#{n.(r.end)})" if notes.is_a?(Array)
           @clamp_warned ||= {}
           return if @clamp_warned[k.name]
           @clamp_warned[k.name] = true
@@ -785,14 +854,45 @@ module MB
         # -6.db for one declared in dB) as the knob's plain number; other
         # values as they are.  (A Pitch is a value here, not a sine to
         # follow, when the knob is a frequency.)
-        def knob_value(k, value)
+        #
+        # A unit value of another type (sd-ux-fixes-1, the review's #1:
+        # 3000.hz typed into a preset's plain-number cutoff followed the
+        # Pitch as a 3 kHz sine, limited to the knob's bottom): its number
+        # when the knob's unit (Param.implied_unit: the spec's unit, or the
+        # names table's for its name) matches, Hz for a Pitch, seconds for
+        # a Length; else refused through MB::Sound.live_error (nil live).
+        # +follow+ (a turn's follow:) follows it as a signal instead.
+        def knob_value(k, value, follow: false)
           t = Param.type_of(value)
           # (a gain like -6.db turning a plain-number knob, e.g. a level:
           # the knob holds the Float gain, so set documents print a number
           # its range can read; omnibus17)
           return value.to_f if t == :decibels && k.spec.param.type == :number
-          return value if t.nil? || t == :number || t == :node || t == :name || t != k.spec.param.type
-          Param.magnitude(value).to_f
+          return value if t.nil? || t == :number || t == :node || t == :name || t == :ratio || t == :boolean || t == :string
+          # (a node tagged as a frequency, v.freq: a signal to follow)
+          return value if follow || (value.respond_to?(:sample) && !value.is_a?(MB::Sound::Pitch))
+          return Param.magnitude(value).to_f if t == k.spec.param.type
+          unit = Param.implied_unit(k.spec, k.name)
+          return value.frequency.to_f if unit == 'Hz' && value.is_a?(MB::Sound::Pitch)
+          if unit == 's' && value.is_a?(MB::Sound::Length)
+            return Length.seconds(value, sample_rate: output_open? ? sample_rate : 48000, transport: @transport).to_f
+          end
+          refuse_unit_value(k, value, unit)
+        end
+
+        # The error for a unit value a knob can't read (see #knob_value):
+        # raised in scripts and specs, warned live (returning nil).
+        def refuse_unit_value(k, value, unit)
+          n = GraphNode::Knob.method(:number)
+          r = k.spec.range
+          what = ArgTypes.describe(Param.type_of(value)).sub(/ \(.*\)\z/, '')
+          holds = unit ? "#{unit == 's' ? 'seconds' : unit}" : 'plain numbers'
+          MB::Sound.live_error(Param::Error.new(
+            "turn #{k.name.inspect}, #{value.respond_to?(:to_ruby) ? value.to_ruby : value.inspect}: knob #{k.name.inspect} holds #{holds} " \
+            "(#{n.(r.begin)}..#{n.(r.end)}), not #{what}; turn it to a number (turn #{k.name.inspect}, #{n.(k.value)}), " \
+            "or follow: the value to follow it as a signal; nothing was changed"
+          ))
+          nil
         end
 
         # +range+ widened to hold +value+, to a round number.

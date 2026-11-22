@@ -208,6 +208,56 @@ module MB
           Clip.new(events, length: @length * cycles, loop: true, seed: @seed, align: @align, performed: @performed)
         end
 
+        # A generator clip (#generated?) played through +fx+ (as for #bake)
+        # one generated cycle at a time, so it keeps generating: each
+        # cycle's events (probabilities and conditions decided for that
+        # cycle) are baked through the transform as a one-shot clip, and
+        # whatever the transform adds past the cycle's end (echo tails)
+        # plays over the next cycles, as a generator's long notes do.  The
+        # baked transforms (MIDI::Stream::CLIP_BAKED: `motifs(...).echo(3.n32,
+        # 3)`) use this on generator clips (gen-ux-1, the maintainer,
+        # 2026-11-17: "Can .echo ... work on a generator without baking").
+        # Lengths in seconds are read at the tempo when the clip is made.
+        # What the transform carries from note to note across cycles (an
+        # echo retriggering a note of the cycle before) starts fresh each
+        # cycle.  (Private: the transforms call it.)
+        #
+        #     track :bell, motifs(scale(:phrygian), 4, evolve: 1).echo(3.n32, 3, pitch: 7.st)
+        def bake_cycles(fx = nil, &block)
+          fx ||= block
+          raise ArgumentError, 'Pass a transform (e.g. echo(1.n8, 3)) or a block taking a MIDI::Stream' unless fx
+          raise ArgumentError, "#{self} doesn't generate its events (bake it instead)" unless generated?
+          apply = fx.respond_to?(:apply) ? fx.method(:apply) : fx
+          current = Sequence.current_transport
+          bpm = current.bpm
+          bar_length = current.bar_length
+
+          # How far past a cycle the transform may play (its declared tail)
+          probe = Transport.new(bpm: bpm, bar_length: bar_length)
+          out = MIDI::Stream.for(apply.call(MIDI::Stream.new(MIDI::ClipSource.new(Clip.new([], length: @length), transport: probe))))
+          tail = out.music_end ? TempoMap.whole_notes_for(out.music_end, probe.whole_notes_per_second) - @length : @length
+          extra = MB::M.max((tail.to_r / @length).ceil, 0)
+
+          src = self
+          length = @length
+          map_cycles(extra_cycles: extra) { |events, cycle|
+            Clip.bake_cycle(events.each_with_index.select { |e, i| src.plays?(e, cycle, i) }.map(&:first), length, apply, bpm, bar_length)
+          }
+        end
+        private :bake_cycles
+
+        # The Events of one generated cycle (+events+, starts relative to
+        # the cycle, +length+ whole notes long) played through +apply+ at
+        # +bpm+ (see #bake_cycles).
+        def self.bake_cycle(events, length, apply, bpm, bar_length)
+          return events if events.empty?
+          lo = events.map(&:start).min
+          shift = lo < 0 ? -lo : 0r
+          clip = Clip.new(events.map { |e| e.with(start: e.start + shift, probability: nil, condition: nil) }, length: length + shift)
+          notes, = bake_notes(clip, apply, Transport.new(bpm: bpm, bar_length: bar_length))
+          notes.map { |start, len, value, velocity| Event.new(start: start - shift, length: len, value: value, velocity: velocity) }
+        end
+
         # A non-looping clip of +total+ copies of this loop's cycles
         # 0...+cycles+ in loop order, copy +first+ holding cycle 0 (copies
         # before it hold the cycles leading up to it), with probabilities

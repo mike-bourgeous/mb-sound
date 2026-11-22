@@ -25,8 +25,13 @@ module Catalog
   # (17 554 bytes: also a question for the maintainer)
   # 17 600 until omnibus19 added derivative and integral (17 807 bytes:
   # a question for the maintainer, as before)
-  # 17 850 until racks-r3 added slot (17 915 bytes: a question again)
-  BUDGET = 17_950
+  # 17 850 until pause-tails-1 listed `suspend` (the old freeze) in :flow
+  # (17 854 bytes) and gen-ux-1 added fadeout to :play and progression to
+  # :generative (17 862 bytes on its own): a question for the maintainer,
+  # as before
+  # 17 900 until racks-r3 added slot (17 969 bytes with both; maintainer
+  # 2026-11-21: "ok")
+  BUDGET = 18_000
 
   # Characters for a description, and bytes for a whole line
   DESCRIPTION_MAX = 80

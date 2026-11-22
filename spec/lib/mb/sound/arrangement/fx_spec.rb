@@ -47,6 +47,26 @@ RSpec.describe(MB::Sound::Arrangement::Fx, :aggregate_failures) do
     expect(described_class.label(chain)).to eq('L.fx.juno1 + L.fx.reverb.plate + a block')
   end
 
+  it "answers the maintainer's console guesses with the spelling that works (ux-friction-1)" do
+    run(->(_s) {
+      MB::Sound.track(:keys, :funk_keys)
+      MB::Sound.track(:bass, :funk_keys)
+      MB::Sound.bg(:keys, KEYS_RIFF.named(:riff))
+    }, buffers: 2)
+    within = ->(&b) { MB::Sound::Session.with_context(session: @sessions.last, &b) }
+    # Two effects as two arguments: the list
+    expect { within.() { MB::Sound.fx(:keys, :hall, :dub) } }.to raise_error(ArgumentError, /fx :keys takes one effect or a list: fx :keys, \[:hall, :dub\]/)
+    # A clip's name given to bg or swap on another track: launch (as cue takes it)
+    %w[bg swap].each do |cmd|
+      expect { within.() { MB::Sound.public_send(cmd, :bass, :riff) } }.to raise_error(ArgumentError, /\A#{cmd} :bass, :riff: :riff is a clip's name; launch :bass, :riff plays it/)
+    end
+    expect(within.() { MB::Sound.launch(:bass, :riff) }.to_s).to start_with('bg :bass lands')
+    # start takes no names; seek 0 is not a bar; a latency profile is checked
+    expect { within.() { MB::Sound.start(:keys) } }.to raise_error(ArgumentError, /start starts the transport .* bg :keys plays/)
+    expect { within.() { MB::Sound.seek(0) } }.to raise_error(ArgumentError, /seek 0: bars count from 1, so the start is seek 1/)
+    expect { MB::Sound.latency(:Low) }.to raise_error(ArgumentError, /latency :Low: no such profile \(did you mean :low\?\); the profiles are :low, :default, :video, :safe/)
+  end
+
   it 'swaps the insert at the launch point, carrying the notes and letting the old tail ring, in one undo step' do
     plain = ->(_s) { MB::Sound.track(:keys, :funk_keys, fx: :hall); MB::Sound.bg(:keys, KEYS_RIFF) }
     _, base = run(plain, buffers: 200)
@@ -85,6 +105,13 @@ RSpec.describe(MB::Sound::Arrangement::Fx, :aggregate_failures) do
       expect { MB::Sound.fx(:pad, :hall) }.to raise_error(described_class::Error, /a graph track's effects go in its graph/)
       expect { MB::Sound.fx(:nope, :hall) }.to raise_error(ArgumentError, /no track :nope/)
       expect { MB::Sound.track(:keys, :funk_keys, fx: :hal) }.to raise_error(described_class::Error, /no effect :hal/)
+
+      # (fixes-15, the maintainer's `fx(:sub) { it.pan(1) }`: Ruby dropped
+      # the block, nothing changed, nothing said so)
+      expect { expect(MB::Sound.fx(:keys) { it.pan(1) }).to eq([]) }.to output(
+        /warning: fx :keys takes its effect as an argument, not a block, so the block was ignored and nothing changed; give a Proc taking the track's signal: fx :keys, ->\(s\) \{ s\.pan\(1\) \}\n\z/
+      ).to_stderr
+      expect(s.arrangement.tracks[:keys].fx).to be_nil.or eq([])
     }
   end
 

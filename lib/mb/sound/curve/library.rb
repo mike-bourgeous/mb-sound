@@ -416,6 +416,7 @@ module MB
         cubic: plain(:cubic) { power(3) },
         quart: plain(:quart) { power(4) },
         quint: plain(:quint) { power(5) },
+        sqrt: plain(:sqrt) { power(0.5) },
         exp: plain(:exp) { db(60) },
         exp_in: plain(:exp_in) { db(-60) },
         exp_out: plain(:exp_out) { db(60) },

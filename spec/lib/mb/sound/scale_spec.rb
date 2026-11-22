@@ -139,4 +139,10 @@ RSpec.describe(MB::Sound::Scale) do
   it 'has a readable to_s' do
     expect(am.to_s).to eq('A3 minor')
   end
+  it "names the mode-first order for a root given first (ux-friction-1 round 2: scale(:a, :phrygian))" do
+    expect { MB::Sound.scale(:a, :phrygian) }.to raise_error(ArgumentError, 'Unknown scale :a: :a is a root note; the mode comes first: scale(:phrygian, :a)')
+    expect { MB::Sound.scale(:Bb) }.to raise_error(ArgumentError, /:Bb is a root note; the mode comes first: scale\(:minor, :Bb\)/)
+    # (root names and scale names never overlap, so the hint can't misfire)
+    expect(MB::Sound::Scale.names.grep(MB::Sound::Scale::ROOT_NAME)).to eq([])
+  end
 end

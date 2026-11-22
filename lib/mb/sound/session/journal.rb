@@ -46,6 +46,7 @@ module MB
           "#{bar}:#{b}"
         end
 
+        include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
         def inspect
           "#<Stamp #{self} frame=#{frame.inspect} pos=#{pos.inspect}>"
         end

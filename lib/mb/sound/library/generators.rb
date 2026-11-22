@@ -40,6 +40,7 @@ module MB
         # back through the heads).
         Path = Data.define(:text) do
           def to_s = text
+          include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
           def inspect = text
           def to_ruby = text
         end

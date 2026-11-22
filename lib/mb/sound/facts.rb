@@ -125,8 +125,11 @@ module MB
         # sampler chunk (`smpl.unity_note`, `smpl.pitch_fraction`,
         # `smpl.loop[i]` as [start, stop, type]), cue points
         # (`cue.point[i]` as [position, label or nil]), LIST INFO texts
-        # (`INFO.<id>`), the `mbmt` chunk, and every other chunk by id
-        # (`chunk.<id>` as [offset, size]).
+        # (`INFO.<id>`), the `mbmt` chunk, ACID's stretch markers
+        # (`strc.count`, `strc.settings`, and `strc.entry[i]` as [flags,
+        # position, pin, value] in file order, listed after the other
+        # chunks' facts), and every other chunk by id (`chunk.<id>` as
+        # [offset, size]).
         def of_riff(riff, text: nil)
           return new(format: :wav) unless riff
           at = ->(id) { riff.chunks.find { |c, _, _| c == id } }
@@ -163,9 +166,21 @@ module MB
             out << Fact.new(key: Meta::Formats::CHUNK, value: text.to_s, record: Meta::Formats::CHUNK, at: c[1], bytes: c[2])
           end
           known = ['fmt ', 'data', 'acid', 'smpl', 'cue ', 'LIST', Meta::Formats::CHUNK, 'ds64']
+          marks = riff.strc && at.('strc')
+          known << 'strc' if marks
           riff.chunks.each do |id, off, size|
             next if known.include?(id)
             out << Fact.new(key: "chunk.#{id}", value: [off, size], record: id, at: off, bytes: size)
+          end
+          if marks
+            # (the entries last: a chunk nothing used lists up to hundreds,
+            # and a description keeps a file's first facts)
+            s = riff.strc
+            out << Fact.new(key: 'strc.count', value: s.count, record: 'strc', at: marks[1], bytes: marks[2])
+            out << Fact.new(key: 'strc.settings', value: s.settings, record: 'strc', at: marks[1], bytes: marks[2])
+            s.entries.each_with_index do |e, i|
+              out << Fact.new(key: "strc.entry[#{i}]", value: [e.flags, e.position, e.pin, e.value], record: 'strc', at: marks[1] + 8 + 28 + 32 * i, bytes: 32)
+            end
           end
           new(format: riff.container == :riff ? :wav : riff.container, facts: out)
         end

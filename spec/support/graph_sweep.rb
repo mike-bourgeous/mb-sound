@@ -280,6 +280,14 @@ module GraphSweep
         c.sig.derivative(per: :sample) + c.mod(-1, 1).slope(mode: :central) * 0.01 + c.sig.integral(leak: 0.002) * 100 +
           c.mod(0, 1).integral(reset: c.trigger, range: 0..0.2) + c.notes.number.integrate(per: :sample, leak: 64.samples) * 1e-3
       }],
+      # (fix-clip-overshoot: bright input far past the limits, where the
+      # high band is scaled by the shaper's slope and the output limited)
+      ['hot shapers (bright input past the limits)', ->(c) {
+        hot = c.sig * 10 + 110.hz.square.at(c.mod(2, 6))
+        hot.clip(-0.9, 0.9) + hot.softclip(0.5, 0.9) + hot.abs * 0.1 + hot.ease(:smoothstep, symmetric: true, in: -1..1) +
+          hot.ease(:smootherstep, edges: :wrap) + hot.shape_db(:fuzz) +
+          c.sig.feedback { |fb, input| (input * 8 + fb.delay(31.samples) * 0.9).clip(-0.9, 0.9).softclip(0.5, 0.8) }
+      }],
       ['inertia (Inertia), musical and hardware', ->(c) {
         h = MB::Sound.stereo(c.sig, c.sig * 0.5).inertia(c.mod(0.002, 0.01), mode: :hardware)
         c.sig.inertia(0.005) + c.sig.inertia(0.02, substeps: 3) + h.outputs[0] + h.outputs[1]
@@ -294,11 +302,13 @@ module GraphSweep
           c.sig.ashape_db([[-84.db, -84.db], [-20.db, -3.5.db], [-19.9.db, -32.3.db], [0.db, -6.db]], table: 0.2.db)
       }],
       ['Quantize node', ->(c) { c.sig.quantize(c.mod(0.01, 0.2)) }],
-      ['filter banks (FilterBank: bandpass_series with node inputs, stereo pans, normalize; filter_bank; peq/peq_series serial)', ->(c) {
+      ['filter banks (FilterBank: bandpass_series with node inputs, stereo pans, per-band moving pans, normalize; filter_bank; peq/peq_series serial)', ->(c) {
         st = c.sig.bandpass_series(c.notes.freq, count: 6, ratio: c.mod(0.9, 1.1), width: MB::Sound.per_harmonic(15.cents..90.cents, curve: :exp),
                                    gain: MB::Sound.per_harmonic(0.db, -3.db), pan: c.mod(-1, 1), normalize: true)
         fb = c.sig.filter_bank([300, 900, 2400], width: 40.hz, gain: [1, 0.5, c.mod(0.1, 0.9)], pan: -0.8..0.8, pan_law: :linear)
-        st.outputs[0] + st.outputs[1] * 0.5 + fb.outputs[0] + fb.outputs[1] +
+        # (each band panned by its own copy of an LFO: per_harmonic's tone form)
+        pb = c.sig.bandpass_series(330, count: 3, width: 30.cents, pan: MB::Sound.per_harmonic(c.mod(-1, 1), phase: 0...1, rate: 1..1.5), normalize: true)
+        st.outputs[0] + st.outputs[1] * 0.5 + fb.outputs[0] + fb.outputs[1] + pb.outputs[0] - pb.outputs[1] * 0.5 +
           c.sig.bandpass_series(220, count: 4, quality: c.mod(5, 20), normalize: true) + c.sig.peq(300 => [-6.db, 0.5], 2000 => 4.db) +
           c.sig.peq_series(c.mod(100, 200), count: 3, gain: -4.db, width: 20.cents) +
           c.sig.filter_bank([200, 2000], type: [:lowpass, :highpass], response: :matched, quality: 0.7, serial: true)
@@ -313,7 +323,12 @@ module GraphSweep
       ['tremolo (Tremolo: LFO shapes, drawn shapes with a seam, depth nodes, stereo phase, tempo rates, mix)', ->(c) {
         c.sig.tremolo(9, depth: 12.db) + c.sig.tremolo(c.mod(2, 30), shape: :square, depth: 0, law: :linear, smooth: 0.002) +
           c.sig.trem(1.n32, shape: [[0, 1], [0.3, -1], [0.3, 0.5], [1, -0.2]], seam: true, depth: c.mod(0.05, 0.9)) +
-          c.stereo_sig.tremolo(11, stereo_phase: 0.5, shape: :triangle, mix: 0.6).mixdown + c.sig.tremolo(7, shape: :random, seed: 3, stereo_phase: 0.25).mixdown
+          c.stereo_sig.tremolo(11, stereo_phase: 0.5, shape: :triangle, mix: 0.6).mixdown + c.sig.tremolo(7, shape: :random, seed: 3, stereo_phase: 0.25).mixdown +
+          # (effects-3: law blends and curves, smooth random, the :auto seam)
+          c.sig.tremolo(6, law: 0.4, depth: c.mod(0.05, 0.9)) + c.sig.tremolo(1.n32, law: :bounce, depth: 0) +
+          c.sig.tremolo(9, shape: :smooth_random, seed: 4, law: :sqrt) + c.sig.trem(1.n16, shape: [[0, -1], [1, 1]], seam: :auto) +
+          # (effects-4: a seam as a Length, random glides of 3 ms by default and hard steps with smooth: 0)
+          c.sig.trem(5, shape: [[0, 1], [0.5, -1], [1, 0]], seam: 4.ms) + c.sig.tremolo(c.mod(3, 20), shape: :random, seed: 6, smooth: 0)
       }],
       ['decimate (Decimator)', ->(c) { c.sig.decimate(c.mod(500, 9000)) + c.sig.lp4(900, resonance: 0.6).decimate(3000.5, jitter: 0.3) + c.sig.srr(c.notes.freq * 3.5) + c.sig.decimate(2500, mix: 0.4) + c.sig.decimate(c.mod(800, 6000), mix: c.mod(0.1, 0.9)) + c.sig.decimate(c.mod(700, 7000), interpolation: :linear, jitter: 0.2) }],
 
@@ -389,7 +404,37 @@ module GraphSweep
         d = Numo::SFloat.cast(Array.new(3000) { |i| Math.sin(i * 0.07) * Math.exp(-(i % 750) / 200.0) })
         smp = MB::Sound::Sample[d, bpm: 960, beats: 1]
         st = MB::Sound::Sample[[d, d * -0.5], bpm: 960]
-        smp.follow * 0.3 + smp.follow(:resample, align: :launch) * 0.3 + st.follow(stretch: { mode: :slice, slices: 4, fill: :stretch, cycle: 0.001 })[1] * 0.3
+        quick = MB::Sound::Sample[[d, d * -0.5], bpm: 96]
+        # (acid-loop-info-1: slices and the vocoder's transients at markers, and a sample played as recorded,
+        # by the stretch mode and by the Sample's declared_one_shot: setting under follow's default)
+        marked = MB::Sound::Sample[d[0...1500], bpm: 960, markers: [0, 750]]
+        shot = MB::Sound::Sample[d[750...2250], bpm: 960, declared_one_shot: true]
+        # (one slice with short cycles, and four slices shorter than the
+        # 15 ms attack plus two 25 ms cycles, which are filled with a
+        # shorter attack and cycles; stretch-fixes-1)
+        smp.follow * 0.3 + smp.follow(:resample, align: :launch) * 0.3 + st.follow(stretch: { mode: :slice, slices: 4, fill: :stretch, cycle: 0.001 })[1] * 0.3 +
+          smp.follow(stretch: { mode: :slice, slices: 1, fill: :stretch, cycle: 0.004 }) * 0.2 + smp.follow(stretch: { mode: :slice, slices: 4, fill: :stretch }) * 0.2 + smp.follow(stretch: { mode: :slice, slices: 2, fill: :even }) * 0.1 + smp.follow(stretch: { mode: :slice, slices: 2, fill: :decay }) * 0.1 +
+          # (slices drawn out by playing each twice, crossfaded: a share
+          # of the slot per slice, nil for the whole overlap)
+          smp.follow(stretch: { mode: :slice, slices: 4, fill: :repeat, slot_fade: [1/2r, nil, 1/2r, nil], fade_law: :parabola }) * 0.1 +
+          # (a loop slower than the sweep's tempo, played at 0.8x its
+          # length: slices cut short crossfading by their slots, and
+          # slices at their own positions, some cut short and one drawn
+          # out and filled)
+          quick.follow(stretch: { mode: :slice, slices: 4, slot_fade: 2/3r, fade_law: :power })[0] * 0.2 +
+          quick.mono.follow(stretch: { mode: :slice, slices: [0, 750, 1500, 2250], positions: [0, 500, 0.03, 1900], slot_fade: 0.5, fill: :even }) * 0.1 +
+          # (the spectral stretch of the loop as a loop, as players ask
+          # for it, and with its own ends)
+          smp.follow(stretch: { mode: :spectral, window: 256 }) * 0.2 + smp.follow(stretch: { mode: :spectral, window: 256, wrap: false }) * 0.2 +
+          # (and the vocoder running live, both channels on one stream)
+          smp.follow(stretch: { mode: :spectral, window: 256, live: true }) * 0.2 + st.follow(stretch: { mode: :spectral, window: 256, live: true })[0] * 0.2 +
+          # (noise kept noise: random phases for the bins that are no partial, cached and live)
+          smp.follow(stretch: { mode: :spectral, window: 256, noise: 1 }) * 0.2 + st.follow(stretch: { mode: :spectral, window: 256, live: true, noise: 1, transients: 0.5 })[1] * 0.2 +
+          marked.follow(stretch: :slice) * 0.2 + marked.follow(stretch: { mode: :spectral, transients: :markers, window: 256.samples }) * 0.2 + smp.follow(stretch: :none) * 0.2 +
+          marked.follow(stretch: { mode: :spectral, transients: :markers, confirm: true, window: 256.samples }) * 0.2 +
+          shot.follow * 0.2 +
+          # (a marker confirmed by its attack: slices at markers with confirm:, and slices: :transients)
+          marked.follow(stretch: { mode: :slice, confirm: true }) * 0.1 + marked.follow(stretch: { mode: :slice, slices: :transients }) * 0.1
       }],
       # Region lanes (regions-1): overlapping regions with crossfades in
       # ACID's shapes, an offset, a transposed (Catmull-Rom) region off the
@@ -466,17 +511,32 @@ module GraphSweep
         c.sig.flanger(:jet, rate: 9, feedback: c.mod(-0.9, 0.9)).+(c.stereo_sig.flanger(:orbit, mix: c.mod(0, 1), depth: c.mod(0, 1)).mixdown) +
           c.sig.flanger(:tape_flange, delay: c.mod(0.0005, 0.002), range: 0.5) * 0.5 + c.sig.flanger(:sheen, range: 0.5.ms..1.5.ms) +
           c.sig.flanger(2.n16, law: :linear, feedback: 0, interpolation: :cubic, sweep: c.mod(-1, 1, 11)) +
-          c.sig.flanger(:steel, delay: 0.0002, range: c.mod(0, 3))
+          c.sig.flanger(:steel, delay: 0.0002, range: c.mod(0, 3)) +
+          c.sig.flanger(:jet, noise: c.mod(0, 0.1)) + c.stereo_sig.flanger(:orbit, noise: 0.05).mixdown # (hiss in the loop: effects-3)
       }],
       ['rotary presets and a live speed (Rotary: crossover, rotors gliding, two microphones)', ->(c) {
         c.sig.rotary(:whirl).mixdown + c.stereo_sig.rotary(speed: c.mod(0, 1, 3), horn: c.mod(0.5, 1), mix: c.mod(0.2, 1)).mixdown +
-          c.sig.rotary(:chorale, speed: :stop, crossover: 1200).mixdown
+          c.sig.rotary(:chorale, speed: :stop, crossover: 1200).mixdown +
+          c.sig.rotary(speed: 1.n8.lfo.square.with_phase(0.5).at(0..1)).mixdown # (a tempo-synced speed: effects-3)
       }],
       ['chorus with hiss (HissGate)', ->(c) { c.sig.chorus(:juno1, hiss: -60.db) }],
       ['phaser (Phaser) mono, stereo, moving settings', ->(c) {
         st = c.stereo_sig.phaser(:swirl, feedback: c.mod(-0.9, 0.9), mix: c.mod(0.2, 0.8, 3))
         c.sig.phaser + c.sig.phaser(13, stages: 12, center: c.mod(200, 3000, 2), depth: c.mod(0, 1, 5), range: c.mod(1, 6, 0.7)) + c.sig.phaser(:jet, range: 200..6000) +
-          c.sig.phaser(sweep: c.mod(-1, 1, 11), feedback: -0.6, stages: 2) + st.outputs[0] + st.outputs[1]
+          c.sig.phaser(sweep: c.mod(-1, 1, 11), feedback: -0.6, stages: 2) + st.outputs[0] + st.outputs[1] +
+          # (effects-3: a dry low band, the amount macro on a node, barber poles, 32 stages)
+          c.sig.phaser(:ripple, above: 180) + c.stereo_sig.phaser(:swirl, amount: c.mod(0, 1, 2), above: 300).mixdown +
+          c.sig.phaser(:barberpole, rate: 7) + c.stereo_sig.phaser(:jet, direction: :down, rate: 5, spread: 0.3).mixdown +
+          c.sig.phaser(9, stages: 32, feedback: c.mod(-0.9, 0.9)) +
+          # (effects-4: a direction knob through zero, a scaled numeric direction on a tempo rate, :jet without its split)
+          c.sig.phaser(:barberpole, rate: 6, direction: c.mod(-2, 2, 3)) + c.sig.phaser(:barberpole, rate: 1.n8, direction: -1.5) +
+          c.sig.phaser(:jet, above: nil, rate: 4) + c.sig.phaser(:jet, rate: 3, lean: -1) + c.stereo_sig.phaser(:swirl, rate: 2, lean: c.mod(-1, 1, 2)).mixdown +
+          # (effects-4: the self-oscillating loop, a feedback node swept past 1, both signs)
+          c.sig.phaser(4, stages: 8, feedback: c.mod(-1.25, 1.25, 3), oscillate: 1) + c.stereo_sig.phaser(:swirl, feedback: -1.1, oscillate: true).mixdown +
+          # (effects-5: mode, level, and pitch nodes; modes in a list; lanes; a whistling barber pole)
+          c.sig.phaser(5, stages: 8, feedback: -1.1, oscillate: c.mod(0, 3, 2), level: c.mod(0.5, 2, 3), pitch: c.mod(300, 900, 0.7)) +
+          c.stereo_sig.phaser(:swirl, feedback: [-1.1, c.mod(-1.2, -0.8, 2)], oscillate: [0, 2], level: [1, 0.5]).mixdown +
+          c.stereo_sig.phaser(:circle, rate: 3).mixdown + c.sig.phaser(:barberpole, rate: 5, feedback: -1.05, oscillate: 1, pitch: 200..800)
       }],
 
       # Dynamics

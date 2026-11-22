@@ -289,6 +289,27 @@ RSpec.describe(MB::Sound::Form) do
       expect(session.journal.changes.find { |e| e.kind == :stop }.data).to eq({ ring: true })
     end
 
+    # (ui-phase1-1; the maintainer, 2026-11-16: "a `sections` command like `players`")
+    it 'lists its sections with `sections` (the one playing, the next) and names the one playing with `section`' do
+      expect(within { MB::Sound.sections }).to eq({})
+      expect(within { MB::Sound.section }).to be_nil
+      setup_scenes(:intro, :verse, :outro)
+      f = within { MB::Sound.flow(play: false) { intro 2; verse 1.bar, times: 2; outro 1 } }
+      expect(f).to be_a(MB::Sound::Form)
+      expect(within { MB::Sound.sections }).to eq(intro: '2 bars', verse: '1 bar x2', outro: '1 bar') # (loaded, not playing)
+      flow do
+        intro 2
+        verse 1.bar, times: 2
+        outro 1
+      end
+      run(bar + 800)
+      expect(within { MB::Sound.section }).to eq(:intro)
+      expect(within { MB::Sound.sections }).to eq(intro: '2 bars (playing: pass 1, bar 2 of 2)', verse: '1 bar x2 (next, at 3:1, open)', outro: '1 bar')
+      within { MB::Sound.loop! }
+      expect(within { MB::Sound.sections }[:intro]).to end_with(', looping)')
+      expect { within { MB::Sound.section(:bridge) } }.to raise_error(ArgumentError, /needs a length/)
+    end
+
     it 'registers a :section marker for each section' do
       setup_scenes(:intro, :verse)
       flow do
@@ -690,6 +711,131 @@ RSpec.describe(MB::Sound::Form) do
     end
   end
 
+  # (form-start-1, the maintainer, 2026-11-21: "The first pad note seems
+  # to be skipped when I start the tunnel vision demo": a form started
+  # from idle kept time while its first scene's tracks were still
+  # building, so a track built late landed past 1:1 and its clip never
+  # played the notes before its landing)
+  describe 'starting from idle' do
+    # A virtual-clock NullOutput that keeps what it writes (channel 0).
+    def start_output(buffer_size)
+      Class.new(MB::Sound::NullOutput) {
+        def written = @written ||= []
+        def written_frames = written.sum(&:length)
+        def write(data)
+          written << data[0].dup
+          super
+        end
+        def mono = SpecBuffers.join(written)
+      }.new(channels: 1, sleep: :virtual, buffer_size: buffer_size)
+    end
+
+    # Plays a two-bar flow whose scene starts track :fast (a quarter-level
+    # gate, built at once) and :slow (a half-level gate, whose build lets
+    # +build_seconds+ of audio render first, as a slow patch build does on
+    # a live session: nil offline).  Returns the mix (channel 0) and the
+    # journal entries of the two tracks' starts.
+    def start_flow(s, buffer_size:, out: nil, build_seconds: nil, launch: {})
+      MB::Sound::Session.with_context(session: s) do
+        MB::Sound.track(:fast) { |c| c.gate * 0.25 }
+        MB::Sound.track(:slow) { |c|
+          out.consume(build_seconds) if build_seconds
+          c.gate * 0.5
+        }
+        MB::Sound.scene(:a, fast: MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).n4.loop, slow: MB::Sound.seq(MB::Sound::G4).n2.loop)
+        f = s.arrangement.build_form { a 2.bars }
+        if out
+          s.ensure_running # (a render thread already running, as after `demo`)
+          MB::Sound::Internal.wait_audio(s, 0.05)
+          MB::Sound.play_form(f, warm_up: false, **launch)
+          audio_until(s) { s.journal.changes.count { |e| e.kind == :bg && e.status == :landed } == 2 }
+          land = s.journal.changes.select { |e| e.kind == :bg }.map { |e| e.lands.frame }.max
+          audio_until(s) { out.written_frames > land + 2.5 * bar }
+          data = out.mono
+        else
+          MB::Sound.play_form(f, warm_up: false, **launch)
+          data = SpecBuffers.join(Array.new((3.5 * bar / buffer_size).ceil) { s.process_buffer(buffer_size)[0].dup })
+        end
+        [data, s.journal.changes.select { |e| e.kind == :bg }.to_h { |e| [e.subject, e] }]
+      end
+    end
+
+    # Lets session +s+ render until the block is true (at most 10 s of
+    # audio).
+    def audio_until(s)
+      200.times do
+        return if yield
+        MB::Sound::Internal.wait_audio(s, 0.05)
+      end
+      raise 'the session never got there'
+    end
+
+    def start_sessions(n)
+      offline = MB::Sound::Session.new(master_gain: 1, output: MB::Sound::NullOutput.new(channels: 1, sleep: false),
+                                       transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 1, buffer_size: n, realtime: false)
+      out = start_output(n)
+      live = MB::Sound::Session.new(master_gain: 1, output: out, transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 1, buffer_size: n, realtime: true)
+      [offline, live, out]
+    end
+
+    [512, *SlowTier.slow_tier([367, 800])].each do |n|
+      it "lands the first section's tracks together, first notes included, as an offline render plays them (#{n}-frame buffers)" do
+        offline, live, out = start_sessions(n)
+        expected, = start_flow(offline, buffer_size: n)
+        data, starts = start_flow(live, buffer_size: n, out: out, build_seconds: 0.3)
+
+        # (the slow build delays the start; both tracks land on one frame)
+        expect(starts[:fast].lands.frame).to eq(starts[:slow].lands.frame)
+        land = starts[:slow].lands.frame
+        expect(land).to be >= 0.3 * 48000
+        expect(starts[:slow].lands.to_s).to eq('1:1')
+        expect(data[0...land].abs.max).to eq(0)
+        expect(data[land...(land + 2 * bar)].to_a).to eq(expected[0...(2 * bar)].to_a)
+      ensure
+        offline&.close
+        live&.close
+      end
+    end
+
+    it 'lands the group on its launch point when the form starts on a later bar' do
+      offline, live, out = start_sessions(512)
+      live.transport.seek(15/16r)
+      offline.transport.seek(15/16r)
+      expected, = start_flow(offline, buffer_size: 512, launch: { on: :bar })
+      data, starts = start_flow(live, buffer_size: 512, out: out, build_seconds: 0.3, launch: { on: :bar })
+      expect(starts.values.map { |e| e.lands.to_s }).to eq(['2:1', '2:1'])
+      land = starts[:slow].lands.frame
+      off_land = expected.to_a.index { |v| v != 0 }
+      expect(data[land...(land + 2 * bar)].to_a).to eq(expected[off_land...(off_land + 2 * bar)].to_a)
+    ensure
+      offline&.close
+      live&.close
+    end
+
+    it 'keeps time from the start through a silent first section (nothing to hold)' do
+      out = start_output(512)
+      live = MB::Sound::Session.new(master_gain: 1, output: out, transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 1, buffer_size: 512, realtime: true)
+      MB::Sound::Session.with_context(session: live) do
+        MB::Sound.track(:a) { |c| c.gate * 0.5 }
+        MB::Sound.scene(:gap, others: :cut)
+        MB::Sound.scene(:two, a: MB::Sound.seq(MB::Sound::E4).n4.loop)
+        f = live.arrangement.build_form { gap 1.bars; two 8.bars }
+        live.ensure_running
+        MB::Sound::Internal.wait_audio(live, 0.05)
+        t0 = live.frame
+        MB::Sound.play_form(f, warm_up: false)
+        expect(live.form_keeps_time?).to eq(true)
+        audio_until(live) { out.written_frames > t0 + 1.5 * bar }
+        start = live.journal.changes.find { |e| e.kind == :bg && e.subject == :a }
+        expect(start.lands.to_s).to eq('2:1')
+        expect(start.lands.frame - t0).to be_between(bar - 3 * 512, bar) # (bar 2, the timeline moving from the start)
+      end
+    ensure
+      live&.arrangement&.playback&.stop
+      live&.close
+    end
+  end
+
   describe 'fills' do
     it 'plays a section\'s fill in its last bar: the fill scene and fill-marked notes' do
       set.track(:x) { |c| c.notes.number }
@@ -813,9 +959,44 @@ RSpec.describe(MB::Sound::Form) do
       end
       run_bars(3)
       expect(ran).to eq([2r]) # once, at the first b
-      expect(within { MB::Sound.at_marker(:b) { ran << session.now } }).to eq(false) # waits for the next b
+      wait = within { MB::Sound.at_marker(:b) { ran << session.now } }
+      expect(wait.scheduled?).to eq(false) # waits for the next b
+      expect(wait.to_s).to eq('at_marker :b waits for the marker')
       run_bars(4)
       expect(ran).to eq([2r, 6r])
+      expect(wait.scheduled?).to eq(true)
+      expect(wait.to_s).to match(/\Aat_marker :b ran /)
+    end
+
+    it 'returns a handle from at_marker that cancels a waiting or scheduled block; reset_scheduler cancels them too (gen-ux-1)' do
+      setup_scenes(:a, :b)
+      ran = []
+      waiting = within { MB::Sound.at_marker(:b) { ran << [:waiting, session.now] } }
+      cancelled = within { MB::Sound.at_marker(:b) { ran << [:cancelled, session.now] } }
+      expect(cancelled.cancel).to be(cancelled)
+      expect(cancelled.to_s).to eq('at_marker :b cancelled')
+      flow do
+        a 2
+        b 2
+        a 2
+        b 2
+      end
+      run_bars(3)
+      expect(ran).to eq([[:waiting, 2r]])
+      expect(waiting.scheduled?).to eq(true)
+      # Scheduled at the marker, then cancelled before it runs
+      later = within { MB::Sound.at_marker(:vo) { ran << [:later, session.now] } }
+      within { MB::Sound.marker(:vo, at: MB::Sound.bar(5)) }
+      expect(later.scheduled?).to eq(true)
+      later.cancel
+      expect(later.schedule).to be_cancelled
+      # reset_scheduler stops waiting ones
+      gone = within { MB::Sound.at_marker(:hit) { ran << [:hit, session.now] } }
+      expect { within { MB::Sound.reset_scheduler } }.to output(/reset_scheduler/).to_stderr
+      expect(gone).to be_cancelled
+      within { MB::Sound.marker(:hit, at: MB::Sound.bar(6)) }
+      run_bars(4)
+      expect(ran).to eq([[:waiting, 2r]])
     end
 
     it 'keeps markers apart from form names and warns about at_marker typos' do
@@ -849,7 +1030,9 @@ RSpec.describe(MB::Sound::Form) do
       expect(st.state).to eq(:started)
       expect(st.to_s).to start_with('started at 1:1; flow a b')
       expect(within { MB::Sound.go }.state).to eq(:playing) # (already playing: says so)
-      expect(within { MB::Sound.pause }.to_s).to include('renders do not pause')
+      # (pause-tails-1: a console-driven Session pauses; start plays on at once)
+      expect(within { MB::Sound.pause }.state).to eq(:paused)
+      expect(within { MB::Sound.start }.state).to eq(:resumed)
       data = run_bars(3)
       expect(changes(data)).to eq([[0, 48], [bar, 50]])
       expect(set.playback.ended?).to eq(true)
@@ -885,7 +1068,7 @@ RSpec.describe(MB::Sound::Form) do
       flow { a 2; b 2; c 2 }
       run(bar / 2)
       e = nil
-      expect { e = within { MB::Sound.go :c, on: :bar } }.to output(/go :c: the flow seeks to its section :c \(2:1\) and plays on/).to_stdout
+      expect { e = within { MB::Sound.go :c, on: :bar } }.to output(/go :c: at 2:1 the flow seeks ahead to its section :c \(5:1\) and plays on/).to_stdout
       expect(e.kind).to eq(:seek)
       run(bar) # (to bar 2, where the seek lands: the timeline jumps to c at bar 5)
       expect(transport.position).to be_within(1/100r).of(4 + 1/2r)
@@ -909,9 +1092,12 @@ RSpec.describe(MB::Sound::Form) do
       expect(pb.section).to eq(:b2)
       expect(pb.section_for_scene(:b)).to eq(:a2)
       expect(pb.section_for_scene(:a)).to eq(:b2)
+      # (fixes-15: the maintainer's `go :build` said "(101:1)", where the
+      # seek lands, and he read it as where the build is; it went back)
+      expect { within { MB::Sound.go(:b, on: :bar) } }.to output(/go :b: at 5:1 the flow seeks back to its section :a2 \(3:1\) and plays on/).to_stdout
       expect { within { MB::Sound.go(:a, section: :a2) } }.to raise_error(ArgumentError, /sections playing :a: :a, :b, :b2/)
       e = nil
-      expect { e = within { MB::Sound.go(:a, section: :a, on: :beat) } }.to output(/seeks to its section :a .*also :b, :b2: go :a, section: :b/).to_stdout
+      expect { e = within { MB::Sound.go(:a, section: :a, on: :beat) } }.to output(/seeks back to its section :a \(1:1\) .*also :b, :b2: go :a, section: :b/).to_stdout
       expect(e.kind).to eq(:seek)
     end
 
@@ -956,7 +1142,9 @@ RSpec.describe(MB::Sound::Form) do
     end
 
     it 'lists the spellings for anything else' do
-      expect { within { MB::Sound.seek(0) } }.to raise_error(ArgumentError, /seek takes a bar .*12\.bars = bar 13.*got a plain number \(0\)/)
+      expect { within { MB::Sound.seek(-2) } }.to raise_error(ArgumentError, /seek takes a bar .*12\.bars = bar 13.*got a plain number \(-2\)/)
+      # (ux-friction-1: the maintainer's `seek 0` for the start)
+      expect { within { MB::Sound.seek(0) } }.to raise_error(ArgumentError, /seek 0: bars count from 1, so the start is seek 1/)
       expect { within { MB::Sound.seek(-1.seconds) } }.to raise_error(ArgumentError, /seek takes a bar/)
       expect { within { MB::Sound.seek(:drop, 2) } }.to raise_error(ArgumentError, /a beat goes with a bar number/)
     end

@@ -28,6 +28,7 @@ module MB
       # a palette index) and +glyphs+ ({:unicode => {...}, :ascii => {...}}).
       Theme = Data.define(:name, :roles, :glyphs) do
         def inspect = "#<MB::Term::Themes::Theme #{name.inspect} #{roles.length} roles>"
+        def pretty_print(q) = q.text(inspect) # (pp, as Pry prints results: the inspect, not Data's field dump)
       end
 
       # The 16 named colors as palette indexes.

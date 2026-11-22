@@ -80,6 +80,10 @@ module MB
       # The pitch class (semitones above C) of each note letter.
       LETTERS = { 'C' => 0, 'D' => 2, 'E' => 4, 'F' => 5, 'G' => 7, 'A' => 9, 'B' => 11 }.freeze
 
+      # A note name as a scale root (:a, 'F#', :Bb, 'C#3'); no scale name
+      # matches it.
+      ROOT_NAME = /\A([A-Ga-g])(#|s|b|♯|♭)?(-?\d+)?\z/
+
       # The names of every scale (OFFSETS and ALIASES).
       def self.names
         OFFSETS.keys + ALIASES.keys
@@ -125,7 +129,7 @@ module MB
         when Pitch then root.respond_to?(:detuned_number) ? root.detuned_number : Note.new(root).number
         when Symbol, String
           name = root.to_s.strip
-          m = name.match(/\A([A-Ga-g])(#|s|b|♯|♭)?(-?\d+)?\z/)
+          m = name.match(ROOT_NAME)
           raise ArgumentError, "Unknown root note #{root.inspect}" unless m
           pc = LETTERS.fetch(m[1].upcase)
           pc += 1 if ['#', 's', '♯'].include?(m[2])
@@ -164,14 +168,30 @@ module MB
       # 0 is in the octave from C4 up, e.g. A4 for :a).  Only its pitch
       # class matters for #transpose, #snap, and #include?; #note and #[]
       # count degrees from the root note.
-      def initialize(intervals = :chromatic, root: 0, period: 12, name: nil)
+      #
+      # +follow+ (gen-ux-1; Scale#following) marks a scale made without a
+      # root, which generators read again for every cycle on the session
+      # key (Generative::KeyFollow): :root keeps its offsets on the key's
+      # root, :key is the key's own scale.  As a value it is the scale it
+      # was made as (on the key in effect then).
+      def initialize(intervals = :chromatic, root: 0, period: 12, name: nil, follow: nil)
+        raise ArgumentError, "A scale's follow: is nil, :root, or :key (got #{follow.inspect})" unless [nil, :root, :key].include?(follow)
+        @follow = follow
+        @on_keys = nil
         @period = exact(Interval.semitones(period))
         raise ArgumentError, "A scale period must be positive (got #{period.inspect})" unless @period.is_a?(Numeric) && @period > 0
 
         if intervals.is_a?(Symbol) || intervals.is_a?(String)
           key = intervals.to_sym
           key = ALIASES.fetch(key, key)
-          list = OFFSETS.fetch(key) { raise ArgumentError, "Unknown scale #{intervals.inspect} (#{Scale.names.join(', ')})" }
+          list = OFFSETS.fetch(key) {
+            if intervals.to_s.match?(ROOT_NAME)
+              # (ux-friction-1 round 2: the maintainer's `scale(:a, :phrygian)`)
+              mode = (root.is_a?(Symbol) || root.is_a?(String)) && Scale.names.include?(root.to_sym) ? root.to_sym : :minor
+              raise ArgumentError, "Unknown scale #{intervals.inspect}: #{intervals.inspect} is a root note; the mode comes first: scale(#{mode.inspect}, #{intervals.inspect})"
+            end
+            raise ArgumentError, "Unknown scale #{intervals.inspect} (#{Scale.names.join(', ')})"
+          }
           name ||= intervals.to_sym
         elsif intervals.respond_to?(:to_a)
           list = intervals.to_a.map { |i| exact(Interval.semitones(i)) }
@@ -206,6 +226,29 @@ module MB
       # Returns this scale with another root (see #initialize).
       def with_root(root)
         Scale.new(@offsets, root: root, period: @period, name: @name)
+      end
+
+      # How this scale follows the session key in generators (see
+      # #initialize): :root, :key, or nil (a fixed scale).
+      def following(kind = nil)
+        return @follow if kind.nil?
+        Scale.new(@offsets, root: @root, period: @period, name: @name, follow: kind)
+      end
+
+      # True for a scale made without a root (see #following).
+      def follows_key?
+        !@follow.nil?
+      end
+
+      # This following scale on MusicalKey +key+ (a fixed Scale): its own
+      # offsets on the key's root (follow :root), or the key's scale (:key);
+      # a fixed scale as it is.
+      def at_key(key)
+        case @follow
+        when :root then (@on_keys ||= {})[key.root] ||= Scale.new(@offsets, root: key.root, period: @period, name: @name)
+        when :key then key.scale
+        else self
+        end
       end
 
       # Returns the +n+th mode of this scale: the same notes starting from

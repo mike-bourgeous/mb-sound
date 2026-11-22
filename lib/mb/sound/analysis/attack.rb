@@ -57,6 +57,7 @@ module MB
             "clipped at #{format('%.1f', level.decibels)} dBFS: #{runs} flat tops (#{format('%.1f', share * 100)}% of samples) " \
               "#{Analysis.seconds_label(start.to_f)}-#{Analysis.seconds_label(stop.to_f)}"
           end
+          include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
           def inspect = "#<Attack::Clip #{self}>"
         end
 

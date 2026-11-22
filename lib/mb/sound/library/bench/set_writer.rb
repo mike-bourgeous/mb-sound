@@ -53,6 +53,7 @@ module MB
             summary
           end
 
+          include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
           def inspect = to_s
         end
 

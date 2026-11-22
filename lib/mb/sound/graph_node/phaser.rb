@@ -42,18 +42,69 @@ module MB
         # 1 / (1 - 0.95) = +26 dB over the wet level.
         MAX_FEEDBACK = 0.95
 
+        # The self-oscillating loop (effects-4, +oscillate:+; the kernel
+        # MB::Sound::FastFilter.phaser_osc): feedback up to this magnitude
+        # (the loop gain at the oscillating mode; above 1 it oscillates),
+        # the mode bandpass's Q, Newton steps per sample, and the kick that
+        # starts an oscillation from silence (added to the bandpass's first
+        # state while |feedback| > 1 and its states sum under OSC_QUIET; once
+        # per mode until |feedback| falls to 1, since effects-5).
+        OSC_MAX_FEEDBACK = 1.25
+        OSC_Q = 4.0
+        OSC_NEWTON = 3
+        OSC_QUIET = 1e-9
+        OSC_KICK = 1e-3
+
+        # The saturator's level (+level:+, effects-5): the loop limits at
+        # level * tanh(Y / level), so the whistle's level scales with it (1
+        # the effects-4 loop; 14 is the .acd converter's in at 1/14, out x
+        # 14); clamped to OSC_MIN_LEVEL..OSC_MAX_LEVEL in the kernel.
+        OSC_MIN_LEVEL = 1e-6
+        OSC_MAX_LEVEL = 1e4
+
         # The lowest stage frequency in Hz (as in the kernel).
         MIN_HZ = 1.0
 
         # Stage counts (even: odd counts leave the chain at -90 degrees at
-        # DC... and Nyquist, a tilt instead of a notch pair).
-        STAGES = (2..12).step(2).to_a.freeze
+        # DC... and Nyquist, a tilt instead of a notch pair).  Up to 32
+        # since effects-3 (the plug-in in the maintainer's .acd song reads
+        # 32; the kernel takes 64).
+        STAGES = (2..32).step(2).to_a.freeze
+
+        # Named sweep directions for a barber-pole phaser (+direction:+,
+        # also a signed number or node of speed; nil is the LFO's
+        # back-and-forth sweep).
+        DIRECTIONS = %i[up down].freeze
+
+        # Staggered chains of a barber-pole phaser: each sweeps the range
+        # one way in turn, faded in and out by a raised cosine so its jump
+        # back is silent; three a third of a cycle apart sum to a steady
+        # wet level (each window scaled by 2/3).
+        BARBER_CHAINS = 3
+
+        # The fastest barber pole in passes a second (effects-5, rate x
+        # direction; a moving direction is clipped here, a fixed one past it
+        # raises): past audio rate each chain's jump back is a transient
+        # whose timing jitters by a sample, aliasing that grows with the
+        # speed (a 1 kHz sine: -46 dB off the pole's sideband grid at 13.7
+        # passes a second, -42 at 37, -35 at 137, -27 at 370, -14 at 1370).
+        BARBER_MAX_HZ = 40.0
 
         # LFO shapes.
         SHAPES = %i[sine triangle].freeze
 
         # The settings GraphNode#phaser takes (besides a preset name or rate).
-        KEYS = %i[rate depth stages feedback mix dry wet spread center range shape phase sweep].freeze
+        KEYS = %i[rate depth stages feedback mix dry wet spread center range shape phase sweep above amount direction lean oscillate level pitch lanes].freeze
+
+        # Feedback magnitude that amount: 1 reaches (see .amount_settings).
+        AMOUNT_FEEDBACK = 0.9
+
+        # The most phasers in series for +lanes:+ (effects-5).
+        MAX_LANES = 8
+
+        # Seconds over which +lean:+'s feedback moves between the LFO's
+        # halves (a #smooth S-curve at each turn of the sweep).
+        LEAN_SMOOTH = 0.05
 
         preset_family :phaser, kind: :effect, label: 'phaser preset', keys: KEYS,
           about: 'Phasers: sig.phaser(:swirl)',
@@ -62,7 +113,7 @@ module MB
 
         param :rate, 0.5, range: 0.01..20.0, unit: 'Hz', description: 'LFO rate (Hz, or a musical length per cycle: 1.bar)'
         param :depth, 1.0, range: 0.0..1.0, description: 'Share of the range the LFO sweeps (0 holds the center)'
-        param :stages, 4, range: 2..12, description: 'Allpass stages (even): notch pairs = stages / 2'
+        param :stages, 4, range: 2..32, description: 'Allpass stages (even): notch pairs = stages / 2'
         param :feedback, 0.0, range: -MAX_FEEDBACK..MAX_FEEDBACK, description: 'Feedback around the stages (negative inverts; resonant peaks)'
         param :mix, 0.5, range: 0.0..1.0, description: 'Dry/wet crossfade, linear (0.5 deepest notches)'
         param :spread, 0.0, range: 0.0..1.0, unit: 'cycles', description: "Right LFO's phase offset from the left (0.5 opposite); stereo out"
@@ -70,6 +121,14 @@ module MB
         param :range, 4.0, range: 0.0..10.0, unit: 'octaves', description: 'Sweep width in octaves at depth 1'
         param :shape, :sine, range: SHAPES, description: 'LFO shape'
         param :phase, 0.0, range: 0.0..1.0, unit: 'cycles', description: "Left LFO's starting phase"
+        param :above, nil, range: 20.0..2000.0, unit: 'Hz', description: 'Keeps the lows dry below this crossover (Linkwitz-Riley, 4th order)'
+        param :amount, 0.5, range: 0.0..1.0, description: 'Light (0) to extreme (1): depth, mix, feedback, and stages together (0.5 the preset)'
+        param :direction, nil, range: -4.0..4.0, description: 'Barber pole: notches climbing (:up, > 0) or falling (:down, < 0) forever, the size scaling the speed'
+        param :oscillate, nil, range: 0..15, description: 'Self-oscillating loop on one mode (0 the lowest notch with negative feedback; a fraction, a node, or a list); feedback past 1 whistles'
+        param :level, 1.0, range: 0.01..100.0, description: "The oscillating loop's level: the saturator's ceiling, which the whistle's level follows (oscillate:)"
+        param :pitch, nil, range: 20.0..10000.0, unit: 'Hz', description: "The whistle's pitch at the sweep's middle (oscillate:; a Range for its sweep's ends): sets the stages' center from the mode"
+        param :lanes, nil, range: 1..MAX_LANES, description: 'Phasers in series, their LFOs spread evenly around the circle: as many notches falling as rising'
+        param :lean, nil, range: -1.0..1.0, description: 'Feedback on one half of the sweep: 1 only while it rises, -1 only while it falls (a one-way whoosh)'
 
         preset :vintage, rate: 0.5, depth: 1.0, stages: 4, feedback: 0.0, mix: 0.5, spread: 0.0, center: 700.0, range: 4.0, shape: :sine,
           tags: %i[gentle four_stage classic], about: 'A four-stage phaser, two notches swept 175-2800 Hz at 0.5 Hz (the defaults)'
@@ -79,8 +138,12 @@ module MB
           tags: %i[fast shallow subtle], about: 'A fast, shallow shimmer: one octave around 1.2 kHz at 4 Hz'
         preset :deep12, rate: 0.2, depth: 1.0, stages: 12, feedback: 0.4, mix: 0.5, spread: 0.5, center: 800.0, range: 5.0, shape: :sine,
           tags: %i[deep twelve_stage stereo], about: 'Deep twelve-stage phasing (six notches), the sides opposite'
-        preset :jet, rate: 0.08, depth: 1.0, stages: 8, feedback: 0.85, mix: 0.5, spread: 0.0, center: 1000.0, range: 6.0, shape: :triangle,
-          tags: %i[resonant whoosh drums], about: 'A resonant jet whoosh: eight stages, strong feedback, a slow six-octave triangle'
+        preset :jet, rate: 0.08, depth: 1.0, stages: 8, feedback: 0.85, mix: 0.5, spread: 0.0, center: 1000.0, range: 6.0, shape: :triangle, above: 150.0,
+          tags: %i[resonant whoosh drums], about: 'A resonant jet whoosh: eight stages, strong feedback, a slow six-octave triangle, dry below 150 Hz'
+        preset :barberpole, rate: 0.1, depth: 1.0, stages: 8, feedback: 0.6, mix: 0.5, spread: 0.0, center: 1000.0, range: 6.0, shape: :sine, direction: :up,
+          tags: %i[endless rising shepard], about: 'A barber pole: notches climbing forever (direction: :down falls), staggered sweeps crossfaded'
+        preset :circle, rate: 0.1, depth: 1.0, stages: 4, feedback: 0.3, mix: 0.5, spread: 0.0, center: 900.0, range: 5.0, shape: :triangle, lanes: 4,
+          above: 150.0, tags: %i[contrary even circle], about: 'Four four-stage phasers in series, their LFOs a quarter cycle apart: as many notches falling as rising (dry below 150 Hz)'
 
         # The default preset (GraphNode#phaser without a preset name).
         DEFAULT_PRESET = :vintage
@@ -91,13 +154,36 @@ module MB
         # The number of allpass stages.
         attr_reader :stages
 
+        # The self-oscillating loop's mode (an index, a fraction between
+        # two, or a node), or nil (see #initialize).
+        attr_reader :oscillate
+
+        # The self-oscillating loop's saturator level (a Float or a node).
+        attr_reader :level
+
+        # True if +center+ is the oscillating mode's frequency (see
+        # #initialize).
+        attr_reader :tuned
+
         # Creates one channel's phaser on +input+: +stages+ allpasses at
         # center * 2 ** (range / 2 * depth * sweep) Hz, feedback around
         # them, dry * input + wet * chain as the output.  +sweep+ (the LFO,
         # -1..1), +center+ (Hz; a Pitch is its frequency), +range+
         # (octaves), +depth+, +feedback+, +dry+, and +wet+ are numbers or
         # nodes.
-        def initialize(input, sweep: 0, center: 700, range: 4, depth: 1, feedback: 0, dry: 0.5, wet: 0.5, stages: 4, sample_rate: nil)
+        #
+        # +oscillate+ (effects-4): nil for the linear loop above, or a mode
+        # (0 the lowest; see .mode_frequency) for the self-oscillating
+        # loop: the chain's output saturated (+level+ * tanh(Y / +level+))
+        # and bandpassed at that mode in the feedback path, +feedback+ up to
+        # OSC_MAX_FEEDBACK, so above 1 the phaser whistles on that one mode
+        # at a level the saturator sets, with or without input.  Since
+        # effects-5 the mode may be a fraction (the bandpass between two
+        # modes) or a node, +level+ (1 by default) a number or node, and
+        # +tuned+ true makes +center+ the mode's frequency (the whistle's
+        # pitch at the sweep's middle) rather than the stages'.
+        def initialize(input, sweep: 0, center: 700, range: 4, depth: 1, feedback: 0, dry: 0.5, wet: 0.5, stages: 4, oscillate: nil, level: 1,
+            tuned: false, sample_rate: nil)
           raise ArgumentError, "Phaser input must be a graph node (got #{input.inspect})" unless input.respond_to?(:sample)
           stages = GraphNode.build_setting(stages)
           unless stages.is_a?(Integer) && STAGES.include?(stages)
@@ -116,11 +202,25 @@ module MB
           @dry = setting(dry, 'dry')
           @wet = setting(wet, 'wet')
           raise ArgumentError, "Phaser center must be positive (got #{@center})" if @center.is_a?(Float) && !(@center > 0)
-          if @feedback.is_a?(Float) && @feedback.abs > MAX_FEEDBACK
-            raise ArgumentError, "Phaser feedback must be within -#{MAX_FEEDBACK}..#{MAX_FEEDBACK} (got #{@feedback})"
+          oscillate = GraphNode.build_setting(oscillate) unless oscillate.respond_to?(:sample)
+          oscillate = oscillate.get_sampler if oscillate.respond_to?(:sample)
+          unless oscillate.nil? || oscillate.respond_to?(:sample) || (oscillate.is_a?(Numeric) && oscillate.real? && oscillate.finite? && oscillate >= 0)
+            raise ArgumentError, "Phaser oscillate must be nil, a mode from 0, or a node (got #{oscillate.inspect})"
+          end
+          @oscillate = oscillate
+          @mode = oscillate.is_a?(Numeric) ? oscillate.to_f : oscillate
+          @level = setting(level, 'level')
+          raise ArgumentError, "Phaser level must be positive (got #{@level})" if @level.is_a?(Float) && !(@level > 0)
+          raise ArgumentError, 'Phaser level and tuned are for the oscillating loop (oscillate:)' if oscillate.nil? && (@level != 1.0 || tuned)
+          @tuned = tuned ? true : false
+          limit = oscillate ? OSC_MAX_FEEDBACK : MAX_FEEDBACK
+          if @feedback.is_a?(Float) && @feedback.abs > limit
+            raise ArgumentError, "Phaser feedback must be within -#{limit}..#{limit}#{' (oscillate: up to 1.25)' unless oscillate} (got #{@feedback})"
           end
 
-          @state = Numo::DFloat.zeros(stages + 1) # (and the flush grid count; see Filter::SVF::FLUSH_GRID)
+          # (and the flush grid count, see Filter::SVF::FLUSH_GRID; oscillating: the
+          # bandpass's two states and the last output before it, and the kick's mark)
+          @state = Numo::DFloat.zeros(stages + (oscillate ? 5 : 1))
           @out = nil
           @node_type_name = 'Phaser'
         end
@@ -137,8 +237,11 @@ module MB
           fb = @feedback.is_a?(Float) ? @feedback : @feedback.sample(n)
           dg = @dry.is_a?(Float) ? @dry : @dry.sample(n)
           wg = @wet.is_a?(Float) ? @wet : @wet.sample(n)
+          md = @mode.is_a?(Float) || @mode.nil? ? @mode : @mode.sample(n)
+          lv = @level.is_a?(Float) ? @level : @level.sample(n)
           # (no Arrays, no return from a block: every buffer; dropouts-2)
           return nil if ended_input?(sw) || ended_input?(c) || ended_input?(r) || ended_input?(d) || ended_input?(fb) || ended_input?(dg) || ended_input?(wg)
+          return nil if (!md.nil? && ended_input?(md)) || ended_input?(lv)
           n = shortest_length(n, sw)
           n = shortest_length(n, c)
           n = shortest_length(n, r)
@@ -146,6 +249,8 @@ module MB
           n = shortest_length(n, fb)
           n = shortest_length(n, dg)
           n = shortest_length(n, wg)
+          n = shortest_length(n, md) unless md.nil?
+          n = shortest_length(n, lv)
           x = x[0...n] if x.length > n
           sw = trimmed(sw, n)
           c = trimmed(c, n)
@@ -156,14 +261,21 @@ module MB
           wg = trimmed(wg, n)
 
           @out = Numo::SFloat.zeros(n) if @out.nil? || @out.length != n
+          unless md.nil?
+            md = trimmed(md, n)
+            lv = trimmed(lv, n)
+            return Kernels.phaser_osc(@out, x, sw, c, r, d, fb, dg, wg, @state, @sample_rate, md, lv, @tuned)
+          end
           Kernels.phaser(@out, x, sw, c, r, d, fb, dg, wg, @state, @sample_rate)
         end
 
         # Takes over phaser +old+'s stage states (Session::Carry's adoption,
-        # NodeTraits' +carry+ :adopt) when it has as many stages; a rebuild
-        # with another stage count starts from silence.
+        # NodeTraits' +carry+ :adopt) when it has as many stages and the same
+        # loop (linear, or oscillating on any mode: a rebuild on another mode
+        # keeps the whistle going, which then moves to the new mode); a
+        # rebuild with another stage count starts from silence.
         def carry_adopt(old)
-          return unless old.stages == @stages
+          return unless old.stages == @stages && old.oscillate.nil? == @oscillate.nil?
           NodeTraits.swap_ivars(self, old, ADOPT_IVARS)
         end
 
@@ -178,6 +290,8 @@ module MB
           s[:feedback] = @feedback unless @feedback.is_a?(Float)
           s[:dry] = @dry unless @dry.is_a?(Float)
           s[:wet] = @wet unless @wet.is_a?(Float)
+          s[:mode] = @mode if @mode.respond_to?(:sample)
+          s[:level] = @level unless @level.is_a?(Float)
           s
         end
 
@@ -190,7 +304,12 @@ module MB
         def to_s
           c = @center.is_a?(Float) ? "#{MB::M.sigfigs(@center, 4)} Hz" : 'node Hz'
           fb = @feedback.is_a?(Float) ? (@feedback == 0 ? '' : ", feedback #{MB::M.sigfigs(@feedback, 3)}") : ', feedback node'
-          "Phaser #{@stages} stages around #{c}#{fb}"
+          osc = if @oscillate.nil?
+                  ''
+                else
+                  ", oscillating on #{@mode.is_a?(Float) ? "mode #{@oscillate.is_a?(Integer) ? @oscillate : MB::M.sigfigs(@oscillate, 3)}" : 'a mode node'}#{' (center: its pitch)' if @tuned}"
+                end
+          "Phaser #{@stages} stages around #{c}#{fb}#{osc}"
         end
 
         # The notch frequencies in Hz of +stages+ identical allpass stages at
@@ -207,6 +326,40 @@ module MB
             next nil if a >= Math::PI / 2
             Math.atan(t * Math.tan(a)) * sample_rate / Math::PI
           }
+        end
+
+        # The frequency in Hz of oscillation mode +mode+ (0 the lowest) of
+        # +stages+ stages at +frequency+ Hz with feedback of +feedback+'s
+        # sign (#phaser's +:oscillate+): negative feedback oscillates where
+        # the chain's phase is an odd multiple of -180 degrees, the
+        # dry-mixed phaser's notches (tan(pi f / rate) = tan(pi fc / rate)
+        # tan((2 mode + 1) pi / (2 stages)), stages / 2 modes); positive
+        # feedback where it is a whole number of turns, the peaks between
+        # them (tan((mode + 1) pi / stages), stages / 2 - 1 modes).  A mode
+        # past the last is the last.  The kernel's bandpass stops at rate *
+        # Filter::FourPole::MAX_CUTOFF_RATIO.
+        def self.mode_frequency(stages, frequency, mode: 0, feedback: -1, sample_rate: 48000)
+          Math.atan(Math.tan(Math::PI * frequency / sample_rate) * mode_tangent(stages, mode, feedback)) * sample_rate / Math::PI
+        end
+
+        # The phaser frequency (+center:+, or a sweep end) at which mode
+        # +mode+ oscillates at +hz+ (the inverse of .mode_frequency), for
+        # fitting a phaser to a measured whistle: `range: lo..hi` with
+        # lo = .mode_center(stages, 250) and hi = .mode_center(stages, 2110).
+        def self.mode_center(stages, hz, mode: 0, feedback: -1, sample_rate: 48000)
+          Math.atan(Math.tan(Math::PI * hz / sample_rate) / mode_tangent(stages, mode, feedback)) * sample_rate / Math::PI
+        end
+
+        # tan of the chain phase step of mode +mode+ (see .mode_frequency).
+        def self.mode_tangent(stages, mode, feedback)
+          if feedback < 0
+            m = MB::M.min(mode, stages / 2 - 1)
+            Math.tan((2.0 * m + 1.0) * Math::PI / (2.0 * stages))
+          else
+            count = stages / 2 - 1
+            return 1.0 if count <= 0
+            Math.tan((MB::M.min(mode, count - 1) + 1.0) * Math::PI / stages)
+          end
         end
 
         # The steady response (complex, a DComplex) at +freqs+ Hz of a
@@ -314,6 +467,207 @@ module MB
           out
         end
 
+        # The exact Ruby mirror of MB::Sound::FastFilter.phaser_osc (the
+        # self-oscillating loop: see ruby_phaser_osc in ext/mb/sound/
+        # fast_filter and OSC_MAX_FEEDBACK): the same double operations in
+        # the same order, inputs read as float32 values.  +state+ holds
+        # stages + 4 values; +mode+ (the oscillation mode, 0 the lowest; a
+        # fraction between two) and +level+ (the saturator's level) are
+        # signal inputs; +tuned+ makes +center+ the mode's frequency.
+        def self.process_osc_ruby(out, x, sweep, center, range, depth, feedback, dry, wet, state, sample_rate, mode, level, tuned)
+          rate = sample_rate.to_f
+          raise ArgumentError, 'Sample rate must be positive and finite' unless rate > 0 && rate.finite?
+          unless state.is_a?(Numo::DFloat) && state.length >= 7 && state.length <= 69
+            raise ArgumentError, 'The oscillating phaser state must be a contiguous DFloat of 7 to 69 values (one per stage, two bandpass states, the last output, the flush grid count, and the kick mark)'
+          end
+          raise ArgumentError, 'The oscillation mode must be at least 0' if mode.is_a?(Numeric) && !(mode.to_f >= 0)
+
+          n = out.length
+          xs = signal_values(x, n)
+          sws = signal_values(sweep, n)
+          cs = signal_values(center, n)
+          rs = signal_values(range, n)
+          ds = signal_values(depth, n)
+          fs = signal_values(feedback, n)
+          drs = signal_values(dry, n)
+          ws = signal_values(wet, n)
+          ms = signal_values(mode, n)
+          ls = signal_values(level, n)
+
+          stages = state.length - 5
+          st = state.to_a
+          pi_over_rate = Math::PI / rate
+          fc_max = rate * Filter::FourPole::MAX_CUTOFF_RATIO
+          half_ln2 = 0.5 * Math.log(2.0)
+          g2_max = Filter::FourPole.tan(fc_max * pi_over_rate)
+          r2 = 1.0 / OSC_Q
+          flush = Filter::SVF::FLUSH
+
+          s1 = st[stages]
+          s2 = st[stages + 1]
+          yl = st[stages + 2]
+          fk = st[stages + 3]
+          fk = fk >= 0 && fk < Filter::SVF::FLUSH_GRID ? fk.to_i : 0
+          kicked = st[stages + 4]
+          fl = ->(v) { !v.finite? || v.abs < flush ? 0.0 : v }
+
+          last_mode = Float::NAN
+          tan_neg = tan_pos = 1.0
+          last_cw = last_tan = Float::NAN
+          base = 0.0
+          last_fc = Float::NAN
+          g = gg = alpha = beta = a_all = 0.0
+          n.times do |i|
+            k = at(fs, i)
+            if !(k >= -OSC_MAX_FEEDBACK)
+              k = k.nan? ? 0.0 : -OSC_MAX_FEEDBACK
+            elsif k > OSC_MAX_FEEDBACK
+              k = OSC_MAX_FEEDBACK
+            end
+
+            md = at(ms, i)
+            md = 0.0 unless md >= 0.0
+            if md != last_mode
+              last_mode = md
+              tan_neg = mode_tangent_kernel(md, stages, true)
+              tan_pos = mode_tangent_kernel(md, stages, false)
+            end
+            tan_mode = k < 0.0 ? tan_neg : tan_pos
+
+            lv = at(ls, i)
+            if !(lv >= OSC_MIN_LEVEL)
+              lv = lv.nan? ? 1.0 : OSC_MIN_LEVEL
+            elsif lv > OSC_MAX_LEVEL
+              lv = OSC_MAX_LEVEL
+            end
+
+            cw = at(cs, i)
+            if tuned
+              if !(cw >= MIN_HZ)
+                cw = MIN_HZ
+              elsif cw > fc_max
+                cw = fc_max
+              end
+              if cw != last_cw || tan_mode != last_tan
+                last_cw = cw
+                last_tan = tan_mode
+                base = Math.atan(Math.tan(cw * pi_over_rate) / tan_mode) / pi_over_rate
+              end
+              cw = base
+            end
+
+            fc = cw * Math.exp(half_ln2 * at(rs, i) * at(ds, i) * at(sws, i))
+            if !(fc >= MIN_HZ)
+              fc = MIN_HZ
+            elsif fc > fc_max
+              fc = fc_max
+            end
+            if fc != last_fc
+              last_fc = fc
+              g = Filter::FourPole.tan(fc * pi_over_rate)
+              gg = g / (1.0 + g)
+              alpha = 2.0 * gg - 1.0
+              beta = 2.0 * (1.0 - gg)
+              a_all = 1.0
+              stages.times { a_all = a_all * alpha }
+            end
+
+            xd = at(xs, i)
+            xi = xd
+            if k.abs > 1.0
+              mark = md + 0.5
+              mark = (mark.finite? ? mark.floor.to_f : mark) + 1.0
+              if kicked != mark && s1.abs + s2.abs < OSC_QUIET * lv
+                s1 = s1 + OSC_KICK * lv
+                kicked = mark
+              end
+            else
+              kicked = 0.0
+            end
+
+            g2 = g * tan_mode
+            g2 = g2_max if g2 > g2_max
+            dd = 1.0 + r2 * g2 + g2 * g2
+            p = r2 * g2 / dd
+            q0 = r2 * (s1 - g2 * ((r2 + g2) * s1 + s2) / dd)
+
+            b = 0.0
+            j = 0
+            while j < stages
+              b = alpha * b + beta * st[j]
+              j += 1
+            end
+            c1 = a_all * (xi + k * q0) + b
+            c2 = a_all * k * p
+            y = yl
+            OSC_NEWTON.times do
+              t = Math.tanh(y / lv)
+              f = y - c2 * (lv * t) - c1
+              fp = 1.0 - c2 * (1.0 - t * t)
+              y = y - f / fp
+            end
+            sat = lv * Math.tanh(y / lv)
+            w = p * sat + q0
+
+            u = xi + k * w
+            j = 0
+            while j < stages
+              sv = st[j]
+              v = (u - sv) * gg
+              lp = v + sv
+              st[j] = lp + v
+              u = 2.0 * lp - u
+              j += 1
+            end
+
+            hp = (sat - (r2 + g2) * s1 - s2) / dd
+            v1 = g2 * hp
+            bp = v1 + s1
+            s1 = bp + v1
+            v2 = g2 * bp
+            lpo = v2 + s2
+            s2 = lpo + v2
+            yl = u
+
+            out[i] = at(drs, i) * xd + at(ws, i) * u
+
+            fk += 1
+            if fk >= Filter::SVF::FLUSH_GRID
+              fk = 0
+              stages.times { |jj| st[jj] = fl.(st[jj]) }
+              s1 = fl.(s1)
+              s2 = fl.(s2)
+              yl = fl.(yl)
+            end
+          end
+
+          stages.times { |jj| state[jj] = st[jj] }
+          state[stages] = s1
+          state[stages + 1] = s2
+          state[stages + 2] = yl
+          state[stages + 3] = fk.to_f
+          state[stages + 4] = kicked
+          out
+        end
+
+        # The kernel's mode tangent (phaser_mode_tangent in fast_filter.c):
+        # mode +m+ (a Float, clamped to 0 and the last mode) of +stages+
+        # stages for negative (+negative+ true) or positive feedback.
+        def self.mode_tangent_kernel(m, stages, negative)
+          m = 0.0 unless m >= 0.0
+          if negative
+            last = (stages / 2 - 1).to_f
+            m = last unless m < last
+            return Math.tan((2.0 * m + 1.0) * Math::PI / (2.0 * stages))
+          end
+          count = stages / 2 - 1
+          return 1.0 if count <= 0
+          last = (count - 1).to_f
+          m = last unless m < last
+          Math.tan((m + 1.0) * Math::PI / stages)
+        end
+        private_class_method :mode_tangent_kernel
+
         # Value +i+ of a signal read by .signal_values.
         def self.at(values, i)
           values.is_a?(Array) ? values[i] : values
@@ -359,6 +713,7 @@ module MB
       end
 
       Kernels.register :phaser, c: FastFilter.method(:phaser), ruby: Phaser.method(:process_ruby)
+      Kernels.register :phaser_osc, c: FastFilter.method(:phaser_osc), ruby: Phaser.method(:process_osc_ruby)
 
       class Phaser
         # Builds a phaser on +input+ (see PhaserMethods#phaser): +rate+ is a
@@ -379,17 +734,45 @@ module MB
             raise ArgumentError, 'phaser: give the rate once (positional or rate:)' if !rate.nil? && options.key?(:rate)
             options = options.merge(rate: rate) unless rate.nil?
           end
-          s = { dry: 1, wet: 1, phase: 0.0, sweep: nil }.merge(preset_settings(preset))
-          s.delete(:center) if options[:range].is_a?(Range)
-          s.merge!(options)
+          preset_s = preset_settings(preset)
 
-          center, octaves = sweep_band(s[:center], s[:range], options.key?(:center))
+          # (given, or the preset's: :jet keeps its lows dry since effects-4;
+          # above: nil turns that off)
+          above = options.key?(:above) ? options[:above] : preset_s[:above]
+          if above
+            # (the lows split off and kept dry; the phaser on the highs)
+            return crossover(input, above, preset, options.merge(above: nil))
+          end
+
+          s = { dry: 1, wet: 1, phase: 0.0, sweep: nil, above: nil, amount: nil, direction: nil, lean: nil, oscillate: nil, level: nil, pitch: nil,
+            lanes: nil }.merge(preset_s)
+          s.delete(:center) if options[:range].is_a?(Range) || options.key?(:pitch)
+          s.merge!(options)
+          amount_settings(s) unless s[:amount].nil?
+
           shape = s[:shape]
           raise ArgumentError, "phaser shape: is #{SHAPES.map(&:inspect).join(' or ')} (got #{shape.inspect})" unless SHAPES.include?(shape)
-          feedback = s[:feedback]
-          if feedback.is_a?(Numeric) && !(feedback.real? && feedback.abs <= MAX_FEEDBACK)
-            raise ArgumentError, "phaser feedback: is within -#{MAX_FEEDBACK}..#{MAX_FEEDBACK} (got #{feedback.inspect})"
+          stages = GraphNode.build_setting(s[:stages])
+          modes = oscillate_modes(s[:oscillate])
+          oscillate = !modes.nil?
+          multi = s[:oscillate].is_a?(Array)
+          count = modes ? modes.length : 1
+          feedbacks = per_mode(s[:feedback], count, 'feedback')
+          limit = oscillate ? OSC_MAX_FEEDBACK : MAX_FEEDBACK
+          feedbacks.each_with_index do |fb, i|
+            if fb.is_a?(Numeric) && !(fb.real? && fb.abs <= limit)
+              raise ArgumentError, "phaser feedback: is within -#{limit}..#{limit}#{' (past +-1 with oscillate:)' unless oscillate} (got #{fb.inspect})"
+            end
+            check_mode(stages, modes[i], fb) if oscillate
           end
+          raise ArgumentError, 'phaser level: is the oscillating loop\'s level; give oscillate: too' if !oscillate && !s[:level].nil?
+          raise ArgumentError, 'phaser pitch: tunes the oscillating loop; give oscillate: too' if !oscillate && !s[:pitch].nil?
+          levels = per_mode(s[:level].nil? ? 1 : s[:level], count, 'level').map { |v| osc_level(v) }
+          tunings = per_mode(s[:pitch], count, 'pitch').each_with_index.map { |pitch, i|
+            next sweep_band(s[:center], s[:range], options.key?(:center)) + [false] if pitch.nil?
+            pitch_band(pitch, s[:range], stages, modes[i], feedbacks[i], input.sample_rate, options.key?(:center))
+          }
+          raise ArgumentError, 'phaser: give oscillate: one mode for each feedback:, level:, or pitch: in a list' if !multi && [s[:feedback], s[:level], s[:pitch]].any?(Array)
 
           mix = s[:mix]
           mix = BlendMethods.amount(mix) unless mix.nil?
@@ -412,18 +795,348 @@ module MB
             raise ArgumentError, 'phaser: a sweep: node drives both sides alike; spread: needs the built-in LFO'
           end
           raise ArgumentError, "phaser sweep: is a node (-1..1; got #{sweep.inspect})" if sweep && !sweep.respond_to?(:sample)
+          direction = barber_speed(s[:direction])
+          lanes = GraphNode.build_setting(s[:lanes])
+          unless lanes.nil? || (lanes.is_a?(Integer) && lanes >= 1 && lanes <= MAX_LANES)
+            raise ArgumentError, "phaser lanes: is a whole number of phasers in series from 1 to #{MAX_LANES} (got #{lanes.inspect})"
+          end
+          raise ArgumentError, 'phaser lanes: spread their own LFOs around the circle; give it or sweep:, not both' if lanes && sweep
+          raise ArgumentError, 'phaser lanes: are for back-and-forth sweeps; a barber pole (direction:) already staggers its sweeps' if lanes && !direction.nil?
+          lean = s[:lean]
+          lean = GraphNode.build_setting(lean) unless lean.respond_to?(:sample)
+          lean = nil if lean.is_a?(Numeric) && lean == 0
+          unless lean.nil? || lean.respond_to?(:sample) || (lean.is_a?(Numeric) && lean.real? && lean.abs <= 1)
+            raise ArgumentError, "phaser lean: is from -1 (feedback only while the sweep falls) to 1 (only while it rises), or a node (got #{lean.inspect})"
+          end
+          raise ArgumentError, 'phaser lean: follows the built-in LFO; give it or sweep:, not both' if lean && sweep
+          raise ArgumentError, 'phaser lean: is for a back-and-forth sweep; a barber pole (direction:) only moves one way' if lean && !direction.nil?
+          raise ArgumentError, 'phaser: a barber pole (direction:) oscillates on one mode; give oscillate: one mode' if multi && !direction.nil?
+          # (a node's |lean| once for both sides: a .tee of the node per side
+          # trips the shared-buffer check, see design/notes/phaser.md)
+          lean = [lean, lean.aabs] if lean.respond_to?(:sample)
+          raise ArgumentError, 'phaser: direction: makes its own sweeps; give it or sweep:, not both' if !direction.nil? && sweep
 
           l, r = StereoDelayMethods.sides(input, 'phaser')
           stereo = !l.equal?(r) || input.is_a?(Channels) && input.channel_count == 2 || spread != 0
           sample_rate = input.sample_rate
+          chain_wet = multi ? StereoDelayMethods.level_product(wet, 1.0 / count) : wet
+          # one chain: mode i of the modes (or the linear loop) on +side+, its LFO at phase +ph+
+          chain = ->(side, ph, i, dry_gain, wet_gain) {
+            center, octaves, tuned = tunings[i]
+            sw = sweep || ModulationLfo.tone(s[:rate], shape: shape, phase: ph, sample_rate: sample_rate, what: 'phaser')
+            fb = lean ? lean_feedback(feedbacks[i], lean, s[:rate], ph, sample_rate) : feedbacks[i]
+            new(side, sweep: sw, center: center, range: octaves, depth: s[:depth], feedback: fb, dry: dry_gain, wet: wet_gain,
+              stages: stages, oscillate: modes && modes[i], level: levels[i], tuned: tuned, sample_rate: sample_rate)
+          }
+          # one phaser (one lane): a chain, or a chain per mode with the dry signal once
+          unit = ->(side, ph) {
+            next chain.(side, ph, 0, dry, wet) unless multi
+            side = side.get_sampler
+            chains = Array.new(count) { |i| chain.(side, ph, i, 0, chain_wet) }
+            d = Chorus.scale(side, dry)
+            Mixer.new(d ? [d, *chains] : chains, sample_rate: sample_rate, stop_early: false)
+          }
           make = ->(side, offset) {
-            sw = sweep || ModulationLfo.tone(s[:rate], shape: shape, phase: phase + offset, sample_rate: sample_rate, what: 'phaser')
-            new(side, sweep: sw, center: center, range: octaves, depth: s[:depth], feedback: feedback, dry: dry, wet: wet,
-              stages: s[:stages], sample_rate: sample_rate)
+            unless direction.nil?
+              center, octaves, tuned = tunings[0]
+              next barber(side, s, direction, phase + offset, center, octaves, feedbacks[0], dry, wet, sample_rate,
+                oscillate: modes && modes[0], level: levels[0], tuned: tuned)
+            end
+            next unit.(side, phase + offset) unless lanes
+            # (lanes in series, their LFOs spread evenly around the circle)
+            x = side
+            lanes.times { |i| x = unit.(x, phase + offset + i.to_f / lanes) }
+            x
           }
 
           return make.(l, 0.0) unless stereo
           Channels.new([make.(l, 0.0), make.(r, spread.to_f)])
+        end
+
+        # The modes for the +:oscillate+ setting: nil (the linear loop), or
+        # an Array of modes (an index, a fraction, or a node each; true is
+        # mode 0) for one mode or a list of them.
+        def self.oscillate_modes(value)
+          list = value.is_a?(Array) ? value : [value]
+          raise ArgumentError, 'phaser oscillate: lists at least one mode' if list.empty?
+          modes = list.map { |m|
+            m = GraphNode.build_setting(m) unless m.respond_to?(:sample)
+            m = 0 if m == true
+            m = nil if m == false
+            if m.nil?
+              next nil unless value.is_a?(Array)
+              raise ArgumentError, 'phaser oscillate: lists modes (indexes, fractions, or nodes), not nil or false'
+            end
+            unless m.respond_to?(:sample) || (m.is_a?(Numeric) && m.real? && m.finite? && m >= 0)
+              raise ArgumentError, "phaser oscillate: is true (mode 0), a mode from 0 (0 the lowest; a fraction between two), a node, or a list of them (got #{m.inspect})"
+            end
+            m
+          }
+          modes == [nil] ? nil : modes
+        end
+
+        # +value+ for each of +count+ modes: an Array of +count+ settings,
+        # or one setting for all.
+        def self.per_mode(value, count, name)
+          return Array.new(count, value) unless value.is_a?(Array)
+          raise ArgumentError, "phaser #{name}: lists one setting per oscillate: mode (#{count}; got #{value.length})" unless value.length == count
+          value
+        end
+
+        # Raises if mode +mode+ (a number) doesn't exist for +stages+ with
+        # +feedback+'s sign (a number): negative feedback has stages / 2
+        # modes, positive stages / 2 - 1 (none at 2 stages).
+        def self.check_mode(stages, mode, feedback)
+          return unless stages.is_a?(Integer) && mode.is_a?(Numeric) && feedback.is_a?(Numeric) && feedback != 0
+          count = feedback < 0 ? stages / 2 : stages / 2 - 1
+          if count <= 0
+            raise ArgumentError, "phaser: #{stages} stages have no mode for positive feedback (a whole turn of phase); use negative feedback or 4 or more stages"
+          end
+          return if mode <= count - 1
+          raise ArgumentError, "phaser oscillate: #{stages} stages have #{count} mode#{'s' if count > 1} with #{feedback < 0 ? 'negative' : 'positive'} feedback " \
+            "(0 to #{count - 1}; got #{mode.inspect})"
+        end
+
+        # The saturator level for +:level+: Decibels, a positive number, or
+        # a node.
+        def self.osc_level(value)
+          value = Decibels.gain_of(value, 'phaser level', above_one: true) if value.is_a?(Decibels)
+          value = GraphNode.build_setting(value) unless value.respond_to?(:sample)
+          return value if value.respond_to?(:sample) || (value.is_a?(Numeric) && value.real? && value > 0 && value.finite?)
+          raise ArgumentError, "phaser level: is the oscillating loop's level, a positive number, Decibels, or a node (got #{value.inspect})"
+        end
+
+        # [center, octaves, tuned] for a +:pitch:+ setting: the whistle's
+        # frequency (Hz, a Pitch, or a node of Hz; the kernel then finds the
+        # stages' center from the mode) with +range+ octaves, or a Range of
+        # the whistle's frequencies (its sweep's ends: converted here for
+        # mode +mode+, a number, and +feedback+'s sign, negative for a node).
+        def self.pitch_band(pitch, range, stages, mode, feedback, sample_rate, center_given)
+          raise ArgumentError, 'phaser: give pitch: (the whistle\'s frequency) or center: (the stages\'), not both' if center_given
+          if pitch.is_a?(Range)
+            raise ArgumentError, 'phaser pitch: lo..hi sets the sweep; give range: in octaves with a single pitch:' if range.is_a?(Range)
+            unless mode.is_a?(Numeric) && stages.is_a?(Integer)
+              raise ArgumentError, 'phaser pitch: lo..hi needs a numeric oscillate: mode and stages: (it is converted where the phaser is built)'
+            end
+            lo, hi = [pitch.begin, pitch.end].map { |f| f.is_a?(MB::Sound::Pitch) ? f.oscillator_frequency : f }
+            unless lo.is_a?(Numeric) && hi.is_a?(Numeric) && lo > 0 && hi >= lo && hi < sample_rate / 2
+              raise ArgumentError, "phaser pitch: of frequencies goes up from a positive frequency below Nyquist (got #{pitch.inspect})"
+            end
+            sign = feedback.is_a?(Numeric) && feedback > 0 ? 1 : -1
+            f_lo = mode_center(stages, lo.to_f, mode: mode, feedback: sign, sample_rate: sample_rate)
+            f_hi = mode_center(stages, hi.to_f, mode: mode, feedback: sign, sample_rate: sample_rate)
+            mid = mode_frequency(stages, Math.sqrt(f_lo * f_hi), mode: mode, feedback: sign, sample_rate: sample_rate)
+            return [mid, Math.log2(f_hi / f_lo), true]
+          end
+
+          raise ArgumentError, 'phaser pitch: with range: lo..hi; give the whistle\'s ends as pitch: lo..hi' if range.is_a?(Range)
+          pitch = GraphNode.build_setting(pitch) unless pitch.respond_to?(:sample)
+          pitch = pitch.oscillator_frequency if pitch.is_a?(MB::Sound::Pitch)
+          unless pitch.respond_to?(:sample) || (pitch.is_a?(Numeric) && pitch.real? && pitch > 0)
+            raise ArgumentError, "phaser pitch: is the whistle's frequency (Hz, a Pitch, or a node) or a Range of them (got #{pitch.inspect})"
+          end
+          _, octaves = sweep_band(1000.0, range, false)
+          [pitch, octaves, true]
+        end
+
+        # A barber-pole phaser on +side+ at signed speed +direction+ (a
+        # number or a node; see .barber_speed): BARBER_CHAINS phasers, each
+        # swept once across the range per LFO cycle by a ramp (exact: an
+        # aliased saw, below audio rates), a third of a cycle apart, each
+        # chain's wet faded by a raised cosine that is silent where its ramp
+        # jumps back, so the notches seem to climb (or fall) forever, like a
+        # Shepard-Risset tone.  The windows sum to 1 (2/3 each at three
+        # chains); the dry signal once.  Ramps and windows read one phase
+        # per chain, so a speed node that changes sign turns the notches
+        # around where they are (no jump, no crossfade needed), and 0 holds
+        # them still.
+        def self.barber(side, s, direction, phase, center, octaves, feedback, dry, wet, sample_rate, oscillate: nil, level: 1, tuned: false)
+          side = side.get_sampler
+          n = BARBER_CHAINS
+          numeric = direction.is_a?(Numeric)
+          rate = barber_rate(s[:rate], numeric ? direction.abs : direction, sample_rate)
+          chains = Array.new(n) { |i|
+            offset = phase + i / n.to_f
+            ramp = ModulationLfo.rate_tone(rate, sample_rate: sample_rate, what: 'phaser').asaw
+            ramp.with_phase(offset % 1) unless offset % 1 == 0
+            # (the ramp is at its middle at phase 0 and jumps at 0.5; the
+            # window peaks at its middle and is 0 at the jump)
+            win = ModulationLfo.tone(rate, shape: :sine, phase: offset + 0.25, sample_rate: sample_rate, what: 'phaser')
+            win = win * (1.0 / n) + (1.0 / n)
+            # (a node speed runs the phase itself backward when negative)
+            sw = numeric && direction < 0 ? ramp * -1 : ramp
+            new(side, sweep: sw, center: center, range: octaves, depth: s[:depth], feedback: feedback, dry: 0, wet: Chorus.scale(win, wet) || win * 0,
+              stages: s[:stages], oscillate: oscillate, level: level, tuned: tuned, sample_rate: sample_rate)
+          }
+          d = Chorus.scale(side, dry)
+          Mixer.new(d ? [d, *chains] : chains, sample_rate: sample_rate, stop_early: false)
+        end
+
+        # Feedback +feedback+ (a number or node) leaning to one half of the
+        # LFO's cycle by +lean+ (-1..1 or a node; effects-4, the
+        # maintainer's hypothesis "setting the feedback high on the
+        # descending half of the LFO phase and low on the ascending phase
+        # ... will give exactly the descending-only or ascending-only
+        # sound"): the full feedback while the sweep moves the leaning way
+        # (rising for a positive lean), feedback x (1 - |lean|) while it
+        # moves back, moving between them over LEAN_SMOOTH at each turn.
+        # The LFO (sine or triangle, middle rising at phase 0) rises from
+        # phase -0.25 to 0.25: a square a quarter cycle ahead at +rate+
+        # and +phase+ marks it (+1 rising), locked to the LFO.
+        def self.lean_feedback(feedback, lean, rate, phase, sample_rate)
+          return feedback if feedback.is_a?(Numeric) && feedback == 0
+          rising = ModulationLfo.rate_tone(rate, sample_rate: sample_rate, what: 'phaser').asquare
+          rising.with_phase((phase + 0.25) % 1) unless (phase + 0.25) % 1 == 0
+          rising = rising.smooth(LEAN_SMOOTH)
+          # scale = 1 - (|lean| - lean x rising) / 2; a node lean comes as
+          # [lean, |lean|] (built once by .build for both sides, each reader
+          # taking its own branch)
+          scale = if lean.is_a?(Numeric)
+                    rising * (0.5 * lean) + (1 - 0.5 * lean.abs)
+                  else
+                    lean, lean_abs = lean.is_a?(Array) ? lean : [lean, lean.aabs]
+                    lean_abs * -0.5 + lean * rising * 0.5 + 1
+                  end
+          feedback.is_a?(Numeric) ? scale * feedback.to_f : scale * feedback
+        end
+
+        # The barber pole's signed speed for the +direction:+ setting: nil
+        # (no barber pole), :up (1.0), :down (-1.0), a number, or a node.
+        # The sign is the way the notches move, the magnitude scales the
+        # sweep rate (1 the preset's rate, 2 twice as fast, 0 held still).
+        def self.barber_speed(direction)
+          direction = GraphNode.build_setting(direction) unless direction.respond_to?(:sample)
+          case direction
+          when nil then nil
+          when :up then 1.0
+          when :down then -1.0
+          when Numeric
+            unless direction.real? && direction.finite?
+              raise ArgumentError, "phaser direction: is a finite number (got #{direction.inspect})"
+            end
+            direction.to_f
+          else
+            return direction if direction.respond_to?(:sample)
+            raise ArgumentError, "phaser direction: is #{DIRECTIONS.map(&:inspect).join(' or ')}, a number (its sign the way the notches " \
+              "move, its size the speed; 1 the preset's rate), or a node, for a barber pole; or nil (got #{direction.inspect})"
+          end
+        end
+
+        # The rate of a barber pole's ramps for the phaser +rate+ setting at
+        # +speed+: a number at least 0 (the rate itself at 1; a musical
+        # length shortened, so it stays locked to the timeline) or a node
+        # (signed: a node of Hz, the rate times the speed, its phase free of
+        # the timeline).
+        def self.barber_rate(rate, speed, sample_rate)
+          rate = GraphNode.build_setting(rate) unless rate.respond_to?(:sample)
+          if speed.is_a?(Numeric)
+            return 0.0 if speed == 0
+            if rate.is_a?(Sequence::Duration)
+              d = speed == 1 ? rate : rate / speed
+              barber_hz_check(d.hz.oscillator_frequency)
+              return d
+            end
+          end
+
+          hz = case rate
+               when Sequence::Duration, Sequence::NodeDuration then rate.hz.oscillator_frequency
+               when Pitch then rate.oscillator_frequency
+               when Numeric then rate.to_f
+               when Length then 1.0 / rate.to_seconds(sample_rate: sample_rate)
+               else
+                 raise ArgumentError, "phaser rate: is Hz, a Pitch, a musical length, a Length, or a node of Hz (got #{rate.inspect})" unless rate.respond_to?(:sample)
+                 rate
+               end
+          if hz.is_a?(Numeric) && speed.is_a?(Numeric)
+            barber_hz_check(hz * speed)
+            return speed == 1 ? rate : hz * speed
+          end
+          # (a moving speed or rate: limited to BARBER_MAX_HZ passes a second)
+          node = if hz.is_a?(Numeric)
+                   speed * hz
+                 elsif speed.is_a?(Numeric) && speed == 1
+                   hz
+                 else
+                   hz * speed
+                 end
+          node.aclip(-BARBER_MAX_HZ, BARBER_MAX_HZ)
+        end
+
+        # Raises if a barber pole's +hz+ (passes a second) is past
+        # BARBER_MAX_HZ.
+        def self.barber_hz_check(hz)
+          return unless hz.is_a?(Numeric) && hz.abs > BARBER_MAX_HZ
+          raise ArgumentError, "phaser: a barber pole makes at most #{BARBER_MAX_HZ} passes a second (rate x direction; got #{MB::M.sigfigs(hz.abs, 4)})"
+        end
+
+        # Phaser +rate+ (a preset name or rate, as for .build) with +options+ on the highs of +input+ above
+        # +frequency+ (Hz or a Pitch), the lows kept dry: a 4th-order
+        # Linkwitz-Riley split (#bands), so the two sum flat (an allpass) where
+        # the phaser leaves the highs alone.  A mono input with spread comes
+        # back stereo, the low band in both sides.
+        def self.crossover(input, frequency, rate, options)
+          frequency = GraphNode.build_setting(frequency)
+          frequency = frequency.oscillator_frequency if frequency.is_a?(MB::Sound::Pitch)
+          unless frequency.is_a?(Numeric) && frequency.real? && frequency > 0 && frequency < input.sample_rate / 2
+            raise ArgumentError, "phaser above: is a crossover frequency in Hz below Nyquist (got #{frequency.inspect})"
+          end
+          lo, hi = input.bands(frequency.to_f)
+          wet = build(hi, rate, **options)
+          lows = lo.outputs
+          outs = wet.outputs.each_with_index.map { |w, i|
+            Mixer.new([lows.length == 1 ? lows[0] : lows[i], w], sample_rate: input.sample_rate, stop_early: false)
+          }
+          outs.length == 1 ? outs[0] : Channels.new(outs)
+        end
+
+        # Applies the +:amount+ macro to settings +s+ (in place): 0.5 leaves
+        # them as they are; toward 0 depth falls to a quarter, the mix to
+        # 0.3 of itself, and feedback to 0; toward 1 depth rises to 1, the mix
+        # to 0.5 (the deepest notches), feedback to +-AMOUNT_FEEDBACK (the
+        # preset's sign), and a numeric amount doubles the stages (up to
+        # 32; halves them toward 0, at least 2).  A node amount moves depth,
+        # mix, and feedback live (stages stay).  Settings given as nodes
+        # stay as given.
+        def self.amount_settings(s)
+          a = GraphNode.build_setting(s[:amount])
+          if a.is_a?(Numeric)
+            raise ArgumentError, "phaser amount: is from 0 (light) to 1 (extreme; got #{a.inspect})" unless a.real? && a >= 0 && a <= 1
+            a = a.to_f
+            t = MB::M.min(a * 2, 1.0)
+            u = MB::M.max(a * 2 - 1, 0.0)
+            st = GraphNode.build_setting(s[:stages])
+            if st.is_a?(Integer)
+              scaled = st * 2.0**(u - (1 - t))
+              s[:stages] = ((scaled / 2).round * 2).clamp(STAGES.first, STAGES.last)
+            end
+          elsif a.respond_to?(:sample)
+            a = a.get_sampler
+            a2 = a.aclip(0, 1).tee(2)
+            t = (a2[0] * 2).aclip(0, 1)
+            u = (a2[1] * 2 - 1).aclip(0, 1)
+          else
+            raise ArgumentError, "phaser amount: is a number from 0 (light) to 1 (extreme) or a node (got #{a.inspect})"
+          end
+
+          ts = t.respond_to?(:sample) ? t.tee(3) : [t, t, t]
+          us = u.respond_to?(:sample) ? u.tee(3) : [u, u, u]
+          # (numbers: v (1 - k (1 - t)) + (top - v) u, exactly v at 0.5)
+          depth = GraphNode.build_setting(s[:depth])
+          s[:depth] = amount_curve(depth, 0.75, 1.0, ts[0], us[0]) if depth.is_a?(Numeric)
+          mix = GraphNode.build_setting(s[:mix])
+          s[:mix] = amount_curve(mix, 0.7, MB::M.max(mix, 0.5), ts[1], us[1]) if mix.is_a?(Numeric)
+          fb = GraphNode.build_setting(s[:feedback])
+          s[:feedback] = amount_curve(fb, 1.0, (fb < 0 ? -1 : 1) * AMOUNT_FEEDBACK, ts[2], us[2]) if fb.is_a?(Numeric)
+          s
+        end
+
+        # Setting +v+ under the amount macro: v (1 - +k+ (1 - t)) on the way
+        # up to 0.5 (t 0..1), then on toward +top+ (u 0..1); t and u numbers
+        # or nodes.
+        def self.amount_curve(v, k, top, t, u)
+          v = v.to_f
+          return v * (1 - k * (1 - t)) + (top - v) * u if t.is_a?(Numeric)
+          t * (k * v) + (v * (1 - k)) + u * (top - v)
         end
 
         # [center Hz, octaves] for the +center+ and +range+ settings: a

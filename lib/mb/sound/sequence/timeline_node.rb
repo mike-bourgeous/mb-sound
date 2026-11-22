@@ -49,6 +49,34 @@ module MB
           !!@timeline_paused
         end
 
+        # How this node holds while the transport is paused
+        # (Session::TransportPause; pause-tails-1, 2026-11-21): :native
+        # for nodes that hold their place themselves through
+        # #timeline_hold (clip sources, loop and region players, time
+        # limits), :runs for nodes that keep running in wall time
+        # (TempoNode: synced LFO rates and delay times; re-placed on resume
+        # only with a resync), and :restart (the default) for nodes that
+        # are re-placed at the held position by #start_at on resume
+        # (timeline-following MIDI transforms).
+        def timeline_hold_mode
+          :restart
+        end
+
+        # Holds (+on+ true) or releases this node's place on the timeline
+        # while the transport is paused, fading over +fade_frames+ where
+        # the node makes sound (see #timeline_hold_mode).  The Session
+        # calls it with every span while paused (so holding is idempotent)
+        # and once on resume.  Does nothing unless the node holds natively.
+        # Returns self.
+        def timeline_hold(on, fade_frames: 0)
+          self
+        end
+
+        # True while this node holds its place (see #timeline_hold).
+        def timeline_held?
+          false
+        end
+
         # The Transport this node follows for tempo and position.
         def transport
           @transport ||= Sequence.transport

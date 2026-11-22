@@ -192,12 +192,15 @@ module MB
 
           # The results for the state's head and find, kept KEEP seconds.
           def results(state)
-            key = [head(state), state[:query].to_s, UI::Picker.index.__id__]
+            # (compared in place: drawing asks several times a frame)
+            h = head(state)
+            q = state[:query].to_s
+            idx = UI::Picker.index.__id__
             now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
             r = state[:results]
-            return r[2] if r && r[0] == key && now - r[1] < UI::Picker::KEEP
-            list = UI::Picker.results(head(state), state[:query]).freeze
-            state[:results] = [key, now, list]
+            return r[2] if r && r[0] == h && r[3] == q && r[4] == idx && now - r[1] < UI::Picker::KEEP
+            list = UI::Picker.results(h, state[:query]).freeze
+            state[:results] = [h, now, list, q.frozen? ? q : q.dup.freeze, idx]
             list
           end
 
@@ -207,14 +210,23 @@ module MB
             list.empty? ? nil : list[state[:pick].to_i.clamp(0, list.length - 1)]
           end
 
+          # #target without one.
+          NO_TARGET = [nil, false].freeze
+
           # [track name, patch track?] the picker loads into: the inspected
           # track (the inspector's, which t T move), or [nil, false].
           def target(state)
             s = state[:snap]
             t = s&.inspector&.track
-            return [nil, false] unless t
+            return NO_TARGET unless t
+            # (kept while the poll's tracks and the track stay: the status
+            # line asks every frame)
+            m = state[:target]
+            return m[2] if m && m[0].equal?(s.tracks) && m[1].equal?(t)
             tr = s.tracks.find { |x| x.name == t }
-            [t, tr && tr.clip != 'graph' ? true : false]
+            pair = [t, tr && tr.clip != 'graph' ? true : false].freeze
+            state[:target] = [s.tracks, t, pair]
+            pair
           end
 
           # Enter's Action for the picked entry, or nil (kept while the
@@ -222,17 +234,17 @@ module MB
           def action(state)
             e = picked(state) or return nil
             t, patch = target(state)
-            key = [e.__id__, t, patch]
             a = state[:action]
-            return a[1] if a && a[0] == key
+            return a[1] if a && a[0].equal?(e) && a[2] == t && a[3] == patch
             act = UI::Picker.action(e, track: t, patch: patch)
-            state[:action] = [key, act]
+            state[:action] = [e, act, t, patch]
             act
           end
 
           def enter_hint(state)
             a = action(state) or return nil
-            a.kind == :paste ? "#{a.note}" : a.note
+            # (the note itself when a String: "#{note}" made one a frame)
+            a.kind == :paste && !a.note.is_a?(String) ? "#{a.note}" : a.note
           end
 
           def draw_body(c, s, state)
@@ -243,22 +255,34 @@ module MB
             list = results(state)
             detail = c.h >= 12 ? 4 : 0
             rows = c.h - 2 - detail
+            # (a longer list gives its last row to "+N more", never over an
+            # entry's text; sd-ux-fixes-1, the review's #23: "dn +48")
+            rows -= 1 if list.length > rows && rows > 1
             pick = state[:pick] = list.empty? ? 0 : state[:pick].to_i.clamp(0, list.length - 1)
             top = state[:top].to_i
             top = pick if pick < top
             top = pick - rows + 1 if pick >= top + rows
             top = state[:top] = top.clamp(0, [list.length - rows, 0].max)
             if list.empty?
-              c.text(0, 2, c.fit(state[:query].to_s.empty? ? "nothing under L.#{head(state)}" : "no match for '#{state[:query]}' under L.#{head(state)} (Tab: other heads)", c.w), :dim)
+              c.text_fit(0, 2, state[:query].to_s.empty? ? "nothing under L.#{head(state)}" : "no match for '#{state[:query]}' under L.#{head(state)} (Tab: other heads)", c.w, :dim)
             else
               playing = playing_entry(s)
-              width = [list[top, rows].map { |e| e.name.length }.max.to_i, c.w / 2 + 2].min
-              list[top, rows].each_with_index do |e, i|
-                draw_entry(c, 2 + i, e, width, top + i == pick, state, playing)
+              # (no slices or Arrays per draw)
+              last = [top + rows, list.length].min
+              width = 0
+              i = top
+              while i < last
+                l = list[i].name.length
+                width = l if l > width
+                i += 1
               end
-              if top + rows < list.length && c.w > 14
-                c.text(c.w - 8, c.h - 1 - detail, " +#{list.length - top - rows} ", :dim)
+              width = [width, c.w / 2 + 2].min
+              i = top
+              while i < last
+                draw_entry(c, 2 + i - top, list[i], width, i == pick, state, playing)
+                i += 1
               end
+              c.text_fit(0, 2 + rows, "  +#{list.length - top - rows} more", c.w, :dim) if top + rows < list.length
             end
             draw_detail(c, c.h - detail, picked(state)) if detail > 0 && !list.empty?
           end
@@ -295,7 +319,7 @@ module MB
             if state[:finding]
               c.line(y, ['find ', :key], [q, :text], ['▏', :key])
             elsif q.empty?
-              c.text(0, y, c.fit(state[:mode] ? '/ find  a listen  Enter load  e edit' : '/ find (in: NAV l)', c.w), :dim)
+              c.text_fit(0, y, state[:mode] ? '/ find  a listen  Enter load  e edit' : '/ find (in: NAV l)', c.w, :dim)
             else
               c.line(y, ['find ', :dim], [q, :text], [" (#{results(state).length})", :dim])
             end
@@ -305,28 +329,56 @@ module MB
           # name, then its family (its kind under L.all; nothing for
           # presets, whose head says what they are) and tags.
           def draw_entry(c, y, e, width, on, state, playing)
-            c.run(0, y, on ? '▸' : ' ', :key)
-            c.run(1, y, playing && playing.family == e.family && playing.name == e.name ? '●' : ' ', :ok)
-            x = c.run(2, y, c.pad(e.name.to_s, width), on ? :key : :name, reverse: on && state[:mode])
-            what = head(state) == :all ? e.kind.to_s : (e.family == :preset ? nil : e.family.to_s)
-            words = [what, *e.tags.first(3)].compact.join(' ')
-            c.text(x + 1, y, c.fit(words, [c.w - x - 1, 0].max), :dim)
+            c.run(0, y, on ? -'▸' : -' ', :key)
+            c.run(1, y, playing && playing.family == e.family && playing.name == e.name ? -'●' : -' ', :ok)
+            name = e.name
+            x = c.run_pad(2, y, name.is_a?(Symbol) ? name.name : name.to_s, width, on ? :key : :name, reverse: on && state[:mode])
+            c.text_fit(x + 1, y, entry_words(e, head(state) == :all), [c.w - x - 1, 0].max, :dim)
+          end
+
+          # An entry's family (its kind under L.all) and first tags, kept
+          # per entry (drawn every frame).
+          def entry_words(e, all)
+            hit = WORDS[e]
+            return hit[1] if hit && hit[0] == all
+            what = all ? e.kind.to_s : (e.family == :preset ? nil : e.family.to_s)
+            words = [what, *e.tags.first(3)].compact.join(' ').freeze
+            WORDS[e] = [all, words].freeze
+            words
           end
 
           # The picked entry's description, tags and params, and where it
           # comes from, in the last 4 rows.
           def draw_detail(c, y, e)
             return unless e
-            c.text(0, y, '─' * c.w, :dim)
-            about = e.about.to_s.empty? ? "#{e.label}" : e.about.to_s
-            c.wrap(about, y: y + 1, rows: 1, role: :text)
-            params = e.params.keys rescue []
-            words = []
-            words << "tags #{e.tags.join(' ')}" unless e.tags.empty?
-            words << "params #{params.join(' ')}" unless params.empty?
-            c.text(0, y + 2, c.fit(words.join('  '), c.w), :dim)
-            c.text(0, y + 3, c.fit("#{UI::Picker.path_of(e)}  #{e.shelf&.name}", c.w), :dim)
+            # (the texts kept per entry and width: drawn every frame)
+            d = DETAILS[e]
+            unless d && d[0] == c.w
+              about = e.about.to_s.empty? ? "#{e.label}" : e.about.to_s
+              params = e.params.keys rescue []
+              words = []
+              words << "tags #{e.tags.join(' ')}" unless e.tags.empty?
+              words << "params #{params.join(' ')}" unless params.empty?
+              # (Canvas#wrap's first row of one: cut with an ellipsis when
+              # more would follow)
+              lines = Canvas.wrap(about, c.w)
+              line = lines[0]
+              if lines.length > 1
+                last = line.chomp(Canvas::BREAK)
+                line = last.length >= c.w ? "#{last[0, c.w - 1]}…" : "#{last}…"
+              end
+              d = DETAILS[e] = [c.w, ('─' * c.w).freeze, line.freeze, words.join('  ').freeze, "#{UI::Picker.path_of(e)}  #{e.shelf&.name}".freeze].freeze
+            end
+            c.text(0, y, d[1], :dim)
+            c.text(0, y + 1, d[2], :text)
+            c.row = y + 2
+            c.text_fit(0, y + 2, d[3], c.w, :dim)
+            c.text_fit(0, y + 3, d[4], c.w, :dim)
           end
+
+          # #entry_words and #draw_detail's texts by entry (weak, by identity).
+          WORDS = ObjectSpace::WeakMap.new
+          DETAILS = ObjectSpace::WeakMap.new
 
           def key_pick(state, d)
             state[:pick] = state[:pick].to_i + d

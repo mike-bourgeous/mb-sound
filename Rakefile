@@ -2,6 +2,9 @@ require "bundler/gem_tasks"
 require 'rake/extensiontask'
 require 'shellwords'
 
+require 'mb-util'
+MB::U.sigquit_backtrace
+
 task :default => :spec
 
 # Parallel extension builds (omnibus11, 2026-10-22).  `rake compile` builds

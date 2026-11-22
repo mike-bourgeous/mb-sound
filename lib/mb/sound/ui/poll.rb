@@ -85,7 +85,7 @@ module MB
           changes = @lock.synchronize { @open.values }
           pos = s.transport.position
           queued = changes.select { |e| e.status == :queued }.last(QUEUED).map { |e|
-            QueuedInfo.new(seq: e.seq, kind: e.kind, subject: e.subject, lands: e.lands.to_s.freeze, pos: e.lands&.pos)
+            QueuedInfo.new(seq: e.seq, kind: e.kind, subject: e.subject, lands: e.lands.to_s.freeze, pos: e.lands&.pos, source: e.source)
           }.freeze
           recording = changes.select { |e| e.kind == :rec && e.status != :failed && e.status != :cancelled }.filter_map { |e|
             ends = e.data[:ends]
@@ -112,11 +112,34 @@ module MB
             matrix: matrix_info(arr),
             racks: rack_infos(s),
             clocks: clock_infos(s),
+            stopped: (s.stopped.keys.freeze rescue [].freeze),
+            build_knobs: arr.respond_to?(:build_knob_names) ? arr.build_knob_names : [].freeze,
+            knob_users: knob_users(s, arr),
             inspector: (info = needs&.include?(:inspect) ? (@inspector ||= Inspect::Gatherer.new).call(s) : nil),
             render_source: needs&.include?(:render) ? render_source(s, arr, info) : nil,
             cue_heard: (s.cue_heard? rescue false)
           )
+          # (live wave displays: the node the preview shows, watched by the
+          # render thread's tap; off by default, ui-wave-perf-1)
+          WaveView.watch_for(s, @inspector, info) if WaveView.live? && info
           [slow, knobs.to_a.freeze]
+        end
+
+        # { player name => [knob names] }: the knobs each player's graph
+        # reads (Session#knob_readers, the same frozen Hash while nothing
+        # joined) with the build knobs each track's patch read
+        # (Arrangement::BuildKnobs), for the knobs pane's track filter.
+        def knob_users(s, arr)
+          readers = s.respond_to?(:knob_readers) ? s.knob_readers : {}.freeze
+          names = arr.respond_to?(:build_knob_names) ? arr.build_knob_names : []
+          return readers if names.empty?
+          # (build_knobs_of: its own lock only, never the render lock)
+          users = readers.dup
+          arr.tracks.each_key do |t|
+            built = arr.build_knobs_of(t)
+            users[t] = ((users[t] || []) | built).freeze unless built.empty?
+          end
+          users.freeze
         end
 
         # +slow+ with the inspector's info for the current Inspect.target
@@ -169,7 +192,8 @@ module MB
           note = walk[:synth] ? nil : "#{name} has no synth voice to copy (the preview plays one voice of a synth: synth(midi) { |v| ... })"
           PatchRender::Source.new(track: name, synth: walk[:synth], clip: tr&.clip, bpm: t.bpm, bar_length: t.bar_length, key: t.key,
                                   tuning: s.tuning, channels: s.instance_variable_get(:@channels) || 2, note: note&.freeze,
-                                  words: "#{name} #{info.code}".freeze, live: walk[:live], frames: (walk[:frames] ||= -> { s.frames_rendered }))
+                                  words: "#{name} #{info.code}".freeze, live: walk[:live], frames: (walk[:frames] ||= -> { s.frames_rendered }),
+                                  thread: (walk[:thread] ||= -> { s.render_thread }))
         rescue StandardError => e
           warn_once(e)
           nil
@@ -429,7 +453,7 @@ module MB
           FormInfo.new(
             section: pb.section, pass: pb.pass, from: pb.pass_start, to: pb.boundary,
             next: nxt.section, next_at: nxt.at.to_s.freeze, committed: nxt.committed,
-            looping: pb.looping?, ended: false
+            looping: pb.looping?, ended: false, sections: pb.section_rows
           )
         end
       end

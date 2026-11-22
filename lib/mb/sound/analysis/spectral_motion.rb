@@ -74,6 +74,7 @@ module MB
                 "(#{format('%.0f', prominence)} dB over its surroundings, #{when_})"
             end
           end
+          include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
           def inspect = "#<SpectralMotion::Resonance #{self}>"
         end
 
@@ -98,6 +99,7 @@ module MB
                 "(teeth every #{sp.(delay_from)} -> #{sp.(delay_to)}, #{when_}; a flanger sweep?)"
             end
           end
+          include MB::Sound::OneLinePrint # (pp prints the inspect below: Pry results in one line)
           def inspect = "#<SpectralMotion::Comb #{self}>"
         end
 

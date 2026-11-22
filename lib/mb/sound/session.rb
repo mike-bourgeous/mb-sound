@@ -32,6 +32,7 @@ require_relative 'session/stems'
 require_relative 'session/cue'
 require_relative 'session/monitor_trim'
 require_relative 'session/pause_fade'
+require_relative 'session/transport_pause'
 require_relative 'session/safety_limiter'
 require_relative 'session/buses'
 require_relative 'session/racks'
@@ -39,6 +40,7 @@ require_relative 'session/slots'
 require_relative 'session/ui_feed'
 require_relative 'session/warming'
 require_relative 'session/carry'
+require_relative 'session/set_clear'
 
 module MB
   module Sound
@@ -98,11 +100,13 @@ module MB
       include Stems
       include MonitorTrim
       include PauseFade
+      include TransportPause
       include SafetyLimiter
       include UIFeed
       include Warming
       include Buses # (strip rules and steps, undo subjects: registered, so include order doesn't matter)
       include Cue
+      include SetClear
       include Slots
 
       # A graph being played by the session.  +serial+ is unique; +name+ is
@@ -138,6 +142,8 @@ module MB
         :clip, # (the clip a track's patch was built for, or nil; see #built_clip)
         :ends_after, # (nodes whose ending starts its quiet ring-out; Tails#end_after)
         :ends_tail, # (that ring-out's cap in seconds, nil for Master::MAX_TAIL_SECONDS; Tails#end_after)
+        :pause_level, :pause_ramp, # (the strip's pause level and its Fades::Ramp while the transport pauses; nil for 1; TransportPause)
+        :pause_whole, # (true while it holds as a whole: not rendered once faded; TransportPause)
         keyword_init: true
       ) do
         # True unless this player is being replaced or stopped.
@@ -333,6 +339,7 @@ module MB
         @paused = false
         @render_error = nil # (see #render_error)
         init_pause_fade
+        init_transport_pause
 
         @players = {}
         @stopped = {}
@@ -583,7 +590,7 @@ module MB
 
         # Its code compiled here rather than where it lands, or in the
         # background, the change held until it is done (see Warming)
-        hold = warm_graph(name, nodes, warm, warm_time(point, start_time), background: warm_hold_for_add, found: found)
+        hold = warm_graph(name, nodes, warm, warm_time(point, start_time), background: warm_hold_for_add, found: found) || group_hold_for_add
 
         default = @players.empty? && !queued_start? ? :now : :bar # (launch_time's :auto, kept for a held change's re-time)
         time = start_time ? start_time.to_r : launch_time(point, timeline_nodes, default: default)
@@ -710,8 +717,9 @@ module MB
       end
 
       # Plays a stopped graph again (see #remove), with the same launch and
-      # fade options as #add.  With no +name+, resumes the most recently
-      # stopped graph.  Returns the name, or nil if there is nothing to
+      # fade options as #add (a graph still fading out or ringing out after
+      # its stop comes back from where it is: #revive_fading, Tails).  With
+      # no +name+, resumes the most recently stopped graph.  Returns the name, or nil if there is nothing to
       # resume under that name (or it is already playing).
       #
       # Looping clips come back in phase with the timeline.  Other nodes
@@ -733,7 +741,7 @@ module MB
         @render_lock.synchronize {
           p = @mutex.synchronize {
             name ||= @stopped.keys.reject { |n| disarmed_monitor?(n) }.last
-            p = @stopped[name] || ringing_player(name)
+            p = @stopped[name] || ringing_player(name) || fading_player(name)
             next nil if p.nil? || @players.each_value.any? { |o| o.name == name && o.current? }
             p
           }
@@ -805,8 +813,8 @@ module MB
       # scheduled it (:user, :form, :take, :script; see Scheduler::Entry)
       # and +label+ the command to show.  See Scheduler for how and when
       # blocks run (and Scheduler::Entry for +:exact+).
-      def schedule(time, period: nil, description: nil, epoch: nil, owner: :user, label: nil, exact: false, &block)
-        @scheduler.schedule(time, period: period, description: description, epoch: epoch, owner: owner, label: label, exact: exact, &block)
+      def schedule(time, period: nil, description: nil, epoch: nil, owner: :user, label: nil, exact: false, held: nil, &block)
+        @scheduler.schedule(time, period: period, description: description, epoch: epoch, owner: owner, label: label, exact: exact, held: held, &block)
       end
 
       # Starts the background rendering thread of a realtime session (and
@@ -841,6 +849,8 @@ module MB
         pb = @arrangement&.playback
         form = !!(pb && !pb.ended?)
         pb.stop if form
+        # (at_marker blocks waiting for their marker: gen-ux-1)
+        @markers&.cancel_waits
         @scheduler.reset(wait: wait).merge(form: form)
       end
 
@@ -1161,7 +1171,8 @@ module MB
             # typed in, like live lines typed between buffers, so a tempo
             # they set covers the whole span (see Scheduler::Entry#exact)
             from = @transport.position
-            to = from + span_step(remaining, per_sample)
+            # (a paused transport stands still: TransportPause)
+            to = @tp_paused ? from : from + span_step(remaining, per_sample)
             if @scheduler.dispatch_exact(from, to)
               @scheduler.apply_timed_changes
               commit_due_seeks unless @changes.empty?
@@ -1171,6 +1182,12 @@ module MB
             end
             n = (@changes.empty? ? nil : frames_before_seek(remaining, per_sample)) || remaining
             n = cell if cell && cell < n
+            # A take's line typed while paused runs on its frame of the
+            # pause (see TransportPause)
+            if @tp_paused && (h = @scheduler.next_held_frame(@frame - @tp_frame))
+              k = h - (@frame - @tp_frame)
+              n = k if k < n
+            end
             last = false
             if until_pos
               left = until_pos - @transport.position
@@ -1251,7 +1268,10 @@ module MB
       # Called with the render lock held.
       def render_span(count, per_sample, to = nil)
         from = @transport.position
-        to ||= Sequence::Transport.position_at(from, count, per_sample)
+        # A paused transport stands still while everything renders (see
+        # TransportPause)
+        paused = @tp_paused
+        to = paused ? from : (to || Sequence::Transport.position_at(from, count, per_sample))
         old_span = Thread.current[:mb_sound_span]
         old_deferral = Thread.current[:mb_sound_plan_deferral]
         @span.frame = @frame
@@ -1260,8 +1280,9 @@ module MB
         # Offline renders waiting for scheduled blocks keep time while idle
         # (see #advance_idle=), live and offline sessions while a form plays
         # (see Form::Playback#keeps_time?); otherwise the timeline pauses
-        keep_time = @advance_idle || form_keeps_time?(from)
-        @span.moving = keep_time || !idle?
+        keep_time = !paused && (@advance_idle || form_keeps_time?(from))
+        idle = timeline_idle?
+        @span.moving = !paused && (keep_time || !idle)
         @span.sample_rate = sample_rate
         @span.run = @run_frame
         Thread.current[:mb_sound_span] = @span
@@ -1278,7 +1299,7 @@ module MB
           @scheduler.seeked(from)
         end
 
-        @scheduler.dispatch(from, to, playing: keep_time || !idle?)
+        @scheduler.dispatch(from, to, playing: !paused && (keep_time || !idle))
 
         # MIDI input lands on exact frames before changes (a recording
         # closing in this span needs its events) and graphs read it
@@ -1298,6 +1319,9 @@ module MB
         deferral = plan_deferral
         deferral&.apply
         Thread.current[:mb_sound_plan_deferral] = deferral
+
+        # Held places stay held, graphs started meanwhile too
+        hold_timeline_nodes if paused
 
         # (a reused copy, taken under the lock: every span; dropouts-2)
         players = (@span_player_list ||= [])
@@ -1325,7 +1349,9 @@ module MB
         # Graphs kept for #resume or #undo keep their shared nodes in step
         read_kept_graphs(@frame + count)
 
-        moving = playing || keep_time
+        # (starts that only wait for a hold leave the timeline where it
+        # is: see #timeline_idle?)
+        moving = !paused && ((playing && !(players.empty? && timeline_idle?)) || keep_time)
         if moving
           whole_notes = to - from
           @transport.advance_span(from, to, whole_notes)
@@ -1712,6 +1738,8 @@ module MB
         @mutex.synchronize {
           # A player still ringing out comes back as it is (see Tails)
           next name if revive_ringing(name, start)
+          # So does one still fading out after a stop (#revive_fading)
+          next name if revive_fading(name, fade)
 
           p = @stopped[name]
           next nil if p.nil? || @players.each_value.any? { |o| o.name == name && o.current? }
@@ -1726,6 +1754,39 @@ module MB
             fade: fade
           )
         }
+      end
+
+      # The player named +name+ that a stop is fading out (or will fade
+      # out: its stop time not reached yet), not replaced by a newer graph
+      # and not ringing out, or nil.  Called with @mutex held.
+      private def fading_player(name)
+        return nil if @players.each_value.any? { |o| o.name == name && o.current? }
+        p = @players.each_value.select { |x| x.name == name }.max_by(&:serial)
+        p && p.keep && p.fade_out && !p.handed && !p.ring ? p : nil
+      end
+
+      # Revives player +name+ while a stop fades it out (knobs-pane-keys-1
+      # round 2, the maintainer's 2026-11-21 "If I can stop a track ..., I
+      # should also be able to resume it"; the tracks pane's Space during a
+      # four-bar fade): the stop is cancelled, and its gain turns around
+      # from where it is up to full over +fade+ bars (the resume's fade-in;
+      # the declick when nil), on the resume's landing sample.  Its graph
+      # never stopped, so clips play on in phase and nothing restarts.
+      # Returns the player, or nil if none is fading.  Called with @mutex
+      # held.
+      private def revive_fading(name, fade)
+        p = fading_player(name) or return nil
+        p.stop_at = nil
+        p.fade_out = nil
+        p.keep = false
+        if p.fading_out || p.ramp
+          frame = @landing_frame || @frame
+          p.ramp = Fades::Ramp.after(p.ramp, p.gain, 1.0, frame, fade_frames(fade || declick_bars, output.sample_rate.to_f))
+          p.fading_out = false
+        end
+        @order.delete(name)
+        @order << name
+        p
       end
 
       # Shortens a graph description for #players.
@@ -1960,7 +2021,9 @@ module MB
         end
 
         ringing = p.ring&.active && !p.fade_out
-        if p.stop_at && p.stop_at < to
+        # (on a paused transport, from == to: a stop landing there is due;
+        # TransportPause)
+        if p.stop_at && (p.stop_at < to || (p.stop_at <= from && to == from))
           if ringing
             # Stops its notes on the exact sample of its stop time, then
             # rings out (see Tails)
@@ -2013,10 +2076,12 @@ module MB
           sidechained = !read_from.nil? && read_from <= offset
         end
         # So does a player with a pre-mute send on (Buses#pre_mute_from),
-        # from the frame it is switched on
+        # from the frame it is switched on (for one launched from CUE, the
+        # frame its MAIN share ramps in: Cue#cue_main_from)
         pm = nil
         if @routed_span && (pm_route = route_of(p.name)) && pm_route.pre
           pm = pre_mute_from(pm_route, offset, frames)
+          pm = cue_main_from(p, base, pm, offset + frames) if pm && p.cue
           if pm && (read_from.nil? || pm < read_from)
             read_from = pm
             sidechained = read_from <= offset
@@ -2069,6 +2134,23 @@ module MB
             return finish_player(p, false, base + offset + frames)
           end
           if silent_from < base + offset + frames
+            asleep_after = base + offset + frames - silent_from
+            frames -= asleep_after
+          end
+        end
+        # A player holding as a whole while the transport is paused (see
+        # TransportPause) stops on the last frame of its fade out, as at a
+        # mute ramp's end, and isn't rendered until the resume
+        if p.pause_whole && asleep_after == 0
+          pr = p.pause_ramp
+          silent_from = pr.nil? ? (p.pause_level.to_f <= 0 ? base + offset : nil) : (pr.to <= 0 ? pr.start + pr.length : nil)
+          if silent_from && silent_from <= base + offset
+            p.pause_level = 0.0
+            p.pause_ramp = nil
+            read_while_asleep(p, frames)
+            p.read_to = base + offset + frames
+            return
+          elsif silent_from && silent_from < base + offset + frames
             asleep_after = base + offset + frames - silent_from
             frames -= asleep_after
           end
@@ -2154,6 +2236,10 @@ module MB
           # mute/solo; readers hear it pre-fader, before the mute (+reader+
           # below: its fade and key level; Faders#reader_levels)
           fade = fade_ramp(p, base + offset, frames)
+          if p.pause_ramp || (p.pause_level && p.pause_level < 1)
+            pl = ramp_levels(p, :pause_level, :pause_ramp, base + offset, frames)
+            fade = fade ? fade * pl : pl if pl
+          end
           level = fader_levels(p, base + offset, frames)
           gain = fade ? (level ? fade * level : fade) : level
           strip = ramp_levels(p, :strip_level, :strip_ramp, base + offset, frames)

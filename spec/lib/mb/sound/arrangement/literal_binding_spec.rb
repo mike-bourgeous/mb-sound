@@ -582,4 +582,23 @@ RSpec.describe(MB::Sound::Arrangement::LiteralBinding, :aggregate_failures) do
     expect([name, qualified]).to eq([:"growl/filter_env_sustain", true])
     expect(described_class.line(:growl, t, as: name)).to eq('bind :growl, filter_env: :sustain, as: :"growl/filter_env_sustain"')
   end
+
+  # sd-ux-fixes-1 (the review's #9, the wording part): a per_harmonic width
+  # printed cut off ("#<MB::Sound::PerHarmonic per_harmonic(20)...") with
+  # nothing about what binds instead
+  it 'refuses a setting that is not a number with its whole value and what binds instead' do
+    expect(MB::Sound.per_harmonic(20.cents..120.cents, curve: :exp).inspect).to eq('#<per_harmonic(20.cents..120.cents, curve: :exp)>')
+    s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), realtime: false)
+    MB::Sound::Session.with_context(session: s) do
+      MB::Sound.track(:ghost) { |c| c.synth { |v| MB::Sound.noise.bandpass_series(v.hz, count: 8, width: MB::Sound.per_harmonic(20.cents..120.cents, curve: :exp), pan: -0.6..0.6).lp1(3000) * v.amp_env } }
+      MB::Sound.bg(:ghost, MB::Sound.seq(MB::Sound::C3).n4.loop, on: :now)
+      4.times { s.process_buffer }
+      expect { MB::Sound.bind(:ghost, bandpass_series: :width) }.to raise_error(described_class::Error,
+        /\Awidth of bandpass_series is a per-harmonic spread \(per_harmonic\(20\.cents\.\.120\.cents, curve: :exp\)\): only numbers become knobs; per_harmonic spreads don't bind \(yet\); bandpass_series has no other numbers to bind/)
+      expect { MB::Sound.bind(:ghost, bandpass_series: :pan) }.to raise_error(described_class::Error, /pan of bandpass_series is a range \(-0\.6\.\.0\.6\)/)
+    end
+  ensure
+    s&.close
+    MB::Sound.rewind
+  end
 end

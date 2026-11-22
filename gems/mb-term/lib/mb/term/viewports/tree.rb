@@ -28,6 +28,16 @@ module MB
       # Layout errors (a bad size, an unknown pane, ...).
       class Error < ArgumentError; end
 
+      class << self
+        # Other names for panes ({ alias => name }; the application's one
+        # table, e.g. mb-sound's UI::PANE_ALIASES): `pane`, `tabs`, and a
+        # layout's focus:/zoom: take them, and the tree keeps the name.
+        attr_accessor :pane_aliases
+
+        # +name+ with an alias resolved.
+        def pane_name(name) = (@pane_aliases || {}).fetch(name, name)
+      end
+
       # Values a pane option may hold (literals, so layouts save as data).
       def self.literal?(v)
         case v
@@ -104,6 +114,7 @@ module MB
         # shrinking; other keywords are the pane's options (literals).
         def pane(name, height: nil, width: nil, weight: 1, min: nil, **opts)
           raise Error, "Pane names are Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
+          name = Viewports.pane_name(name)
           bad = opts.reject { |_, v| Viewports.literal?(v) }
           raise Error, "#{name.inspect}: pane options are literals (Symbols, numbers, Strings, true/false/nil, Arrays) (got #{bad.keys.map(&:inspect).join(', ')})" unless bad.empty?
 
@@ -126,7 +137,7 @@ module MB
         def tabs(*names, active: 0, height: nil, width: nil, weight: 1, min: nil, &block)
           kids = names.map { |n|
             raise Error, "Tab names are Symbols (got #{n.inspect})" unless n.is_a?(Symbol)
-            Pane.new(name: n)
+            Pane.new(name: Viewports.pane_name(n))
           }
           if block
             b = Builder.new(:tabs)
@@ -135,6 +146,7 @@ module MB
           end
           raise Error, 'tabs needs at least two tabs' if kids.length < 2
 
+          active = Viewports.pane_name(active) if active.is_a?(Symbol)
           index = active.is_a?(Symbol) ? kids.index { |k| k.panes.include?(active) } : active
           raise Error, "No tab #{active.inspect} (#{kids.map { |k| k.panes.first.inspect }.join(', ')})" unless index.is_a?(Integer) && kids[index]
 
@@ -236,6 +248,7 @@ module MB
         end
 
         def inspect = "#<MB::Term::Viewports::Layout #{name.inspect}: #{panes.map(&:inspect).join(' ')}#{zoom ? " (#{zoom.inspect} zoomed)" : ''}>"
+        def pretty_print(q) = q.text(inspect) # (pp, as Pry prints results: the inspect, not Data's field dump)
       end
 
       module_function
@@ -249,6 +262,8 @@ module MB
         b.instance_exec(&block)
         raise Error, "Layout #{name.inspect} has no panes" if b.children.empty?
 
+        focus = Viewports.pane_name(focus) if focus
+        zoom = Viewports.pane_name(zoom) if zoom
         Layout.new(name: name, root: Split.new(axis: :rows, children: b.children), focus: focus, zoom: zoom, gap: gap)
       end
 

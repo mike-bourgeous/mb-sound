@@ -97,23 +97,59 @@ module MB
           @times = nil
           @start_time = nil
           @pass_start = nil
+          @start_hold = nil # (the first section's group hold: see #begin_first)
+          @section_rows = nil # (see #section_rows)
           check_form
+        end
+
+        # The form's sections for listings (the console's `sections`, the
+        # tiled screen's form pane), in the order they first play: one
+        # frozen [name, text] pair per section, +text+ its plays' lengths
+        # and passes ("8 bars x2", or "8 bars x2 · 4 bars" for a section
+        # that plays in two places).  A generative form lists its sections
+        # as declared (its order is decided as it plays).  Frozen, and the
+        # same object every call (forms don't change while they play).
+        def section_rows
+          @section_rows ||= Playback.rows_of(@form)
+        end
+
+        # #section_rows for Form +form+ (playing or not: the console's
+        # `sections` lists a loaded flow too).
+        def self.rows_of(form)
+          plays = form.generative? ? form.sections.values.map { |s| [s.name, s.times, s.length] } : form.plays
+          texts = {}
+          plays.each do |name, times, len|
+            t = "#{length_text(len)}#{" x#{times}" if times != 1}"
+            (texts[name] ||= []) << t
+          end
+          texts.map { |name, list| [name, list.join(' · ').freeze].freeze }.freeze
+        end
+
+        # A section length as listings say it: "8 bars" (a number of bars)
+        # or the Duration's own words.
+        def self.length_text(len)
+          return len.to_s unless len.is_a?(Numeric)
+          n = len.is_a?(Rational) && len.denominator == 1 ? len.to_i : len
+          "#{n} bar#{n == 1 ? '' : 's'}"
         end
 
         # Starts the form at timeline position +time+ (whole notes).
         def start(time)
           @lock.synchronize {
             raise 'This form has already started' if @started
-            @started = true
-            @start_time = time.to_r
             raise ArgumentError, 'The form has no sections' unless @program.any? { |ins| ins[0] == :play || ins[0] == :generate }
+            @start_time = time.to_r
             if @start_time <= @session.now
               # Starting now: launch the first section right away (a
-              # scheduled block would run a buffer later when idle)
+              # scheduled block would run a buffer later when idle), its
+              # group held from before the form keeps time (see #begin_first)
+              hold = @start_hold = @session.group_hold
+              @started = true
               Session.with_context(session: @session, time: @start_time, source: Session.context&.source || :set) {
-                begin_first
+                begin_first(hold)
               }
             else
+              @started = true
               gen = @gen
               schedule(@start_time, 'form start') { begin_first if gen == @gen }
             end
@@ -143,6 +179,9 @@ module MB
         # paused timeline, as before).
         def keeps_time?(pos)
           return false if !@started || (@end_at && pos >= @end_at)
+          # (not while the first section's tracks build: see #begin_first)
+          h = @start_hold
+          return false if h && !h.released?
           !@ended || (!@end_pos.nil? && pos < @end_pos)
         end
 
@@ -240,6 +279,24 @@ module MB
               c
             }
           }
+        end
+
+        # Where #seek_now(+name+) would move the timeline now (whole notes),
+        # or nil when only a generate step plays the section (found when
+        # the seek lands) or the form has ended.  For messages (fixes-15:
+        # `go :build` said "(101:1)", where the seek lands, and the
+        # maintainer read it as where the build is; it went back to 17:1).
+        def seek_target(name)
+          target = control_target(name)
+          @lock.synchronize {
+            return nil if @ended
+            index, pos, = @where[name]
+            return pos if pos
+            index ||= target[0] == :label ? @form.labels[name] : first_play(name)
+            index && score_positions[index]
+          }
+        rescue ArgumentError
+          nil
         end
 
         # Moves the timeline to +name+ (a section or label of the form) and
@@ -592,14 +649,27 @@ module MB
           result
         end
 
-        # Starts the form: follows the flow to its first section.
-        def begin_first
-          @lock.synchronize {
-            return if @ended
-            step = walk(0, time: @start_time)
-            set_label_markers(step.labels, @start_time)
-            @counters = step.counters
-            step.section ? begin_pass(step, @start_time) : finish_form(@start_time)
+        # Starts the form: follows the flow to its first section, whose
+        # tracks land as one group, as `go`'s do (Session#group_hold, with
+        # +hold+ if given): held until the last one is built and warmed,
+        # while the form doesn't keep time (#keeps_time?), so an idle
+        # timeline waits for them and they start together on the form's
+        # start, first notes included (form-start-1, the maintainer,
+        # 2026-11-21: "The first pad note seems to be skipped when I start
+        # the tunnel vision demo": the form kept time while begin_first
+        # built the tracks one by one, and a track built late landed past
+        # 1:1, its clip skipping the notes before its landing).  Later
+        # sections keep time through silence as before.
+        def begin_first(hold = nil)
+          hold ||= (@start_hold = @session.group_hold)
+          @session.with_group_hold(hold) {
+            @lock.synchronize {
+              next if @ended
+              step = walk(0, time: @start_time)
+              set_label_markers(step.labels, @start_time)
+              @counters = step.counters
+              step.section ? begin_pass(step, @start_time) : finish_form(@start_time)
+            }
           }
         end
 

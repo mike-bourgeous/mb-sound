@@ -781,6 +781,19 @@ RSpec.describe MB::Sound::Help do
       MB::Sound::Help.show(body, out, nil)
     end
 
+    # (fixes-15, the maintainer: a long help page under `ui :vis` opened
+    # less over the band, leaving Pry's input line under its border)
+    it 'prints a page in the console instead of the pager while a screen that cannot page is up' do
+      body = MB::Sound.help(:render).to_s
+      band = Object.new # (a screen without #page, as UI::Band)
+      allow(MB::Sound::UI).to receive(:screen).and_return(band)
+      tty = StringIO.new
+      def tty.tty? = true
+      expect(Pry::Pager).not_to receive(:new)
+      MB::Sound::Help.show(body, tty, double('pry'))
+      expect(MB::U.remove_ansi(tty.string)).to include('render(filename')
+    end
+
     it 'wraps the sheet footer to 40 columns' do
       allow(MB::U).to receive(:width).and_return(40)
       expect(text(MB::Sound.help).lines.drop_while { |l| !l.start_with?('More help') }.map { |l| l.chomp.length }.max).to be <= 40
@@ -933,6 +946,40 @@ RSpec.describe MB::Sound::Help do
         expect(text(MB::Sound::Help.page_for_text(q))).to include('help :blend'), q
       end
       expect(text(MB::Sound.help(:dry))).to include('beat.blend(0.4) { |s|')
+    end
+
+    # (ux-friction-1 round 2, the maintainer's note "how do I show the
+    # .unison method help from the unison help?": `help .unison` and
+    # `help '.unison'` showed the topic again or searched)
+    it 'opens a .name method page from a topic, and the topic says how' do
+      cb = MB::Sound.module_eval('binding')
+      ['.unison', "'.unison'", ':".unison"'].each do |q|
+        expect(text(MB::Sound::Help.page_for_text(q, cb)).lines.first).to start_with('unison(count = '), q
+      end
+      expect(text(MB::Sound.help('.unison')).lines.first).to start_with('unison(count = ')
+      expect(text(MB::Sound.help(:unison))).to include("Each one's page (arguments, examples): help .unison")
+      expect(text(MB::Sound.help(:knobs))).to include("Each one's page (arguments, examples): help :knob")
+      expect(text(MB::Sound.help(:unison)).lines.first).to start_with('Unison and supersaws')
+      expect(MB::Sound::Help.page_for_text('.no_such_method_here', cb)).to be_a(MB::Sound::Help::SearchPage)
+    end
+
+    # (fixes-15, the maintainer's `help Clip#ghost_chords`: the # read as
+    # a Ruby comment, so the page was a search for "clip" and the name)
+    it 'shows the method page for Owner#method and Owner.method, with suggestions for a missing one' do
+      cb = MB::Sound.module_eval('binding')
+      clip = text(MB::Sound::Help.page_for_text('Clip#ghost_chords', cb))
+      expect(clip.lines.first).to start_with('ghost_chords(*chords, per:')
+      expect(clip).to include('Sequence::Clip').and include('silent chord')
+      expect(text(MB::Sound::Help.page_for_text('Sequence::Clip#ghost_chords', cb)).lines.first).to start_with('ghost_chords(*chords, per:')
+      expect(text(MB::Sound.help('Clip#ghost_chords')).lines.first).to start_with('ghost_chords(*chords, per:')
+      expect(text(MB::Sound::Help.page_for_text('Notes#ghost_chords', cb)).lines.first).to include('Notes')
+      expect(text(MB::Sound::Help.page_for_text('GraphIO.load', cb)).lines.first).to start_with('load(source, inputs:')
+
+      missing = MB::Sound::Help.page_for_text('Clip#ghost_chord', cb)
+      expect(missing).to be_a(MB::Sound::Help::MissPage)
+      expect(text(missing)).to include('Sequence::Clip has no method ghost_chord.').and include('help Clip#ghost_chords')
+      expect(text(MB::Sound::Help.page_for_text('Tone#ghost_chords', cb))).to include('Tone has no method ghost_chords.').and include('help Sequence::Clip#ghost_chords')
+      expect(text(MB::Sound::Help.page_for_text('Nope#x', cb))).to include('No class or module named Nope.')
     end
 
     # (omnibus19, Kez's panel 3 dry run: the guide's own `help

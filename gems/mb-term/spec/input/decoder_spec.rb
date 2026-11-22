@@ -56,6 +56,25 @@ RSpec.describe(MB::Term::Input::Decoder, :aggregate_failures) do
     ])
   end
 
+  it 'decodes XTVERSION (a DCS, only while expected) and secondary device attributes' do
+    d.expect_dcs = true
+    ev = d.feed("\eP>|Konsole 24.08.3\e\\\e[>1;240802;0c")
+    expect(ev).to eq([
+      input::Reply.new(kind: :dcs, data: '>|Konsole 24.08.3'),
+      input::Reply.new(kind: :device2, data: [1, 240_802, 0]),
+    ])
+
+    # Split across reads: the DCS waits for its terminator
+    expect(d.feed("\eP>|xterm(3")).to eq([])
+    ev = d.feed("90)\e\\x")
+    expect(ev[0]).to eq(input::Reply.new(kind: :dcs, data: '>|xterm(390)'))
+    expect(chords(ev[1..])).to eq([['x', []]])
+  end
+
+  it 'keeps ESC P as Alt-P when no DCS is expected' do
+    expect(chords(d.feed("\ePx"))).to eq([['P', [:alt]], ['x', []]])
+  end
+
   it 'decodes kitty keyboard protocol keys, with legacy bytes for programs that read those' do
     ev = d.feed("\e[27u\e[97;5u\e[13;2u\e[120;3u")
     expect(chords(ev)).to eq([[:escape, []], ['a', [:ctrl]], [:enter, [:shift]], ['x', [:alt]]])

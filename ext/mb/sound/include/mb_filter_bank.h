@@ -51,9 +51,14 @@
  *
  * A slot is an index into the signal list (+sig+: one signal input per
  * distinct node, sampled once per block), or -1 for the constant beside
- * it.  Coefficients are recomputed only on samples where a signal changes
- * (every band then recomputes its settings; a band whose frequency, Q, and
- * gain are unchanged keeps its coefficients).
+ * it.  Coefficients are recomputed only on samples where a signal read by
+ * a design setting (frequency, ratio, width, gain, or a morph setting)
+ * changes (every band then recomputes its settings; a band whose
+ * frequency, Q, and gain are unchanged keeps its coefficients).  Node pans
+ * are recomputed only on samples where a pan signal changes, once per
+ * distinct pan signal (bands sharing a pan node share its gains;
+ * filterbank-pan-1), so moving pans cost a pan law per moving pan node
+ * and leave the bands' designs alone.
  *
  * Parallel banks sum each band's output times its channel gains in double
  * (band order), then multiply by the normalization scale (normalize 1:
@@ -228,16 +233,46 @@ static inline void mb_fbank_run(const double *cfg, const struct mb_signal *x, co
 	double power[nbands];
 	double pan_gain[nbands][2];
 	double last_pan[nbands];
+	long pan_owner[nbands]; // (the first band reading the same pan signal; -1 for none)
 	const double *mix[nbands];
 	double vals[nsig > 0 ? nsig : 1];
+	unsigned char design[nsig > 0 ? nsig : 1]; // (1 for signals a design setting reads)
 	double acc[nch];
 
+	// vals holds each pan signal's first band while the owners are found
+	for (long s = 0; s < nsig; s++) {
+		vals[s] = -1.0;
+		design[s] = 0;
+	}
+	if (nsnap > 0) {
+		for (int k = 8; k <= 12; k += 2) {
+			if (cfg[k] >= 0) {
+				design[(long)cfg[k]] = 1;
+			}
+		}
+	}
 	for (long b = 0; b < nbands; b++) {
+		const double *bd = bands + b * stride;
 		mb_svf_init(&svf[b]);
 		power[b] = 0.0;
 		last_pan[b] = NAN;
 		pan_gain[b][0] = pan_gain[b][1] = 0.0;
-		mix[b] = bands[b * stride + 11] >= 0 ? pan_gain[b] : bands + b * stride + MB_FB_BAND;
+		if (nsnap == 0) {
+			for (int k = 1; k <= 9; k += 2) {
+				if (k != 5 && bd[k] >= 0) {
+					design[(long)bd[k]] = 1;
+				}
+			}
+		}
+		pan_owner[b] = -1;
+		if (bd[11] >= 0) {
+			long s = (long)bd[11];
+			if (vals[s] < 0) {
+				vals[s] = (double)b;
+			}
+			pan_owner[b] = (long)vals[s];
+		}
+		mix[b] = pan_owner[b] >= 0 ? pan_gain[pan_owner[b]] : bd + MB_FB_BAND;
 	}
 	for (long s = 0; s < nsig; s++) {
 		vals[s] = NAN;
@@ -253,13 +288,15 @@ static inline void mb_fbank_run(const double *cfg, const struct mb_signal *x, co
 
 	double scale = 1.0;
 	for (size_t i = 0; i < n; i++) {
-		int changed = i == 0;
+		int changed = i == 0; // (a design signal changed)
+		int panned = i == 0; // (a signal changed: pans to check)
 		for (long s = 0; s < nsig; s++) {
 			double v = mb_signal_at(&sig[s], i);
 			// (NaN != NaN, so a NaN signal recomputes every sample)
 			if (v != vals[s]) {
 				vals[s] = v;
-				changed = 1;
+				changed |= design[s];
+				panned = 1;
 			}
 		}
 
@@ -348,11 +385,12 @@ static inline void mb_fbank_run(const double *cfg, const struct mb_signal *x, co
 				}
 				scale = sum > 0.0 ? sqrt(MB_FB_NORM_REF / sum) : 1.0;
 			}
+		}
 
+		if (panned) {
 			for (long b = 0; b < nbands; b++) {
-				const double *bd = bands + b * stride;
-				if (bd[11] >= 0) {
-					double p = vals[(long)bd[11]];
+				if (pan_owner[b] == b) {
+					double p = vals[(long)bands[b * stride + 11]];
 					if (p != last_pan[b]) {
 						last_pan[b] = p;
 						mb_fbank_pan(law, p, pan_gain[b]);

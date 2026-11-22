@@ -221,7 +221,7 @@ RSpec.describe(MB::Sound::Session::Changes) do
     it 'keeps a per-buffer transport record' do
       session.add(1.constant)
       run(800)
-      expect(session.transport_record).to eq(frame: 800, pos: 800 / 96000r, bpm: 120, bar_length: 1, playing: true)
+      expect(session.transport_record).to eq(frame: 800, pos: 800 / 96000r, bpm: 120, bar_length: 1, playing: true, paused: false)
     end
   end
 

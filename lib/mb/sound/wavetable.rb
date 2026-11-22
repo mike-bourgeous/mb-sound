@@ -505,6 +505,13 @@ module MB
         raise ArgumentError, "Unknown interpolation #{@interpolation.inspect} (#{INTERPOLATIONS.keys.join(', ')})" unless INTERPOLATIONS.include?(@interpolation)
 
         @normalize = normalize
+
+        # The builders and lazy readers set the rest; preset them all so cycle
+        # and sample tables keep one shape (batch 34: "reached 8 shape
+        # variations" in a suite run).
+        @frames = @data = @size = @frame_count = @spectra = @half_means = nil
+        @root = @loop = @sample_rate = @level_sets = @derivative_spectra = @sync_levels = nil
+
         if mode == :cycle
           build_cycle(spectra, frames, size, align)
         else
@@ -589,7 +596,9 @@ module MB
         sync = false unless sync && @mode == :cycle && @spacing
         scan_wrap = !!scan_wrap && @mode == :cycle && @frame_count > 1
         by_rate = @kernel_specs[sample_rate] ||= {}
-        by_rate[[emphasis, sync, scan_wrap]] ||= begin
+        # (an Integer key: an Array key allocated one per buffer of every
+        # wavetable tone)
+        by_rate[(emphasis ? 4 : 0) | (sync ? 2 : 0) | (scan_wrap ? 1 : 0)] ||= begin
           hi, lo = thresholds(sample_rate, sync: sync)
           levels, loop_levels = sync ? [sync_level_set(emphasis), nil] : level_set(emphasis)
           [
