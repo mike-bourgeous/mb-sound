@@ -190,25 +190,53 @@ module MB
         # +interpolation+ for every region, or (nil) each sample's own
         # (Sample#read_as: the lofi presets read drop-sample with no levels),
         # else #mips and :optimal.
-        def kernel_tables(c, sample_rate, mips: nil, interpolation: nil)
+        #
+        # With a Sampler::Reach (+reach+), only the tables of regions on its
+        # keys are built; the other slots hold Reach.placeholder's spec (the
+        # same slots and rows as without it).  +slots+ true returns, third,
+        # each slot's [index, [regions], mips, interpolation, [region
+        # indices]] (Reach#cover fills the placeholders later).  A table built here gives the GVL
+        # to other threads (Thread.pass) before the next one: building a
+        # kit's tables takes seconds and holds it otherwise.
+        def kernel_tables(c, sample_rate, mips: nil, interpolation: nil, reach: nil, slots: false)
           raise ArgumentError, 'A layered instrument plays through its layers (see #play)' if @layers
           stereo = channel_count == 2
-          tables = []
+          # (one slot per sample table: an Audio's table per channel and
+          # spacing, as Sample::Audio#table keeps them, and interpolation)
           index = {}
-          spec_of = ->(s, m, interp) {
-            t = s.audio.table(c % s.channel_count, m)
-            index[[t.object_id, interp]] ||= (tables << t.kernel_spec(sample_rate, interp)).length - 1
+          list = []
+          slot_of = ->(r, k, s, m, interp) {
+            i = index[[s.audio.object_id, c % s.channel_count, m, interp]] ||= (list << [r.sample, m, interp, [], []]).length - 1
+            list[i][3] << r
+            list[i][4] << k
+            i
           }
 
-          rows = @regions.map { |r|
+          rows = @regions.each_with_index.map { |r, k|
             s = r.sample
             interp = (interpolation || s.interpolation || :optimal).to_sym
             code = Wavetable::INTERPOLATIONS.fetch(interp) { raise ArgumentError, "Unknown interpolation #{interp.inspect}" }
             m = mips.nil? ? (s.mips.nil? ? @mips : s.mips) : mips
-            row(s, spec_of.(s, m, interp), sample_rate, keys: r.keys, vel: r.vel, seq: r.seq, rand: r.rand, root: r.root || s.root, keytrack: r.keytrack,
+            row(s, slot_of.(r, k, s, m, interp), sample_rate, keys: r.keys, vel: r.vel, seq: r.seq, rand: r.rand, root: r.root || s.root, keytrack: r.keytrack,
                 veltrack: r.veltrack, tune: r.tune, gain: r.gain * (stereo ? Instrument.pan_gain(r.pan.to_f, c, s.channel_count) : 1.0), offset: r.offset, interp: code)
           }
-          [tables, Numo::DFloat.cast(rows)]
+          tables = list.map { |s, m, interp, regs, _|
+            next Reach.placeholder_spec(sample_rate, interp) if reach && regs.none? { |r| reach.covers?(r) }
+            Instrument.table_spec(s, c, m, sample_rate, interp)
+          }
+          out = [tables, Numo::DFloat.cast(rows)]
+          out << list.each_with_index.map { |(_, m, interp, regs, ks), i| [i, regs, m, interp, ks] } if slots
+          out
+        end
+
+        # The kernel spec of sample +s+'s table for channel +c+ (see
+        # #kernel_tables), giving other threads the GVL after building one.
+        def self.table_spec(s, c, m, sample_rate, interp)
+          audio = s.audio
+          built = audio.table?(c % s.channel_count, m)
+          spec = audio.table(c % s.channel_count, m).kernel_spec(sample_rate, interp)
+          Thread.pass unless built
+          spec
         end
 
         # A voice playing this instrument (GraphNode::SamplerVoice; a
@@ -274,7 +302,7 @@ module MB
         # on the lane its allocator gives it); a clip swap resumes nothing
         # from before the swap, and clips on their own clocks nothing.
         def play(source = nil, trigger: nil, number: nil, freq: :auto, gate: :auto, shift: :auto, start: nil, transpose: 0, declick: DECLICK,
-                 interpolation: nil, mips: nil, seed: nil, steal_fade: true, lanes: false, resume: :auto)
+                 interpolation: nil, mips: nil, seed: nil, steal_fade: true, lanes: false, resume: :auto, reach: nil)
           if source && !source.is_a?(MB::Sound::Notes)
             raise ArgumentError, "Play a sampler from a synth voice (v), trigger:/number:, or a MIDI source (got #{source.inspect})" unless midi_source?(source)
             return sampler(source, transpose: transpose, start: start, declick: declick, interpolation: interpolation, mips: mips, steal_fade: steal_fade, lanes: lanes,
@@ -295,7 +323,7 @@ module MB
             end
             start ||= source.cc(lane[:start], smooth: false) if lane[:start]
             out = play(source, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose, declick: declick,
-                               interpolation: interpolation, mips: mips, seed: seed, steal_fade: steal_fade, resume: resume)
+                               interpolation: interpolation, mips: mips, seed: seed, steal_fade: steal_fade, resume: resume, reach: reach)
             out = out * source.cc(lane[:volume], default: 127, smooth: smooth) if lane[:volume]
             out = out.pan(source.cc(lane[:pan], range: -1.0..1.0, default: 64, smooth: smooth), law: lane[:law]) if lane[:pan]
             return out
@@ -324,7 +352,7 @@ module MB
           choke_time = steal_fade && steal_fade != true ? Length.seconds(steal_fade).to_f : nil
           raise ArgumentError, "steal_fade: is true, false, or a length above 0 (got #{steal_fade.inspect})" if choke_time && !(choke_time > 0)
           voice(source, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose, declick: declick,
-                        interpolation: interpolation, mips: mips, seed: seed, shared: {}, choke: choke, choke_time: choke_time, resume: resume)
+                        interpolation: interpolation, mips: mips, seed: seed, shared: {}, choke: choke, choke_time: choke_time, resume: resume, reach: reach)
         end
 
         # True if #play resumes notes by default (+resume: :auto+): every
@@ -353,14 +381,14 @@ module MB
         # (+scope+: a Hash holding the layer's ZoneValue::Index), so a
         # piano's second layer costs nothing on notes outside its keys.
         def voice(source, trigger:, number:, freq:, gate:, shift:, start:, transpose:, declick:, interpolation:, mips:, seed:, shared:, layer: false, choke: nil,
-                  scope: nil, choke_time: nil, resume: false)
+                  scope: nil, choke_time: nil, resume: false, reach: nil)
           if @layers
             n = channel_count
             alloc = source && source.stream.respond_to?(:allocator) ? source.stream.allocator : nil
             outs = @layers.each_with_index.map { |l, li|
               o = l.send(:voice, source, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose,
                                          declick: declick, interpolation: interpolation, mips: mips, seed: seed, shared: shared, layer: true, choke: choke,
-                                         scope: part?(l, alloc) ? {} : nil, choke_time: choke_time, resume: resume)
+                                         scope: part?(l, alloc) ? {} : nil, choke_time: choke_time, resume: resume, reach: reach)
               if part?(l, alloc)
                 part = GraphNode::SubLane.new(o, notes: source, wake: l.wake_check(mono: alloc.mono?), name: l.name || "layer #{li + 1}")
                 o = part.outputs.length == 1 ? part.outputs[0] : MB::Sound.channels(*part.outputs)
@@ -382,7 +410,7 @@ module MB
             GraphNode::SamplerVoice.new(
               self, channel: c, trigger: trigger, number: number, freq: freq, gate: gate, shift: shift, start: start, transpose: transpose,
               declick: declick, interpolation: interpolation, mips: mips, seed: seed, choke: choke, choke_fade: @envelope.nil?, choke_time: choke_time,
-              resume: resume ? source : nil
+              resume: resume ? source : nil, reach: reach
             )
           }
           nodes.each { |n| source.register(n) } if source && one_shot?
@@ -410,13 +438,25 @@ module MB
         # of silence).
         #
         #     amen.sampler(brk) { |v, s| s * v.env(0.0005, 0.01, 1, 0.006) }
+        #
+        # A drum kit (an instrument with a #drum_map) playing a Clip builds
+        # the playback tables of the regions on the clip's keys only (a
+        # Sampler::Reach; swaps cover the new clip's keys before they land:
+        # MIDI::ClipSource#prepare_clip).
         def sampler(source, voices: 1, **options, &block)
           inst = self
           tail = source.is_a?(Sequence::Clip) ? { tail: 0 } : {}
-          MB::Sound.synth(source, voices: voices, **tail) { |v|
-            s = inst.play(v, **options)
-            block ? block.call(v, s) : s
+          reach = options.key?(:reach) ? options.delete(:reach) : Reach.for(self, source)
+          build = -> {
+            MB::Sound.synth(source, voices: voices, **tail) { |v|
+              s = inst.play(v, **options, reach: reach)
+              block ? block.call(v, s) : s
+            }
           }
+          # (tables to build: say so, and hand the GVL to the render thread)
+          syn = Reach.notice(self, reach) ? Reach.yielding(&build) : build.call
+          syn.clip_sources.each { |c| c.prepare_with(reach) } if reach
+          syn
         end
 
         # Layers covering more than this share of the keyboard (keys 21..108

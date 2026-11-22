@@ -111,12 +111,83 @@ RSpec.describe MB::Sound::Library::Generators, 'drum beats', :aggregate_failures
     end
   end
 
+  # (beat-halftime-1: the drum-gen tests looked at 8 bars, so a beat that
+  # ended or changed character after its first phrase would not have shown)
+  it 'keeps its character for 72 bars: anchors through fill bars, hold blocks repeat and differ, energy acts in every bar' do
+    beats.each do |e|
+      bars = { 0.1 => nil, 0.5 => nil, 1.0 => nil }.to_h { |en, _| c = e.call(seed: 4, energy: en); [en, (0...72).map { |cy| hits(c, cy) }] }
+      bars.each do |en, list|
+        list.each_with_index do |h, cy|
+          what = "#{e.name} at #{en}, bar #{cy + 1}"
+          expect(h).to include([0, roles.note(:kick)]), what
+          expect(h.length).to be > 0, what
+        end
+        # hold: 2 repeats each pair of bars, except a fill bar; every block differs from the next
+        (0...36).each do |k|
+          next if (2 * k + 2) % 8 == 0
+          expect(list[2 * k + 1]).to eq(list[2 * k]), "#{e.name} at #{en}: bars #{2 * k + 1} and #{2 * k + 2}"
+        end
+        # (sparse at low energy: fewer different bars, still varying)
+        expect(list.uniq.length).to be >= (en < 0.5 ? 18 : 36), "#{e.name} at #{en}: #{list.uniq.length} different bars in 72"
+      end
+      # the backbeat's anchors play in every bar, fill bars included, above the lowest energy
+      backbeat = { 4 => roles.note(:snare), 12 => roles.note(:snare) }
+      backbeat = { 8 => roles.note(:snare) } if e.name == :halftime
+      backbeat = { 4 => roles.note(:clap), 12 => roles.note(:clap) } if %i[house techno].include?(e.name)
+      bars[0.5].each_with_index { |h, cy| backbeat.each { |st, k| expect(h).to include([st, k]), "#{e.name} bar #{cy + 1}: no #{roles::NAMES[k]} on step #{st}" } }
+      72.times do |cy|
+        expect(bars[0.1][cy] - bars[1.0][cy]).to eq([]), "#{e.name} bar #{cy + 1}: more energy dropped hits"
+        expect(bars[1.0][cy].length).to be > bars[0.1][cy].length, "#{e.name} bar #{cy + 1}: energy did nothing"
+      end
+    end
+  end
+
   it 'gives the same bars for the same values (and a seed picks another)' do
     beats.each do |e|
       a = e.call(seed: 7, energy: 0.8)
       b = e.call(seed: 7, energy: 0.8)
       expect((0...8).map { |c| hits(a, c) }).to eq((0...8).map { |c| hits(b, c) })
       expect((0...8).map { |c| hits(e.call(seed: 8, energy: 0.8), c) }).not_to eq((0...8).map { |c| hits(a, c) })
+    end
+  end
+
+  # gen-morph-1: every ordered pair of the family morphs (Generative::Morph)
+  # at 0, 0.25, 0.5, 0.75, and 1: the ends are each side exactly, hits both
+  # sides play never drop, no slot (drum, step) changes twice over the
+  # sweep (a slot with two hits of one drum, a ghost row and the snare, may
+  # take two steps), and hits per bar stay within the sides' range: 15% past
+  # it at 0.25 and 0.75, 35% past the larger at 0.5, where the anchors of
+  # both sides play (the rule: the skeleton never empties; measured at most
+  # 31%, halftime -> house).
+  it 'morphs every ordered pair of beats: exact ends, shared hits kept, each slot changing once, hits per bar in range' do
+    ts = [0.0, 0.25, 0.5, 0.75, 1.0]
+    bars = 8
+    slots = ->(clip, cy) { clip.events_for(cy).map { |e| [e.value, (e.start * 16).floor] }.tally }
+    beats.product(beats).reject { |a, b| a.equal?(b) }.each do |ea, eb|
+      a = ea.call
+      b = eb.call
+      sa = (0...bars).map { |cy| slots.(a, cy) }
+      sb = (0...bars).map { |cy| slots.(b, cy) }
+      per_t = ts.map { |t| m = a.morph(b, morph: t); (0...bars).map { |cy| slots.(m, cy) } }
+      label = "#{ea.name} -> #{eb.name}"
+      expect(per_t.first).to eq(sa), "#{label} at 0"
+      expect(per_t.last).to eq(sb), "#{label} at 1"
+      bars.times do |cy|
+        shared = sa[cy].keys & sb[cy].keys
+        per_t.each_with_index { |x, i| expect(shared - x[cy].keys).to eq([]), "#{label} bar #{cy + 1} at #{ts[i]} dropped a shared hit" }
+        (sa[cy].keys | sb[cy].keys).each do |k|
+          counts = per_t.map { |x| x[cy].fetch(k, 0) }
+          moves = counts.each_cons(2).count { |p, q| p != q }
+          most = (sa[cy].fetch(k, 0) - sb[cy].fetch(k, 0)).abs > 1 || [sa[cy].fetch(k, 0), sb[cy].fetch(k, 0)].max > 1 ? 2 : 1
+          expect(moves).to be <= most, "#{label} bar #{cy + 1}: #{k.inspect} went #{counts}"
+        end
+      end
+      lo, hi = [sa, sb].map { |s| s.sum { |h| h.values.sum } / bars.to_f }.minmax
+      per_t.each_with_index do |x, i|
+        n = x.sum { |h| h.values.sum } / bars.to_f
+        expect(n).to be >= lo * 0.85, "#{label} at #{ts[i]}: #{n} hits per bar (sides #{lo}..#{hi})"
+        expect(n).to be <= hi * (ts[i] == 0.5 ? 1.35 : 1.15), "#{label} at #{ts[i]}: #{n} hits per bar (sides #{lo}..#{hi})"
+      end
     end
   end
 
@@ -149,7 +220,9 @@ RSpec.describe MB::Sound::Library::Generators, 'drum beats', :aggregate_failures
       s2 = MB::Sound::Session.new(realtime: false)
       begin
         MB::Sound::Session.with_context(session: s2) { io.load(text) }
-        expect(io.dump(s2.arrangement, name: 'g')).to eq(text)
+        # (without the saved: stamps: two saves a second apart differ there;
+        # fixes-16, spec_hygiene_spec)
+        expect(io.dump(s2.arrangement, name: 'g').sub(/saved: "[^"]*"/, '')).to eq(text.sub(/saved: "[^"]*"/, ''))
       ensure
         s2.close
       end

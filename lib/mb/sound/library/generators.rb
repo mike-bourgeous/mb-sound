@@ -226,6 +226,9 @@ module MB
               return value unless value.kind == :generator && value.builder
               [value, {}]
             when Sequence::Clip
+              # (a morph of generators: its sides with the track's knobs,
+              # and the knob :"track/morph"; generator_morph.rb)
+              m = MORPHS[value] and return morph_track_clip(value, m, track, session, reuse)
               b = ORIGINS[value] or return value
               [b.entry, b.kwargs]
             else
@@ -256,6 +259,27 @@ module MB
 
         # Clips .track_clip built => { param => knob } (keys weak).
         KNOBS = ObjectSpace::WeakKeyMap.new
+
+        # A copy of track clip +clip+ (.track_clip; or of a clip made from
+        # one by transforms, made again from the copy) whose generator
+        # reads +session+'s knobs of the same names: what a warm-up
+        # sandbox's copy of a track's patch plays (Session::Warming plays
+        # a copy only if it shares no node with the live graph, and the
+        # live track knobs made every warm-up of a generator track only
+        # build, so YJIT compiled the new patch where it landed, 24-45 ms
+        # at 128 and 256 frames; bg-latency-2).  +clip+ itself when it
+        # isn't one, or +session+ lacks one of the knobs.
+        def copy_reading(clip, session)
+          return clip unless clip.is_a?(Sequence::Clip) # (a track's Kit of rows, a Hash)
+          lineage = clip.lineage
+          idx = lineage.index { |c| KNOBS.key?(c) } or return clip
+          root = lineage[idx]
+          built = ORIGINS[root] or return clip
+          knobs = KNOBS[root].transform_values { |k| session.knobs[k.name] }
+          return clip if knobs.value?(nil)
+          copy = run(built.entry, BLOCKS[built.entry], [], built.kwargs, knobs: knobs)
+          lineage[0...idx].reverse.reduce(copy) { |c, step| step.rederive(c) }
+        end
 
         # Clips .track_clip built from a clip => that clip (keys weak; set
         # documents print a track's clip in the place of the clip it was
@@ -386,6 +410,8 @@ module MB
         # The instrument name a generator clip's entry plays on (see
         # .generator), or nil.
         def instrument(clip)
+          # (a morph plays on its first side's, else the second's)
+          m = morph_of(clip) and return m.sides.lazy.filter_map { |s| instrument(s) }.first
           origin(clip)&.entry&.settings&.[](:instrument)
         end
 
@@ -448,18 +474,40 @@ module MB
         # defaults) on its instrument (else the soft saw, or a drum machine
         # for drum notes), DEMO_BARS bars.  Returns a Playable::Graph.
         def demo(entry)
-          clip = entry.call
           path = head_path(entry)
           inst = entry.settings[:instrument]
+          limited = played_nodes(entry, :audition).map { |n| n.until(DEMO_BARS.bars) }
+          Playable::Graph.new(nodes: limited, description: "#{path} on #{inst || 'a soft saw'}, #{DEMO_BARS} bars", ends: true,
+            note: "a generator makes note material: track :x, #{path}#{inst ? '' : ', :instrument'}; #{path}(seed: 2) for another line")
+        end
+
+        # What `bg` plays for a generator entry with no track of its name
+        # (`bg :drums, L.gen.beat.halftime` before `track :drums`, or after
+        # a new output started a new session; beat-halftime-1, 2026-11-22:
+        # the maintainer's beat stopped after 8 bars, since bg played the
+        # audition): its clip at the entry's defaults on its instrument, as
+        # #demo, without an end (a generator has no natural end; `play`
+        # keeps the 8-bar audition).  +name+ is the player's name, if any.
+        # Returns a Playable::Graph.
+        def endless(entry, name = nil)
+          path = head_path(entry)
+          inst = entry.settings[:instrument]
+          Playable::Graph.new(nodes: played_nodes(entry, name || :x), description: "#{path} on #{inst || 'a soft saw'}", ends: false,
+            note: "track #{(name || :x).inspect}, #{path} gives it a track and knobs")
+        end
+
+        # The output nodes generator entry +entry+'s clip (at its
+        # defaults) plays on its instrument (else as Playable plays a
+        # clip); +track+ names the track in messages.
+        def played_nodes(entry, track)
+          clip = entry.call
+          inst = entry.settings[:instrument]
           node = if inst
-                   Arrangement::InstrumentPatch.entry_for(inst, track: :audition).call(clip)
+                   Arrangement::InstrumentPatch.entry_for(inst, track: track).call(clip)
                  else
                    Playable.graph(clip).nodes
                  end
-          node = node.is_a?(Array) ? node : node.outputs
-          limited = node.map { |n| n.until(DEMO_BARS.bars) }
-          Playable::Graph.new(nodes: limited, description: "#{path} on #{inst || 'a soft saw'}, #{DEMO_BARS} bars", ends: true,
-            note: "a generator makes note material: track :x, #{path}#{inst ? '' : ', :instrument'}; #{path}(seed: 2) for another line")
+          node.is_a?(Array) ? node : node.outputs
         end
 
         # What `play` plays for a flow entry: a sketch of the chain, one bar

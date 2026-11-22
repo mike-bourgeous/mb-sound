@@ -11,6 +11,13 @@ RSpec.describe('spec hygiene') do
       'joins buffers in quadratic time (each step copies the growing result: 12000 64-sample buffers took 2.2 s)',
       'SpecBuffers.join(list) in specs, first.concatenate(*rest) in lib',
     ],
+    [
+      # (fixes-16: library/drum_beats_spec compared a set saved twice as
+      # text, a flake whenever the two saves fell in different seconds)
+      /expect\((?:MB::Sound::)?(?:io|GraphIO)\.dump\([^()]*(?:\([^()]*\)[^()]*)*\)\)\.to eq\(/,
+      'compares a document saved now with another as text, saved: stamps included (they differ when the saves fall in different seconds)',
+      "compare both without the stamp: text.sub(/saved: \"[^\"]*\"/, '') (see rack_documents_spec's without_saved)",
+    ],
   ]
 
   rules.each do |pattern, why, instead|
@@ -20,6 +27,21 @@ RSpec.describe('spec hygiene') do
       }
       expect(hits).to eq([]), "#{hits.join("\n")}\n#{why}; write #{instead}"
     end
+  end
+
+  # (fixes-17: perf_spec's `wait_until { acks >= 3 }` ran out its 5 s on
+  # every run, silently, and under load the next wait did too, leaving a
+  # nil that failed far from the cause.)  The files with a wait_until of
+  # their own (device and JACK specs) are left to a later round.
+  it 'has no bare wait_until statement (a timeout that goes unnoticed)' do
+    hits = files.flat_map { |f|
+      text = File.read(File.join(root, f))
+      next [] if text.match?(/^\s*def wait_until\b/)
+
+      text.each_line.with_index(1).filter_map { |line, n| "#{f}:#{n}" if line.match?(/^\s*wait_until\s*(\(|\{|do\b)/) }
+    }
+    expect(hits).to eq([]), "#{hits.join("\n")}\na wait whose result nobody reads times out silently; " \
+                            'write wait_until!(what) { } (UIHelpers: raises on timeout) or expect(wait_until { }).to eq(true), why'
   end
 
   # A constant assigned in a spec file's describe block is a top-level
@@ -69,7 +91,22 @@ RSpec.describe('spec hygiene') do
     s.arrangement.track(:lead) { |c| c.tone.triangle * c.amp_env }
     s.arrangement.scene(:intro, lead: MB::Sound.seq(MB::Sound::C4).n4)
     expect(SessionGuard.leftovers(s)).to eq('tracks :lead; scenes :intro; names :lead (track)')
+    # (as the default Session: its output opened too)
+    expect(SessionGuard.leftovers(s, state: true)).to eq('tracks :lead; scenes :intro; names :lead (track); its output opened (MB::Sound::NullOutput)')
     s.close
     expect(SessionGuard.leftovers(s)).to be_nil
+  end
+
+  # fixes-16: a screen's Space paused the default Session's transport, and
+  # a later example's at_bar block in that Session never ran
+  it 'names a paused transport and an opened output, for the default Session guard' do
+    s = MB::Sound::Session.new(realtime: false)
+    expect(SessionGuard.leftovers(s, state: true)).to be_nil # (not opened by making it)
+    s.pause_transport
+    s.process_buffer(16)
+    expect(SessionGuard.leftovers(s, state: true)).to eq("the transport paused; its output opened (#{s.output.class})")
+    expect(SessionGuard.leftovers(s)).to be_nil # (not the default Session)
+  ensure
+    s&.close
   end
 end

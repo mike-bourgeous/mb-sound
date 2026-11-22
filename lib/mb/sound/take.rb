@@ -563,6 +563,9 @@ module MB
           fade_in: s.fade_in,
           fade_out: s.fade_out,
           replace_declick: s.replace_declick,
+          # (console lines count MIDI channels from 1; takes saved before
+          # midi-one-based-1 don't say so, and replay counting from 0)
+          midi_one_based: true,
           rng: [Marshal.dump(MB::Sound::Internal.root_rng)].pack('m0'),
           time: Time.now.strftime('%Y-%m-%d %H:%M:%S'),
         }.tap { |h|

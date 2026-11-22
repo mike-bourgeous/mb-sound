@@ -702,6 +702,7 @@ module MB
         lit = literal || Param.method(:literal)
         v = Param.type_of(value) == :number ? typed(value) : value
         v = v.round if stepped? && v.is_a?(Float) && v == v.round
+        v = within_range(v) if clamp && range.is_a?(Range) && !choices?
         # (a plain-number value prints as a plain number: literals print
         # Floats that are exact tenths of a dB as -6.db, which a plain
         # range's check refuses on load; omnibus17)
@@ -715,6 +716,30 @@ module MB
                end
         [name.inspect, text, *extras(lit, cc: cc, description: description, options: options)]
       end
+
+      # +value+ limited to the range without a warning, for printing a
+      # declaration that must load again: a value read from a float32
+      # buffer lands just outside a range end that has no exact float32
+      # (fixes-16: a knob following another at its top saved
+      # (-0.3..0.3).at(0.30000001192092896), which the loader refused).
+      # Values it can't compare with the range pass through.
+      def within_range(value)
+        plain = value.is_a?(Numeric) && !value.is_a?(MB::Sound::Decibels)
+        v = begin
+          plain ? value : (Param.type_of(value) == Param.type_of(range.begin || range.end) ? Param.magnitude(value) : nil)
+        rescue Error
+          nil
+        end
+        return value unless v.is_a?(Numeric) && v.real?
+
+        lo = range.begin && Param.magnitude(range.begin)
+        hi = range.end && Param.magnitude(range.end)
+        return value if (lo.nil? || v >= lo) && (hi.nil? || v <= hi)
+
+        limited = v.clamp(lo || -Float::INFINITY, hi || Float::INFINITY)
+        plain ? limited : typed(limited)
+      end
+      private :within_range
 
       # The graph-document header line (format 5, the canonical spelling:
       # `param :cutoff, (150.0..8000.0).at(2400.0), description: "..."`)

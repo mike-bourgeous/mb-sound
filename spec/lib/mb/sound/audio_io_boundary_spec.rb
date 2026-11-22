@@ -11,7 +11,7 @@ module AudioIOBoundary
   FILES = (
     %w[array_input background_output concealment device_input device_output exit_close ffmpeg_input ffmpeg_output
        input_buffer_wrapper output_buffer_wrapper io_base io_input io_output jack null_input null_output].map { |f| "mb/sound/#{f}.rb" } +
-    %w[event source file_source live_source input output virtual_input midi_file control_map realtime_reader tempo_map].map { |f| "mb/sound/midi/#{f}.rb" }
+    %w[event source file_source live_source input output ports virtual_input midi_file control_map realtime_reader tempo_map].map { |f| "mb/sound/midi/#{f}.rb" }
   ).freeze
 
   EXT_DIRS = %w[ext/mb/sound/fast_audio ext/mb/sound/fast_midi].freeze
@@ -35,6 +35,9 @@ module AudioIOBoundary
     'small value and buffer types the gem would take along or replace' => [
       'mb/sound/input_buffer_wrapper.rb: CircularBuffer', 'mb/sound/output_buffer_wrapper.rb: CircularBuffer',
       'mb/sound/concealment.rb: Length::Samples', 'mb/sound/midi/live_source.rb: Length',
+      # (midi-one-based-1: the 1-based channel and program edge, plain Ruby)
+      'mb/sound/midi/event.rb: Channel', 'mb/sound/midi/event.rb: Program',
+      'mb/sound/midi/file_source.rb: Channel', 'mb/sound/midi/midi_file.rb: Channel',
     ],
     'process starts through the process starter (spawner-1): the gem would take Starter along (plain Ruby, no mb-sound in its process)' => [
       'mb/sound/ffmpeg_input.rb: Starter', 'mb/sound/io_base.rb: Starter',

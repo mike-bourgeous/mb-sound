@@ -194,11 +194,15 @@ module MB
           @epoch = epoch + 1
           without_command_or_line {
             pb = arrangement.playback
+            # (a seek landing late, its form's lock busy, lands that far past
+            # its target: #land_form_change)
+            late = @seek_late
             if target.is_a?(Symbol) && pb && !pb.ended? && (pb.form.sections.key?(target) || pb.form.labels.key?(target))
-              pb.seek_now(target)
+              pb.seek_now(target, late: late)
             else
               pos = target.is_a?(Symbol) ? markers.position(target) : seek_position(target)
               raise ArgumentError, "No marker #{target.inspect}" if pos.nil?
+              pos += late if late
               if pb && pb.started? && !pb.ended? && pos >= pb.start_time
                 # The form plays on from the pass playing there in an
                 # uninterrupted run (G4; Form::Playback#seek_position)
@@ -225,7 +229,7 @@ module MB
           raise 'Nothing to restore for the timeline' unless state.is_a?(TimelineState)
           @epoch = epoch + 1
           without_command_or_line {
-            @transport.seek(state.pos)
+            @transport.seek(@seek_late ? state.pos + @seek_late : state.pos)
             pb = arrangement.playback
             pb.restore_seek(state.form) if state.form && pb && !pb.ended?
           }
@@ -254,15 +258,77 @@ module MB
         # of a span; see #process_buffer), with the changes due before them
         # in queue order (so a change for the same time issued earlier lands
         # first, as in #commit_due).
+        #
+        # A seek or its undo reads and moves the playing form, so it takes
+        # the form's lock, without waiting (Form::Playback::Lock: the
+        # scheduler may hold it while it waits for the render lock); once
+        # per span.  If the lock is busy (a section's scene launching), the
+        # seek and what is queued after it wait for a later span, and the
+        # seek lands late, that far past its target (#land_form_change).
         def commit_due_seeks
           while @changes.any? { |x| timeline_change?(x) && x.time <= @transport.position }
             while (c = @changes.first) && c.time <= @transport.position
+              pb = nil
+              if form_change?(c)
+                return if @seek_tried_frame == @frame # (one try per span)
+                pb = hold_form(c)
+                if pb == false
+                  @seek_tried_frame = @frame
+                  return
+                end
+              end
               @changes.shift
-              pos = @transport.position
-              commit_change(c, land_pos: pos, land_frame: @frame, commits: stamp(pos, frame: @frame), immediate: false)
+              land_form_change(c, pb)
               break if timeline_change?(c) # what is due now depends on the new position
             end
           end
+        end
+
+        # True for a change that reads and moves the playing form: a seek
+        # or its undo (see #commit_due_seeks).
+        def form_change?(c)
+          c.kind == :seek || (c.kind == :restore && c.subject == :timeline)
+        end
+
+        # Takes the playing form's lock for change +c+ (see #form_change?)
+        # without waiting.  Returns the Form::Playback (release it after),
+        # nil if no form plays, or false if its lock is busy: the first
+        # time, the change is remembered as deferred (where it was due, for
+        # #land_form_change).  Allocates nothing.
+        def hold_form(c)
+          pb = @arrangement&.playback or return nil
+          return pb if pb.try_hold
+
+          unless @seek_deferred_seq == c.seq
+            @seek_deferred_seq = c.seq
+            @seek_deferred_pos = @transport.position
+            @seek_deferred_frame = @frame
+          end
+          false
+        end
+
+        # Lands due change +c+ now (at the span's start), with the form held
+        # (+pb+, from #hold_form, released after).  A change deferred by a
+        # busy form lands that much later: a seek's target moves as far
+        # past (+@seek_late+, read by #apply_seek and #restore_timeline), so
+        # the song is where an on-time landing would have put it, and the
+        # render thread queues a :late_seek journal note with the frames.
+        def land_form_change(c, pb)
+          pos = @transport.position
+          late = nil
+          if @seek_deferred_seq == c.seq
+            late = pos - @seek_deferred_pos
+            frames = @frame - @seek_deferred_frame
+            @seek_deferred_seq = nil
+            @seek_late = late if late > 0
+          end
+          commit_change(c, land_pos: pos, land_frame: @frame, commits: stamp(pos, frame: @frame), immediate: false)
+          if late
+            @journal.note_entry(kind: :late_seek, subject: c.subject, lands: c.lands, data: { frames: frames, seq: c.seq, kind: c.kind })
+          end
+        ensure
+          @seek_late = nil
+          pb&.release_hold
         end
 
         # The number of frames (1 to +count+ - 1) before the next timeline

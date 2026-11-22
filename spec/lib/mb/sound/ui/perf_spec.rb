@@ -435,10 +435,17 @@ RSpec.describe(MB::Sound::UI::Perf) do
       # An XTVERSION answer (a DCS the decoder would otherwise read as
       # Alt-P and text) and a DA2 answer, as a terminal sends them
       @term.write("\eP>|Konsole 24.08.3\e\\\e[>1;240802;0c")
-      wait_until { p.identity[:da2] }
-      wait_until { p.summary[:acks][:answered] >= 3 }
+      wait_until!('the DA2 answer', timeout: 15) { p.identity[:da2] }
+      # A query rides on a frame the screen writes (its answer times the
+      # terminal's parse of that frame), and an idle screen writes none:
+      # this wait used to run out its 5 s every time, silently, with no
+      # query sent (fixes-17).  Redraws make the frames.
+      wait_until!('3 terminal answers', timeout: 15) {
+        @tiles.invalidate
+        p.summary[:acks][:answered] >= 3
+      }
       @term.type('12')
-      wait_until { p.summary[:keys][:n] >= 2 }
+      wait_until!('2 keys matched to frames', timeout: 15) { p.summary[:keys][:n] >= 2 && p.summary[:keys][:p95] }
       @tiles.stop_perf
       s = p.summary
       expect(s[:frames]).to be > 5
@@ -464,7 +471,7 @@ RSpec.describe(MB::Sound::UI::Perf) do
       p = @tiles.start_perf
       @tiles.type_scripted('ab')
       expect(@term.wait_for('t> ab')).to eq(true) # (to the REPL, as typed)
-      wait_until { p.summary[:keys][:n] >= 2 }
+      wait_until!('2 keys', timeout: 15) { p.summary[:keys][:n] >= 2 }
       expect(p.summary[:keys][:n]).to eq(2)
       expect(p.typed_keys).to eq(0) # (scripted: not his)
       @tiles.stop_perf

@@ -34,6 +34,32 @@ RSpec.describe(MB::Sound::Library::Audition, :aggregate_failures) do
     expect(played.map(&:first).uniq).to include(:instrument, :kit, :effect, :master, :envelope, :generator, :flow)
   end
 
+  # (ux-friction-4, the maintainer's take of 2026-11-21: with his fonts
+  # installed `bg :x, L.kit.jazz` raised "Cannot make a MIDI stream from
+  # #<Kit ...>", and `bg :y, L.inst.funk_kit` "Nothing in Clip(...) plays
+  # a TR-808 voice"; the sweep above meets the kits by kind on their
+  # fallback machine only)
+  it 'plays every kit by kind on a SoundFont, and drum instruments a beat' do
+    require_relative '../../../../support/sf2_writer'
+    dir = File.dirname(tmp_path('fonts/x'))
+    FileUtils.mkdir_p(dir)
+    MB::Sound::Sampler::FontPath.only = [dir]
+    MB::Sound::Drums::InstalledKits::KINDS.each_value do |k|
+      name, (bank, program) = k[:fonts].first
+      SF2Writer.drum_kit(File.join(dir, "#{name}.sf2"), keys: 35..61, name: name, bank: bank, program: program) unless File.exist?(File.join(dir, "#{name}.sf2"))
+    end
+    kits = MB::Sound::L.kit.installed.entries
+    drums = MB::Sound::Library.index.entries(kind: :instrument).select { |e| e.name.to_s.match?(/kit|drum/) || e.tags.include?(:drums) }
+    expect(kits.map(&:name)).to include(:acoustic, :jazz, :hand_percussion, :gm)
+    expect(drums.map(&:name)).to include(:funk_kit)
+    (kits + drums).each do |e|
+      expect(MB::Sound::Drums::InstalledKits.found(e.name)).not_to be_nil if e.family == :installed
+      g = MB::Sound::Playable.graph(described_class.playable(e))
+      peak = 60.times.map { g.nodes.map { |n| (b = n.sample(800)) ? b.abs.max : 0 }.max }.max
+      expect(peak).to be > 0.001, "#{e.head_path} is silent"
+    end
+  end
+
   it 'plays on MAIN at -6 dB without CUE, on CUE with it, and stops' do
     s = session
     MB::Sound::Session.with_context(session: s) do

@@ -42,6 +42,7 @@ require_relative 'session/ui_feed'
 require_relative 'session/warming'
 require_relative 'session/carry'
 require_relative 'session/set_clear'
+require_relative 'session/midi_outs'
 
 module MB
   module Sound
@@ -97,6 +98,7 @@ module MB
       include KeyChanges
       include TempoChanges
       include MidiIn
+      include MidiOuts
       include AudioRecording
       include Stems
       include MonitorTrim
@@ -200,6 +202,15 @@ module MB
         @default ||= new(fade_in: DEFAULT_FADE_IN, fade_out: DEFAULT_FADE_OUT)
       end
 
+      # The track names of the default session the last .use_output closed
+      # (a new output, as `latency :low` opens, starts a new session
+      # without the old one's tracks, knobs, and scenes), so a command
+      # naming one of them can say where it went (PlaybackMethods#bg;
+      # beat-halftime-1).  Empty if none.
+      def self.left_behind
+        @left_behind || []
+      end
+
       # True if the default session's output was chosen by the user (given
       # to .use_output with +chosen: true+, e.g. through
       # PlaybackMethods#use_output or #latency), rather than opened
@@ -221,6 +232,7 @@ module MB
       def self.use_output(output, chosen: true)
         if @default && !@default.closed?
           raise ArgumentError, 'Stop the background players first (e.g. panic)' unless @default.idle?
+          @left_behind = @default.arrangement.tracks.keys.freeze
           @default.close
         end
 
@@ -404,8 +416,13 @@ module MB
         # Session.span; MIDI::Stream#spy)
         @span = Span.new(self, 0, 0r, 0r, false, 48000, 0)
         @player_frame = nil
+        @write_frame = 0 # (see MidiOuts)
+        @midi_outs = nil # (MidiOuts: OutNodes holding notes)
+        @reading_player = nil # (MidiOuts: the player being read)
         @sound_end_frame = 0 # (see #sound_end_frame)
         @schedule_ran_kept = nil # (see #schedule_ran_frame)
+        @ran_frame = nil # (see #note_schedule_ran_frame)
+        @ran_frame_pos = nil
         @span_end_pos = nil # (see #keep_schedule_ran_frame)
         @asleep_ids = nil # (unused since dropouts-2; see Strip#span_graphs)
         @span_graph_scratch = nil
@@ -904,12 +921,19 @@ module MB
       # had come is kept from before the seek (#keep_schedule_ran_frame):
       # a block seeking back from its own time ends a render there at any
       # buffer size (seed 768014, fix-batch-1101).
+      #
+      # The frame is the one found in the span that reached the block's
+      # time (#note_schedule_ran_frame), so it is the same at any buffer
+      # size while the tempo moves (fixes-16, soak seed 789018: counted
+      # back from the end of the last buffer at the tempo there, a ramp
+      # started by the block put it 1-3 frames late with 800-frame buffers
+      # and on time with 367).
       def schedule_ran_frame
         kept = @schedule_ran_kept
         pos = @scheduler.ran_ahead_time or return kept
         now = @transport.position
         return kept if pos > now
-        f = @frame - @transport.frames_of(now - pos, Rational(output.sample_rate)).floor
+        f = pos == @ran_frame_pos ? @ran_frame : @frame - @transport.frames_of(now - pos, Rational(output.sample_rate)).floor
         kept && kept > f ? kept : f
       end
 
@@ -1166,6 +1190,7 @@ module MB
         # dropouts-2: two new SFloats a buffer were ~470 KB/s of garbage
         # at 256 frames); callers of #process_buffer keep what it returns
         @reuse_mix = Thread.current.equal?(@thread)
+        @write_frame = @frame # (MidiOuts)
 
         mix = @render_lock.synchronize {
           # A seek (or its undo) landing inside the buffer splits it: the
@@ -1272,10 +1297,25 @@ module MB
         rate = Rational(output.sample_rate)
         return if @transport.frames_of(pos - last, rate) >= 1
 
-        f = @frame - @transport.frames_of(last - pos, rate).floor
+        f = pos == @ran_frame_pos ? @ran_frame : @frame - @transport.frames_of(last - pos, rate).floor
         @schedule_ran_kept = f if @schedule_ran_kept.nil? || f > @schedule_ran_kept
       end
       private :keep_schedule_ran_frame
+
+      # Notes the session frame of the latest time a scheduled block ran
+      # for once a span (+from+ to +to+ on the timeline, +per_sample+ whole
+      # notes a frame, starting at frame @frame) reaches it: the first
+      # frame at or past it, in the span's own tempo (see
+      # #schedule_ran_frame).  Called with the render lock held, for spans
+      # whose timeline moves.
+      def note_schedule_ran_frame(from, to, per_sample)
+        pos = @scheduler.ran_ahead_time or return
+        return if pos == @ran_frame_pos || pos < from || pos >= to
+
+        @ran_frame_pos = pos
+        @ran_frame = @frame + ((pos - from) / per_sample).ceil
+      end
+      private :note_schedule_ran_frame
 
       # Renders +count+ frames (one span of #process_buffer): scheduled
       # blocks, changes landing in the span, players, and the master chain.
@@ -1311,6 +1351,7 @@ module MB
             p.timeline_nodes.each { |n| n.start_at(from, origin: p.start, launch: p.launch, transport: @transport) } if p.started
           end
           keep_schedule_ran_frame
+          @ran_frame_pos = nil # (the times blocks ran for are forgotten too)
           @scheduler.seeked(from)
         end
 
@@ -1363,6 +1404,8 @@ module MB
 
         # Graphs kept for #resume or #undo keep their shared nodes in step
         read_kept_graphs(@frame + count)
+        # MIDI out graphs no longer read end their notes (see MidiOuts)
+        end_midi_out_span(@frame + count) if @midi_outs
 
         # (starts that only wait for a hold leave the timeline where it
         # is: see #timeline_idle?)
@@ -1371,6 +1414,7 @@ module MB
           whole_notes = to - from
           @transport.advance_span(from, to, whole_notes)
           end_clock_span(count, whole_notes, moving)
+          note_schedule_ran_frame(from, to, per_sample)
         end
         @span_end_pos = @transport.position # (the timeline before a seek; see #keep_schedule_ran_frame)
         # Pre-chain master gain (the default; see #master_gain_post?)
@@ -2216,10 +2260,12 @@ module MB
           begin
             @knob_frame = base + offset if @knob_frame
             @player_frame = base + offset
+            @reading_player = p
             data = p.input.read(frames)
           ensure
             @knob_frame = base if @knob_frame
             @player_frame = nil
+            @reading_player = nil
           end
           elapsed = MB::U.clock_now - t
           p.cpu = (p.cpu || 0.0) + elapsed if @ui_feed
@@ -2461,6 +2507,15 @@ module MB
         end
         @thread.name = 'MB::Sound::Session'
         @thread.priority = RENDER_THREAD_PRIORITY
+
+        # Generator cycles are computed ahead on the scheduler thread
+        # while this session renders (Scheduler#background starts that
+        # thread on first use).  The scheduler joined Ahead only when its
+        # thread started for a scheduled block, so a console session with
+        # nothing scheduled (`track`, `bg`, `swap`) computed every new cycle
+        # of a generator on the render thread, 0.3-0.9 ms at 128 frames
+        # for the drum beats (bg-latency-2).
+        Generative::Ahead.attach(@scheduler)
 
         # Stop the thread and close the output cleanly at exit (held
         # weakly: an at_exit block would keep this Session and every graph

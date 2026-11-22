@@ -94,7 +94,7 @@ module MB
           # (a clip's stream through transforms: set documents' wires,
           # `wire :lead, riff.stream.echo(1.n8, 3)`; transforms taking
           # blocks are code)
-          'MB::Sound::Sequence::Clip' => %i[then stream],
+          'MB::Sound::Sequence::Clip' => %i[then stream morph],
           'MB::Sound::MIDI::Stream' => %i[then] + (MB::Sound::MIDI::Stream::TRANSFORMS - %i[select reject map_notes]),
           'MB::Sound::Rack' => %i[with >> << using],
           # A rack's knobs with modulation around them (racks R2)
@@ -147,7 +147,7 @@ module MB
         # with_seed: a block whose random draws start from a given seed
         # (MB::Sound.with_seed; fit-patch-2: fits print it around a voice),
         # walked as document code.)
-        TOP_EXTRA = (Set[:per_voice, :per_channel, :per_harmonic, :scale, :tones, :weights, :harmony, :markov, :lsystem, :knob, :cc, :modes, :breakbeat, :with_seed] |
+        TOP_EXTRA = (Set[:per_voice, :per_channel, :per_harmonic, :scale, :tones, :weights, :harmony, :markov, :lsystem, :knob, :cc, :modes, :breakbeat, :with_seed, :midi_out] |
                      MB::Sound::Rack::CONSTRUCTORS).freeze
 
         # Methods whose blocks build graphs (run once per call as document

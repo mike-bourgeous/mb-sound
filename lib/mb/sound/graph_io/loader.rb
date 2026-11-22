@@ -170,6 +170,9 @@ module MB
           # names (documents before format 14, which named
           # L.gen.techno_beat; Library::Heads::RENAMED)
           @old_names = false
+          # Whether MIDI channel and program arguments count from 0
+          # (documents before format 16, shifted at load; MIDI::Channel)
+          @old_midi = false
           @path = path
           @label = path || '(graph document)'
           @given_inputs = inputs.transform_keys(&:to_sym)
@@ -572,6 +575,7 @@ module MB
               @old_tempo = !GraphIO.since?(version, :tempo_live)
               @old_scales = !GraphIO.since?(version, :following_scales)
               @old_names = !GraphIO.since?(version, :beat_family)
+              @old_midi = !GraphIO.since?(version, :midi_one_based)
               @comment_notes = GraphIO.since?(version, :metadata)
               @document.read_graph_line(kwargs, offsets: @header_offsets || {})
             when :inputs
@@ -1239,6 +1243,7 @@ module MB
           end
 
           args, kwargs = old_db_arguments(receiver, name, args, kwargs) if @old_db
+          args, kwargs = old_midi_arguments(receiver, name, args, kwargs) if @old_midi
           # (before format 6, clip shift was rotate's alias)
           name = :rotate if @old_shift && name == :shift && receiver.is_a?(Sequence::Clip)
 
@@ -1268,6 +1273,37 @@ module MB
           # root when loaded, a fixed scale; gen-ux-1)
           result = result.with_root(result.root) if @old_scales && name == :scale && result.is_a?(Scale) && result.follows_key?
           result
+        end
+
+        # Calls whose MIDI channel arguments documents before format 16
+        # wrote counted from 0: channel filters on streams, Notes, and clips
+        # (positional), and +channel:+ of these methods.  midi_out came
+        # after channels counted from 1, so it is not here.
+        OLD_MIDI_FILTERS = %i[channel rechannel to_channel].freeze
+        OLD_MIDI_CHANNEL_KWARGS = %i[stream cc to_midi midi_clip note_stats].freeze
+
+        # Arguments for a call in a document older than format 16, whose
+        # 0-based MIDI channels become the 1-based ones they meant
+        # (MIDI::Channel).
+        def old_midi_arguments(receiver, name, args, kwargs)
+          if OLD_MIDI_FILTERS.include?(name) && !args.empty? && (receiver.is_a?(MIDI::Stream) || receiver.is_a?(MB::Sound::Notes) || receiver.is_a?(Sequence::Clip))
+            args = [old_midi_shift(args[0]), *args.drop(1)]
+          end
+          if OLD_MIDI_CHANNEL_KWARGS.include?(name) && kwargs.key?(:channel)
+            kwargs = kwargs.merge(channel: old_midi_shift(kwargs[:channel]))
+          end
+          [args, kwargs]
+        end
+
+        # A 0-based channel (Integer, Array, or Range) counted from 1;
+        # other values stay as they are (and raise where they're used).
+        def old_midi_shift(c)
+          case c
+          when Integer then c + 1
+          when Array then c.map { |x| old_midi_shift(x) }
+          when Range then (c.begin.is_a?(Integer) && c.end.is_a?(Integer)) ? Range.new(c.begin + 1, c.end + 1, c.exclude_end?) : c
+          else c
+          end
         end
 
         # Arguments for a call in a document older than format 3, whose

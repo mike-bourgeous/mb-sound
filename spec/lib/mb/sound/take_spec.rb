@@ -676,6 +676,34 @@ RSpec.describe(MB::Sound::Take) do
     expect(frames).to be_between(192000, 193600)
   end
 
+  # (midi-one-based-1: console lines count MIDI channels from 1; takes
+  # saved before it say nothing and typed them counted from 0)
+  it 'replays MIDI channels of takes saved before midi_one_based counted from 0, and of newer takes counted from 1' do
+    seen = []
+    stub_const('MB::Sound::TakeChannelProbe', seen)
+    replay = ->(code, **opts) {
+      MB::Sound::Take::Replay.new(bpm: 120, bar_length: 1r, master_gain: 0.5, fade_in: nil, fade_out: nil, rng: nil, ends: 1r, **opts) { |rp|
+        rp.line(0r, [], code)
+      }
+    }
+    line = 'MB::Sound::TakeChannelProbe << [cc(1, channel: %d).channel, C4.to_midi(channel: %d).channel, seq(C4).n4.stream(channel: %d).source.channel, seq(C4).n4.stream.source.channel]'
+    out = -> { MB::Sound::NullOutput.new(channels: 2, sleep: false) }
+    # old (no midi_one_based:): channel 0 was the first; defaults stay channel 1
+    expect { replay.(format(line, 0, 9, 1)).render(out.(), tail: 0) }.not_to output.to_stderr
+    expect(seen).to eq([[1, 9, 1, 0]])
+    seen.clear
+    expect { replay.(format(line, 1, 10, 2), midi_one_based: true).render(out.(), tail: 0) }.not_to output.to_stderr
+    expect(seen).to eq([[1, 9, 1, 0]])
+    seen.clear
+    expect { replay.(format(line, 0, 1, 1), midi_one_based: true).render(out.(), tail: 0) }.to output(/Take line 1 raised ArgumentError.*channels count from 1/).to_stderr
+    expect(seen).to eq([])
+
+    # midi_out came after channels counted from 1: always 1-based
+    expect(MB::Sound::MIDI::Channel.zero_based { MB::Sound::MIDI::Destination.check_channel(1) }).to eq(1)
+    expect(MB::Sound::MIDI::Channel.zero_based? ).to eq(false)
+    expect(MB::Sound::Take.new.send(:start_state)).to include(midi_one_based: true)
+  end
+
   # (ux-friction-3: `seek 0` is the start, as seek 1, since the
   # maintainer asked for it back)
   it 'replays seek 0 as a seek to the start' do

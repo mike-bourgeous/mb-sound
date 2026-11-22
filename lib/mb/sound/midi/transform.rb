@@ -156,14 +156,13 @@ module MB
           process([event], event.time, event.time).first
         end
 
-        # Keeps events on some channels (see Stream#channel).
+        # Keeps events on some channels (see Stream#channel): +channels+
+        # count from 1 (MIDI::Channel.set_of).
         class Channel < Transform
           def initialize(parent, channels)
             super(parent)
-            list = channels.is_a?(Integer) ? [channels] : channels.to_a
-            unless !list.empty? && list.all? { |c| c.is_a?(Integer) && c.between?(0, 15) }
-              raise ArgumentError, "MIDI channels are Integers from 0 to 15 (got #{channels.inspect})"
-            end
+            list = Array(MIDI::Channel.set_of(channels)).to_a
+            raise ArgumentError, "MIDI channel filters need at least one channel (got #{channels.inspect})" if list.empty?
 
             @channels = list.uniq.sort.freeze
             @node_type_name = "channel(#{channels.inspect})"

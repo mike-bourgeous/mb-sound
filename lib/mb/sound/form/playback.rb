@@ -52,6 +52,44 @@ module MB
 
         include Walking
 
+        # Raised (in check mode, Lock.check) when a thread holding a realtime
+        # Session's render lock waits for a Playback's lock it doesn't hold.
+        class LockOrderError < RuntimeError; end
+
+        # A Playback's lock, and the lock order (fixes-17): a thread holding
+        # Playback's lock may take the render lock (the scheduler launching
+        # a section builds and adds graphs, Session#add), so a thread
+        # holding the render lock never waits for Playback's lock.  The
+        # render thread takes it only with #try_enter, once per span, and a
+        # seek that finds it busy lands at a later span (Session::Seeks
+        # #commit_due_seeks).  Before, a `go :section` seek landing while
+        # the scheduler launched a section froze the console in a deadlock
+        # (since 74a210582, 2026-10-11, seeks through the change queue).
+        # With Lock.check (spec_helper), waiting for the lock under a
+        # realtime Session's render lock raises LockOrderError.  Offline
+        # Sessions run scheduled blocks on the render thread itself, one
+        # thread taking both, so they aren't checked.
+        class Lock < Monitor
+          class << self
+            # True to raise LockOrderError for the wrong lock order (see
+            # Lock); spec_helper sets it.
+            attr_accessor :check
+          end
+          self.check = false
+
+          def initialize(session)
+            super()
+            @session = session
+          end
+
+          def synchronize(&)
+            if Lock.check && !mon_owned? && @session.realtime? && @session.render_lock_owned?
+              raise LockOrderError, "a thread holding the render lock waited for a form's lock (the scheduler may hold it while it waits for the render lock: a deadlock); take it with try_enter"
+            end
+            super
+          end
+        end
+
         # A decision inside the playback (see Form::Step).
         Step = Form::Step
 
@@ -72,7 +110,7 @@ module MB
           @form = form
           @seed = Integer(seed)
           @program = form.program
-          @lock = Monitor.new
+          @lock = Lock.new(@session)
           @history = []
           @played = []
           @counters = {}.freeze
@@ -305,8 +343,11 @@ module MB
         # through (gotos not taken, first pick options).  The action of a
         # :seek change (see Session#seek and Session::Seeks), so it runs
         # with the render lock held, on the frame where the seek lands.
+        # +late+ (whole notes) moves the timeline that far past the target,
+        # for a seek that landed late (the form's lock was busy: see Lock),
+        # so the song is where an on-time landing would have put it.
         # Returns the Decision (the section that plays there).
-        def seek_now(name)
+        def seek_now(name, late: nil)
           target = control_target(name)
           @lock.synchronize {
             raise 'The form has ended' if @ended
@@ -315,7 +356,7 @@ module MB
               # Only a generate step plays it: where the plan from here
               # (decided as the form would decide) first plays it
               found = find_ahead(name) or raise ArgumentError, "#{name.inspect} doesn't come up in the next #{PLAN_SEARCH} passes of the form"
-              return seek_to_pass(*found)
+              return late ? seek_to_pass(*found, at: found[0].start + late) : seek_to_pass(*found)
             end
             index ||= target[0] == :label ? @form.labels[name] : first_play(name)
             pos ||= score_positions[index]
@@ -323,7 +364,8 @@ module MB
             drop_pending_pass
             @transport.fills.remove_owner(self, after: pos)
             @looping = false
-            @transport.seek(pos)
+            at = late ? pos + late : pos
+            @transport.seek(at)
 
             step = case @program[index][0]
                    when :label then walk(index, time: pos)
@@ -331,16 +373,16 @@ module MB
                      forced_generate_step(name).then { |st| length ? st.with(length: length) : st }
                    else play_step(index, @counters)
                    end
-            Session.with_context(session: @session, time: pos, source: Session.context&.source || :set) {
+            Session.with_context(session: @session, time: at, source: Session.context&.source || :set) {
               set_label_markers(step.labels, pos)
               if step.section
                 @counters = step.counters
                 begin_pass(step, pos)
               else
-                finish_form(pos)
+                finish_form(at)
               end
             }
-            Decision.new(section: step.section, at: @session.stamp(pos), committed: true)
+            Decision.new(section: step.section, at: @session.stamp(at), committed: true)
           }
         end
 
@@ -401,6 +443,19 @@ module MB
             end
             seek_to_pass(pass, plan.history.first(pass.number), at: pos)
           }
+        end
+
+        # Takes this form's lock without waiting, for the render thread (see
+        # Lock; Session::Seeks#commit_due_seeks).  Returns true if it was
+        # free (or already held by this thread): release it with
+        # #release_hold.
+        def try_hold
+          @lock.try_enter
+        end
+
+        # Releases the lock #try_hold took.
+        def release_hold
+          @lock.exit
         end
 
         # What #restore_seek needs to put the form back in the pass playing

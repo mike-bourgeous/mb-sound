@@ -184,14 +184,35 @@ module MB
           return s.arrangement.play(name, :on, at: point.given? ? point : nil, fade: fade)
         end
         name, sound = sound.nil? ? [nil, name_or_sound] : [name_or_sound, sound]
+        # (a sampler instrument given to a track: `track` changes the
+        # track's instrument; ux-friction-4)
+        if (e = Internal.voice_for_track_error('bg', name, sound))
+          return MB::Sound.live_error(e)
+        end
         # A library entry given to a track: a clip or generator entry is its
         # clip at the defaults (as `track :x, entry` takes it), played on
         # the track; instruments and effects say how to change the track's
         # (lesson-fixes-1: `bg :drums, L.gen.beat.techno` played the 8-bar
-        # audition in place of the track; `play` and new players keep it)
+        # audition in place of the track; `play` keeps it)
         if sound.is_a?(Library::Entry) && name && Session.current.arrangement.tracks[name]
           sound = Internal.entry_for_track('bg', name, sound)
           return MB::Sound.live_error(sound) if sound.is_a?(Exception)
+        end
+        # A generator entry with no track of that name plays its clip on its
+        # instrument without an end (beat-halftime-1, 2026-11-22: `bg
+        # :drums, L.gen.beat.halftime` after a new output had dropped the
+        # track played the 8-bar audition and stopped; `play entry` keeps
+        # the audition), saying what it plays on, and naming a track of
+        # that name that a new output left behind (his `latency` after
+        # `panic` had dropped the set unseen)
+        notice = MB::Sound.live? && Session.context&.session.nil? && !Session.context&.batch
+        gone = notice && name.is_a?(Symbol) && !Session.current.arrangement.tracks[name] && Session.left_behind.include?(name)
+        gone_text = gone ? ": it went with the old session when latency or use_output changed the output" : ''
+        if sound.is_a?(Library::Entry) && sound.kind == :generator
+          sound = Library::Generators.endless(sound, name)
+          $stdout.puts "\e[2mbg#{" #{name.inspect}" if name}: #{sound.description}, as a player#{" (no track #{name.inspect}#{gone_text})" if name}; #{sound.note}\e[0m" if notice
+        elsif gone
+          $stdout.puts "\e[2mbg #{name.inspect}: a player, not a track #{name.inspect}#{gone_text}\e[0m"
         end
         sound = Sequence::Clocked.apply(sound, clock) if clock
         raise ArgumentError, ':all is reserved for stop(:all)' if name == :all
@@ -209,11 +230,22 @@ module MB
             # (a clip a generator built plays with the track's knobs for
             # the params its call left out: Library::Generators.track_clip)
             sound = Library::Generators.track_clip(sound, name, session, reuse: true)
-            return session.arrangement.play(name, sound, at: point, fade: fade) if point.given?
-
-            time = Session.context&.time
-            time = session.send(:launch_time, nil, []) if time.nil? && !session.arrangement.tracks[name].q
-            return session.arrangement.play(name, sound, start_time: time, fade: fade)
+            Internal.pitched_on_kit_notice('bg', name, sound) if notice
+            if point.given?
+              result = session.arrangement.play(name, sound, at: point, fade: fade)
+            else
+              time = Session.context&.time
+              time = session.send(:launch_time, nil, []) if time.nil? && !session.arrangement.tracks[name].q
+              result = session.arrangement.play(name, sound, start_time: time, fade: fade)
+            end
+            # (ux-friction-4, the maintainer's take: `bg :drums,
+            # L.gen.acid_rhythm(seed: 13)` right after swapping in the
+            # same call returned nil without a word: the same clip again
+            # changes nothing)
+            if result.nil? && notice && session.playing_after_queue?(name) && session.arrangement.tracks[name].clip.equal?(sound)
+              $stdout.puts "\e[2mbg #{name.inspect}: #{name.inspect} already plays that clip (or has it queued), so nothing changes\e[0m"
+            end
+            return result
           end
         end
 
@@ -241,6 +273,10 @@ module MB
 
         session_command(name, label: "bg #{name.inspect}", kind: :bg) { |session, time|
           land = landings.empty? ? nil : (time || session.send(:launch_time, point, session.timeline_nodes_in(playable)))
+          # (a generator clip's first reads made here, for where the graph
+          # will start, not in the buffer where it lands: Session#prepare_clips)
+          nodes = session.timeline_nodes_in(playable)
+          session.prepare_clips(nodes, land || time || session.send(:launch_time, point, nodes)) if nodes.any?(MIDI::ClipSource)
           added = session.add(playable, at: point, name: name, fade: fade, start_time: point.given? ? nil : time, to: to || :keep, send: send, pre_send: pre_send, pre_mute_send: pre_mute_send)
           Arrangement::TrackKnobs.land(session, landings, land) if land && added
           added
@@ -389,6 +425,9 @@ module MB
             disarmed = session.arrangement.panic_disarm
           }
         }
+        # MIDI out: all notes off now on every destination (the stopped
+        # tracks' own note-offs follow on their stop frame)
+        MIDI::Destination.panic_all
         return stops if Session.context&.batch
 
         stopped = Array(stops).grep(Session::Journal::Entry)
@@ -743,7 +782,7 @@ module MB
           return MB::Sound.live_error(ArgumentError.new("swap takes the player's name first, then its new clip: #{example} (a Hash in parentheses is the name; old => new pairs follow the name: swap :drums, beat => beat2)"))
         end
         if (e = Internal.sound_for_name_error('swap', name) || Internal.stream_for_track_error('swap', name, clips, any: true) ||
-                Internal.clip_name_for_track_error('swap', name, clips))
+                Internal.clip_name_for_track_error('swap', name, clips) || Internal.voice_for_track_error('swap', name, clips))
           return MB::Sound.live_error(e)
         end
         raise ArgumentError, 'Pass a new clip or old => new pairs, not both' if clips && !pairs.empty?
@@ -765,6 +804,7 @@ module MB
           # Library::Generators.track_clip; another player: the defaults)
           track = name.is_a?(Symbol) && Session.current.arrangement.tracks[name]
           clips = track ? Library::Generators.track_clip(clips, name, Session.current, reuse: true) : (clips.is_a?(Library::Entry) ? clips.call : clips)
+          Internal.pitched_on_kit_notice('swap', name, clips) if track
         end
         # A track that isn't playing (stopped, never started, or a one-shot
         # clip ended) starts with the new clip, as `bg :name, clip`, at the
@@ -1554,7 +1594,14 @@ module MB
           # (or the time of a scheduled block or the frame of a queued
           # change it kept time for)
           ended = [session.sound_end_frame, session.schedule_ran_frame || 0, session.change_landed_frame].max
-          frames += render_end(session, hold, mix, ended, frames_left.call, buffer_size)
+          # (the tail stops at the end bar's frame as if the timeline had
+          # kept moving through the tempo's cells, not as estimated at the
+          # tempo where the render stopped: fixes-16)
+          left = max_frames - frames + skip
+          if (end_pos = end_time&.call)
+            left = MB::M.min(left, session.frames_to_position(end_pos))
+          end
+          frames += render_end(session, hold, mix, ended, left, buffer_size)
         elsif tail && (bars || seconds || to) && !interrupted
           # The song reached its end; stop anything still playing (and the
           # flow: no section begins in the tail, whose timeline doesn't move)

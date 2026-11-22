@@ -109,7 +109,7 @@ module MB
         end
 
         # The raw value (0..127) of controller +number+ (on any channel, or
-        # 0-based +channel+) on the Session's default MIDI input at or before
+        # 0-based wire +channel+, Event#channel) on the Session's default MIDI input at or before
         # timeline position +pos+, or nil if it hasn't moved.
         def self.session_cc(number, pos, channel: nil)
           s = session or return nil
@@ -248,16 +248,15 @@ module MB
         # Session's default MIDI input (a clip's transforms steered from a
         # controller), else +default+ (a raw value, 0 by default), mapped
         # onto +range+ with +curve+ (:linear, :exp, or :switch; see
-        # ControlSpec#value).  +channel+ (0-based) listens to one channel
-        # only.
+        # ControlSpec#value).  +channel+ (1 to 16, as synths count them;
+        # MIDI::Channel) listens to one channel only.
         class CC < Base
-          attr_reader :spec, :channel
+          attr_reader :spec
 
           def initialize(number, range = 0.0..1.0, curve: :linear, default: nil, channel: nil, name: nil)
-            raise ArgumentError, "cc channel must be 0..15 (got #{channel.inspect})" unless channel.nil? || (channel.is_a?(Integer) && channel.between?(0, 15))
+            @wire_channel = MIDI::Channel.of_optional(channel)
             @spec = ControlSpec.new(number: number, range: range, curve: curve, default: default, name: name, description: 'Param read by MIDI transforms')
-            @channel = channel
-            kwargs = { curve: (curve unless curve == :linear), default: default, channel: channel, name: name }.compact
+            kwargs = { curve: (curve unless curve == :linear), default: default, channel: MIDI::Channel.show(@wire_channel), name: name }.compact
             args = [number]
             args << range unless range == (0.0..1.0)
             with_recipe(nil, :cc, args, kwargs)
@@ -268,9 +267,14 @@ module MB
             @spec.number
           end
 
+          # The channel listened to (1 to 16), or nil for any.
+          def channel
+            MIDI::Channel.show(@wire_channel)
+          end
+
           def value_at(pos, frame: nil, transport: nil, stream: nil)
-            raw = stream&.cc(number, channel: @channel)
-            raw ||= Param.session_cc(number, pos, channel: @channel) if pos
+            raw = stream&.cc(number, channel: @wire_channel)
+            raw ||= Param.session_cc(number, pos, channel: @wire_channel) if pos
             @spec.value(raw || @spec.default)
           end
 

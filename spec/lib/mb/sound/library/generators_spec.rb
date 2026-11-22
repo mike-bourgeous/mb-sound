@@ -399,9 +399,10 @@ RSpec.describe MB::Sound::Library::Generators do
         expect { MB::Sound.bg(:drums, MB::Sound::L.fx.reverb.hall) }.to raise_error(ArgumentError, /is an effect, and :drums is a track: fx :drums, L\.fx\./)
       }, buffers: 1)
 
-      # A new player still auditions it
+      # A new player plays it without an end (beat-halftime-1: it played
+      # the 8-bar audition; generators_endless_spec.rb)
       s, _ = run(:drums, -> { track.(); MB::Sound.bg(:x, MB::Sound::L.gen.beat.techno, on: :now) }, buffers: 1)
-      expect(s.players[:x]).to include('8 bars')
+      expect(s.players[:x]).to eq('L.gen.beat.techno on tr909')
     end
 
   end

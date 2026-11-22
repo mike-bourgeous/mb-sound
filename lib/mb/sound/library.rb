@@ -304,6 +304,7 @@ require_relative 'library/finder'
 require_relative 'library/audition'
 require_relative 'library/bench'
 require_relative 'library/generators'
+require_relative 'library/generator_morph'
 
 module MB
   module Sound

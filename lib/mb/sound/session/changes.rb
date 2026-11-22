@@ -174,7 +174,9 @@ module MB
           @render_lock.synchronize {
             # Changes already queued for a time this one would land at or
             # after land first, in queue order (see #commit_queued_due)
-            commit_queued_due if time.nil? || time <= @transport.position
+            # (a seek waiting for its form's lock, Seeks#hold_form, keeps
+            # this one queued behind it)
+            behind = (time.nil? || time <= @transport.position) && commit_queued_due == false
             pos = @transport.position
             check_late(kind, subject, time, pos) unless queue
             seq = @journal.next_seq
@@ -189,8 +191,16 @@ module MB
               status: :queued, source: source, line: line, data: data.freeze, undoes: undoes
             ))
 
-            if (time.nil? || time <= pos) && !hold && !held?(c)
-              commit_change(c, land_pos: pos, land_frame: @frame, commits: stamp(pos, frame: @frame), immediate: true)
+            now = (time.nil? || time <= pos) && !hold && !behind && !held?(c)
+            # (a seek or its undo takes the playing form's lock without
+            # waiting, or is queued: Form::Playback::Lock)
+            form = now && form_change?(c) ? hold_form(c) : nil
+            if now && form != false
+              begin
+                commit_change(c, land_pos: pos, land_frame: @frame, commits: stamp(pos, frame: @frame), immediate: true)
+              ensure
+                form&.release_hold
+              end
             else
               # (held: waits for its warm-up, its action seeing a past time
               # as if it landed now)
@@ -251,6 +261,12 @@ module MB
           @render_lock.synchronize(&block)
         end
 
+        # True if the current thread holds the render lock (for lock-order
+        # checks: Form::Playback::Lock).
+        def render_lock_owned?
+          @render_lock.mon_owned?
+        end
+
         private
 
         # Sets up the change queue and journal.  Called by Session#initialize.
@@ -261,6 +277,12 @@ module MB
           @frame = 0
           @transport_record = transport_record_for(false)
           @change_landed_frame = 0
+          # (seeks waiting for their form's lock: Seeks#hold_form)
+          @seek_tried_frame = nil
+          @seek_deferred_seq = nil
+          @seek_deferred_pos = nil
+          @seek_deferred_frame = nil
+          @seek_late = nil
         end
 
         # The transport position or a scheduled block's time, without the
@@ -304,7 +326,7 @@ module MB
         # with the render lock held, outside any console command's undo
         # step (the changes belong to whoever queued them).
         def commit_queued_due
-          return if @changes.empty? || @changes.first.time > @transport.position
+          return true if @changes.empty? || @changes.first.time > @transport.position
           without_command do
             i = 0
             while (c = @changes[i]) && c.time <= @transport.position
@@ -312,11 +334,14 @@ module MB
                 i += 1
                 next
               end
+              pb = form_change?(c) ? hold_form(c) : nil
+              return false if pb == false # (the form's lock is busy: see Seeks#commit_due_seeks)
+
               @changes.delete_at(i)
-              pos = @transport.position
-              commit_change(c, land_pos: pos, land_frame: @frame, commits: stamp(pos, frame: @frame), immediate: false)
+              land_form_change(c, pb)
             end
           end
+          true
         end
 
         # Inserts +c+ into the queue in time order (issue order for the
