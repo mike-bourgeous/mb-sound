@@ -1473,7 +1473,12 @@ module MB
         # in one assignment, so a clip playing elsewhere meanwhile never
         # sees half of them.  Returns the number of results made.
         def pregenerate(pos, origin:, epoch:)
-          return 0 unless @loop && @length > 0 && generated? && origin != :clocked
+          return 0 unless @loop && @length > 0 && origin != :clocked && !@variations.empty?
+          # (only clips whose every variation is a generator, maybe mapped
+          # by transforms: other variations, such as a param's
+          # (`.swing(knob(:x))`, ClipParams), read their params when a cycle
+          # is made, outside the decisions checked at the landing)
+          return 0 unless @variations.all? { |v| v.block.is_a?(Generative::Producer) }
 
           copy = dup
           copy.send(:clear_caches)

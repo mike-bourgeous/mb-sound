@@ -153,4 +153,19 @@ RSpec.describe(MB::Sound::Sequence::Clip, '#pregenerate', :aggregate_failures) d
   ensure
     s&.close
   end
+
+  it 'makes nothing for clips with variations besides generators (a param read as a cycle is made)' do
+    s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 1, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120),
+                               channels: 1, realtime: false, raise_errors: true)
+    MB::Sound::Session.with_context(session: s) {
+      MB::Sound.knob :e, 0.2, range: 0.0..1.0
+      MB::Sound.knob :t, 0, range: -12..12
+      expect(beat(5).transpose(2).pregenerate(8r, origin: 0r, epoch: s.epoch)).to be > 20
+      expect(beat(5).transpose(MB::Sound.knob(:t)).pregenerate(8r, origin: 0r, epoch: s.epoch)).to eq(0)
+      expect(beat(5).humanize(0.01, vary: true).pregenerate(8r, origin: 0r, epoch: s.epoch)).to eq(0)
+      expect(MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).n4.loop.pregenerate(0r, origin: 0r, epoch: s.epoch)).to eq(0)
+    }
+  ensure
+    s&.close
+  end
 end
