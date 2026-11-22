@@ -34,14 +34,14 @@ RSpec.describe(MB::Sound::Sequence::Clip, '#pregenerate', :aggregate_failures) d
     }
   end
 
-  # Renders 6 bars at +n+ frames in a new offline Session: a track playing
+  # Renders +bars+ bars at +n+ frames in a new offline Session: a track playing
   # beat 1 from bar 1, then +command+ (code run with MB::Sound's methods)
   # (a Proc given the example) issued halfway through bar 2, landing on
   # bar 3, and +between+ run a
   # quarter bar later, before it lands.  Returns [the audio, counts in the
   # landing buffer: generator cycles computed, unit event lists and edge
   # tables made].
-  def render(n, command, between: nil, steered: true)
+  def render(n, command, between: nil, steered: true, bars: 6)
     s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 1, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120),
                                channels: 1, buffer_size: n, realtime: false, raise_errors: true, master_gain: 1)
     counting = false
@@ -58,7 +58,7 @@ RSpec.describe(MB::Sound::Sequence::Clip, '#pregenerate', :aggregate_failures) d
     })
     out = []
     land = 2 * BAR
-    (6 * BAR / n.to_f).ceil.times do |i|
+    (bars * BAR / n.to_f).ceil.times do |i|
       frame = i * n
       run.(command) if frame <= BAR * 3 / 2 && frame + n > BAR * 3 / 2
       run.(between) if between && frame <= BAR * 7 / 4 && frame + n > BAR * 7 / 4
@@ -102,6 +102,16 @@ RSpec.describe(MB::Sound::Sequence::Clip, '#pregenerate', :aggregate_failures) d
         expect(objects).to be < 1200, "#{n} frames"
         expect(@landing_objects).to be > objects
       end
+    end
+  end
+
+  it 'lands each library drum beat, steered by its track knobs, computing nothing', render_budget: { seconds: 120, reason: 'seven beats, each rendered twice for 4 bars' } do
+    %i[rock pop halftime funk house dnb techno].each do |name|
+      bg = ->(_) { MB::Sound.bg :d, MB::Sound::L.gen.beat.public_send(name) }
+      audio, counts = render(800, bg, bars: 4)
+      before, = render_unprepared(800, bg, bars: 4)
+      expect(counts).to eq({}), name.to_s
+      expect(audio.to_binary.hash).to eq(before.to_binary.hash), name.to_s
     end
   end
 
