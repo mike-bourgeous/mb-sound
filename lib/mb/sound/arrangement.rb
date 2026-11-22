@@ -359,7 +359,7 @@ module MB
             return MB::Sound.live_error(e)
           end
           fx = nil if fx.empty?
-          raise ArgumentError, "track #{name.inspect}: fx: goes on a track with a patch or an instrument; a graph track's effects go in its graph" if fx && values[0]
+          raise ArgumentError, Fx.graph_track_message("track #{name.inspect}, fx:", name, values[0]) if fx && values[0]
         end
         graph, clip, entry = values
         patch = InstrumentPatch.patch(entry) if entry

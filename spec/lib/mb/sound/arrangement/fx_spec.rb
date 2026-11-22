@@ -1,3 +1,5 @@
+require_relative '../../../../support/sf2_writer'
+
 # A track's effect insert (library-2; the maintainer, 2026-10-30: "Build fx:
 # slot"): `track :keys, instrument, fx: L.fx.reverb.hall`, `fx :keys, ...`
 # swapping it at the launch point with the instrument's state carried and
@@ -113,6 +115,40 @@ RSpec.describe(MB::Sound::Arrangement::Fx, :aggregate_failures) do
       ).to_stderr
       expect(s.arrangement.tracks[:keys].fx).to be_nil.or eq([])
     }
+  end
+
+  # (the maintainer's take, 2026-11-21: `track :drums, sf2(...)`, a
+  # generator on it, then `fx :drums, ->{ it.compress(threshold: -30) }`:
+  # "Why can I not put effects on a soundfont track?"  The SoundFont was a
+  # graph track, so fx refused it; the message now names the patch block
+  # that plays the kit with an insert, and that spelling works)
+  it 'says how to put effects on a SoundFont kit given as a graph, and that patch block plays the kit through the insert' do
+    path = tmp_path('kit.sf2')
+    SF2Writer.write(path,
+      samples: [
+        { name: 'thump', data: Array.new(4000) { |i| Math.sin(2 * Math::PI * 60 * i / 44100.0) * Math.exp(-i / 900.0) }, rate: 44100, pitch: 36 },
+        { name: 'tick', data: Array.new(2000) { |i| Math.sin(2 * Math::PI * 3000 * i / 44100.0) * Math.exp(-i / 300.0) }, rate: 44100, pitch: 60 },
+      ],
+      instruments: [{ name: 'Kit', zones: [{ key_range: [0, 37], sample_id: 0 }, { key_range: [38, 127], sample_id: 1 }] }],
+      presets: [{ name: 'Spec Kit', program: 0, zones: [{ instrument: 0 }] }])
+    beat = MB::Sound::L.gen.techno_beat.call(seed: 5)
+
+    s, = run(->(_s) { MB::Sound.track(:drums, MB::Sound.sf2(path)); MB::Sound.bg(:drums, beat) }, buffers: 1)
+    MB::Sound::Session.with_context(session: s) {
+      msg = /fx :drums: effect inserts go on tracks with an instrument or a patch block, and :drums plays a graph: a SoundFont \(Spec Kit.*kit\.sf2\)\.  Give it a patch block that plays its clips, then the effect: track\(:drums\) \{ \|c\| sf2\(".*kit\.sf2"\)\.sampler\(c, voices: 8\) \}; fx :drums, \.\.\./
+      expect { MB::Sound.fx(:drums, ->(sig) { sig.compress(threshold: -30.db) }) }.to raise_error(described_class::Error, msg)
+      expect { MB::Sound.track(:d2, MB::Sound.sf2(path), fx: :hall) }.to raise_error(ArgumentError, /track :d2, fx:: .*SoundFont.*track\(:d2\) \{ \|c\| sf2/)
+    }
+
+    # The spelling the message gives, with the compressor in the insert, is
+    # the patch block with the compressor inside it, bit for bit
+    font = MB::Sound.sf2(path)
+    comp = ->(sig) { sig.compress(threshold: -30.db) }
+    _, ref = run(->(_s) { MB::Sound.track(:drums) { |c| comp.(font.sampler(c, voices: 8)) }; MB::Sound.bg(:drums, beat) })
+    s2, got = run(->(_s) { MB::Sound.track(:drums) { |c| font.sampler(c, voices: 8) }; MB::Sound.fx(:drums, comp); MB::Sound.bg(:drums, beat) })
+    expect(ref.abs.max).to be > 0.01
+    expect(got).to eq(ref)
+    expect(s2.arrangement.tracks[:drums].fx).to eq([comp])
   end
 
   it 'saves the insert in set documents and loads it back' do
