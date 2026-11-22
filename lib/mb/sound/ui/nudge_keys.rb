@@ -18,6 +18,8 @@ module MB
       #     Ctrl-Alt-Up/Down             a coarse step (10 steps)
       #     Alt-Shift-Right/Left         the cursor to the next, previous number
       #     Esc, then the same arrows    the same, for terminals that eat Alt-arrows
+      #                                  (the arrow within Reline's keyseq timeout,
+      #                                  0.5 s; measured reliable to 0.3 s, tiles too)
       #
       # With the cursor off every number, the first nudge moves it to the
       # nearest number (the next one, else the last) without changing it.

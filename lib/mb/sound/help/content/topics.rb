@@ -2010,7 +2010,8 @@ module MB
         steps by its last written digit (300 -> 301, 0.125 -> 0.126);
         Alt-Shift is a fine step (0.125 -> 0.1251), Ctrl-Alt a coarse one
         (10 steps); Alt-Shift-Left/Right jump between numbers, and Esc then
-        Up/Down works where Alt-arrows don't arrive.  Keys pressed together
+        Up/Down (within half a second) works where Alt-arrows don't arrive;
+        off a number, the first press moves the cursor onto the nearest one.  Keys pressed together
         run the line once; history keeps one entry for the run.
 
         `ui :tiles` (or `:studio`, `:keys`, `:wall`) takes the whole screen:
