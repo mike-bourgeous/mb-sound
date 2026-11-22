@@ -18,7 +18,14 @@ module MB
         #
         #     phaser(rate: notes.freq.within(2.hz..8.hz))          # the melody, sub-audio
         #     play riff.freq.within(E1..E2).tone.saw.lp4(500) * riff.amp_env
-        def within(range)
+        #
+        # A range of plain numbers reads note numbers (`within(2..8)` is
+        # about 9-13 Hz) and warns once per call site with the Hz form.
+        def within(range, *extra)
+          MB::Sound::OctaveFold.check_arguments(range, extra)
+          if (hint = MB::Sound::OctaveFold.plain_number_hint(range))
+            MB::Sound::Internal.warn_once_per_site(:within_plain_numbers, hint)
+          end
           # (tagged as a frequency for type-dispatched parameters; see ArgTypes)
           ArgTypes.tag(Within.new(self, range), :frequency)
         end

@@ -376,7 +376,8 @@ module MB
 
         # Returns a Seq with every note moved into +range+ by octaves (see
         # Clip#within), chords and nested clips too.
-        def within(range)
+        def within(range, *extra)
+          MB::Sound::OctaveFold.check_arguments(range, extra)
           fold = MB::Sound::OctaveFold[range]
           map_steps { |s|
             raise ArgumentError, "Pitch-marked hits (sampler chops) keep their keys; #{self} can't move into #{fold}" if s[:pitch]

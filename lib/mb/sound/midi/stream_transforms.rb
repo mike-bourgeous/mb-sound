@@ -278,7 +278,8 @@ module MB
         #
         #     bass = lead_notes.within(E1..E2)    # the lead's degrees in the bass register
         #     midi.within(C4..C5).synth { |v| v.hz.triangle * v.amp_env }
-        def within(range, **options)
+        def within(range, *extra, **options)
+          MB::Sound::OctaveFold.check_arguments(range, extra)
           Stream.new(Transform::Within.new(self, range, **options))
         end
 
