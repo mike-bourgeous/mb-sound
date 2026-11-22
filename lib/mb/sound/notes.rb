@@ -1033,6 +1033,14 @@ module MB
         !held? && envelopes_idle?
       end
 
+      # True if an envelope made through this instance (see #env,
+      # #register) can't become idle within the next +frames+ samples
+      # without an input event (Envelope#busy_through?), so #voice_idle?
+      # can't turn true in that time (Synth#sleep_candidate).
+      def busy_through?(frames)
+        @envelopes.any? { |e| e.respond_to?(:busy_through?) && e.busy_through?(frames) }
+      end
+
       # True if every envelope made through this instance (see #env,
       # #register) is idle.
       def envelopes_idle?

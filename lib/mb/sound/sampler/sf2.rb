@@ -821,7 +821,11 @@ module MB
             }
           end
 
-          # Warns once per preset about what it leaves out (#skipped).
+          # Warns once per preset of a font file per process about what it
+          # leaves out (#skipped).  Fonts are cached by WeakRef, so a font
+          # opened again after a GC is a new Font: the notice is kept by
+          # file (path, size, modification time) and preset, so loading the
+          # same kit again in the console doesn't repeat it (sf2-cost-1).
           def warn_skipped(p)
             notes = skipped(p).map { |k, n| "#{k} (#{n} zone#{'s' if n != 1})" }
             return if notes.empty?
@@ -829,7 +833,19 @@ module MB
               return if @warned[p.index]
               @warned[p.index] = true
             }
+            return unless Font.first_notice?(@file, p.index)
             warn "SF2 #{File.basename(@path)} #{p}: not mapped: #{notes.join(', ')}"
+          end
+
+          WARNED_LOCK = Mutex.new
+          WARNED = {} # (guarded by WARNED_LOCK)
+
+          # True the first time this process asks about +preset+ (an index)
+          # of font +file+ as it is now (see #warn_skipped).
+          def self.first_notice?(file, preset)
+            st = File.stat(file) rescue nil
+            key = [File.expand_path(file), st&.size, st&.mtime&.to_r, preset].freeze
+            WARNED_LOCK.synchronize { WARNED.key?(key) ? false : (WARNED[key] = true) }
           end
         end
       end

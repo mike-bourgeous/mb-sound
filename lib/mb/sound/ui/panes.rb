@@ -1175,10 +1175,15 @@ module MB
         class Page < Pane
           mode_keys do
             group 'Page'
-            on [:up, 'k'], :scroll, -1, help: 'scroll up, down a line', label: 'Up Down j k'
-            on [:down, 'j'], :scroll, 1, help: 'scroll up, down a line', label: 'Up Down j k'
-            on [:page_up, 'b'], :scroll, :page_up, help: 'scroll a page up, down', label: 'PgUp PgDn b Space'
-            on [:page_down, ' '], :scroll, :page_down, help: 'scroll a page up, down', label: 'PgUp PgDn b Space'
+            pick = 'pick a page the page lists (else a line up, down), read it, back to the page before'
+            on :up, :pick, -1, help: pick, label: 'Up Down Enter Bksp'
+            on :down, :pick, 1, help: pick, label: 'Up Down Enter Bksp'
+            on :enter, :follow, help: pick, label: 'Up Down Enter Bksp'
+            on :backspace, :back, help: pick, label: 'Up Down Enter Bksp'
+            on 'k', :scroll, -1, help: 'scroll a line, a page', label: 'j k PgUp PgDn b Space'
+            on 'j', :scroll, 1, help: 'scroll a line, a page', label: 'j k PgUp PgDn b Space'
+            on [:page_up, 'b'], :scroll, :page_up, help: 'scroll a line, a page', label: 'j k PgUp PgDn b Space'
+            on [:page_down, ' '], :scroll, :page_down, help: 'scroll a line, a page', label: 'j k PgUp PgDn b Space'
             on [:home, 'g'], :scroll, :top, help: 'top, bottom', label: 'Home End g G'
             on [:end, 'G'], :scroll, :bottom, help: 'top, bottom', label: 'Home End g G'
             on '/', :find, help: 'search the page (n the next match, N the one before)', label: '/ n N'
@@ -1204,16 +1209,31 @@ module MB
             @rows = 1
             @find = nil
             @found = nil
+            @links = [].freeze
+            @pick = nil
+            @follow = nil
+            @history = []
           end
 
+          # Rows naming other pages ([[line index, subject], ...]), the one
+          # picked (an index into them, or nil), and the pages before
+          # (Backspace).
+          attr_reader :links, :pick, :history
+
           # Shows +text+ from its top; +title+ is the pane's title (nil:
-          # "page").
-          def show(text, title: nil)
+          # "page").  +links+ are rows naming other pages, opened with
+          # +follow+ (see UI::Tiles#page); a page shown from outside starts
+          # a new history.
+          def show(text, title: nil, links: nil, follow: nil, keep_history: false)
+            @history.clear unless keep_history
             @lines = text.to_s.lines.map(&:chomp).freeze
             @offset = 0
             @found = nil
             @title = title.to_s.empty? ? 'page' : title.to_s
             @title_text = nil
+            @links = (links || []).freeze
+            @pick = nil
+            @follow = follow
             self
           end
 
@@ -1223,13 +1243,75 @@ module MB
           def draw_body(c, _s, state)
             @rows = [c.h - 1, 1].max
             @offset = @offset.clamp(0, [@lines.length - @rows, 0].max)
+            picked = @pick && @links[@pick]&.first
             @lines[@offset, @rows].to_a.each_with_index do |l, y|
-              c.text_fit(0, y, l, c.w, :text)
+              if picked == @offset + y
+                c.run(0, y, c.fit(l, c.w).ljust([c.w, 1].max)[0, c.w], :key, reverse: true)
+              else
+                c.text_fit(0, y, l, c.w, :text)
+              end
             end
             last = [@offset + @rows, @lines.length].min
-            status = "lines #{@offset + 1}-#{last} of #{@lines.length}#{@found ? "  /#{@find}" : ''}  " \
-                     "#{state[:mode] ? 'j k PgUp PgDn g G, / search, y copy, Esc back, q closes' : 'Enter reads, q closes'}"
-            c.text_fit(0, c.h - 1, status, c.w, :dim)
+            c.text_fit(0, c.h - 1, status_text(state, last), c.w, :dim)
+          end
+
+          # The status row: where in the page, and the keys (the page keys
+          # in its mode; Up/Down/Enter/Backspace while it lists pages or
+          # has one to go back to).
+          def status_text(state, last)
+            keys = if !state[:mode]
+                     'Enter reads, q closes'
+                   elsif @links.empty? && @history.empty?
+                     'j k PgUp PgDn g G, / search, y copy, Esc back, q closes'
+                   else
+                     "#{@links.empty? ? '' : 'Up Down pick a page, Enter reads it, '}#{@history.empty? ? '' : 'Backspace back, '}j k PgUp PgDn, / search, Esc, q closes"
+                   end
+            "lines #{@offset + 1}-#{last} of #{@lines.length}#{@found ? "  /#{@find}" : ''}  #{keys}"
+          end
+
+          # Up/Down: the row naming a page before or after the one picked
+          # (scrolled into view), else a line up or down.
+          def key_pick(_state, dir)
+            return key_scroll(nil, dir) if @links.empty?
+
+            nxt = if @pick.nil?
+                    # (the first one on screen going down, the last going up)
+                    shown = @links.each_index.select { |i| @links[i][0] >= @offset && @links[i][0] < @offset + @rows }
+                    shown.empty? ? (dir > 0 ? @links.index { |l, _| l >= @offset } : @links.rindex { |l, _| l < @offset }) : (dir > 0 ? shown.first : shown.last)
+                  else
+                    @pick + dir
+                  end
+            return key_scroll(nil, dir) if nxt.nil? || nxt.negative? || nxt >= @links.length
+
+            @pick = nxt
+            line = @links[nxt][0]
+            @offset = line if line < @offset
+            @offset = line - @rows + 1 if line >= @offset + @rows
+            @offset = @offset.clamp(0, [@lines.length - @rows, 0].max)
+            nil
+          end
+
+          # Enter: the picked row's page, this one kept for Backspace.
+          def key_follow(_state)
+            return 'Up Down pick a page first' if @pick.nil? || @links.empty?
+            return 'no page to open here' unless @follow
+
+            subject = @links[@pick][1]
+            text, title, links = @follow.call(subject)
+            @history << [@lines, @title, @offset, @links, @pick]
+            show(text, title: title || @title, links: links, follow: @follow, keep_history: true)
+            nil
+          rescue StandardError => e
+            "help #{subject}: #{e.message}"
+          end
+
+          # Backspace: the page before.
+          def key_back(_state)
+            prev = @history.pop or return 'no page before this one'
+            @lines, @title, @offset, @links, @pick = prev
+            @title_text = nil
+            @found = nil
+            nil
           end
 
           # / : the search prompt (its answer: #key_found).
