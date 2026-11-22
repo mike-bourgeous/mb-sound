@@ -13,7 +13,10 @@ module MB
       # Values: a library effect Entry (`L.fx.hall`, a graph document or
       # library-file chain), a Symbol naming one effect (`:hall`; a name two
       # families share raises with their head paths), `{ reverb: :plate }`
-      # (a family and a name: what set documents print for those), a Proc
+      # (a family and a name: what set documents print for those), an
+      # effect rack (`rack(:glue)`, `arack { |sig| ... }`; a named one's
+      # name finds it too, as `:glue`, and set documents save it so; see
+      # Session::MasterRack for racks saved from the master chain), a Proc
       # or Method taking the signal (`->(sig) { sig.lp4(900) }`; not saved
       # in set documents), or an Array of those.  `fx :x, ...` on a playing
       # track rebuilds it at its launch point (one command, one undo step),
@@ -31,8 +34,8 @@ module MB
 
         module_function
 
-        # +value+ as an insert chain: a frozen Array of library Entries and
-        # Procs (empty for OFF values).  Raises Error for anything else,
+        # +value+ as an insert chain: a frozen Array of library Entries,
+        # effect Racks, and Procs (empty for OFF values).  Raises Error for anything else,
         # +track+ naming the track in messages.
         def chain(value, track: :x)
           return [].freeze if OFF.include?(value)
@@ -47,6 +50,9 @@ module MB
             raise Error, "fx #{track.inspect}: #{value.head_path} is #{a_kind(value)}, not an effect (L.fx lists effects)"
           when Proc, Method
             [value]
+          when Rack
+            return [value] if value.kind == :effect
+            raise Error, "fx #{track.inspect}: #{value.label} is #{a_kind(value)} rack (#{value.signature}), not an effect rack (audio in, audio out)"
           when Symbol
             [lookup(value, track)]
           when Hash
@@ -58,8 +64,8 @@ module MB
               one(e, track).first
             }
           else
-            raise Error, "fx #{track.inspect}: an effect is a library effect (L.fx.hall, :hall), a { family: :name } pair, a Proc taking the signal, " \
-                         "or a list of those (got #{value.class})"
+            raise Error, "fx #{track.inspect}: an effect is a library effect (L.fx.hall, :hall), a { family: :name } pair, an effect rack " \
+                         "(rack(:glue), arack { |sig| ... }), a Proc taking the signal, or a list of those (got #{value.class})"
           end
         end
 
@@ -86,17 +92,25 @@ module MB
         # "off"), for journal entries and listings.
         def label(chain)
           return 'off' if chain.nil? || chain.empty?
-          chain.map { |f| f.is_a?(Library::Entry) ? f.head_path : 'a block' }.join(' + ')
+          chain.map { |f|
+            case f
+            when Library::Entry then f.head_path
+            when Rack then f.name ? "rack(#{f.name.inspect})" : "an #{f.constructor}"
+            else 'a block'
+            end
+          }.join(' + ')
         end
 
         # +chain+ as the value a set document's track line prints (Symbols,
-        # or { family: :name } where a Symbol names another effect too), or
-        # nil if a Proc is in it (set documents can't save code there).
+        # or { family: :name } where a Symbol names another effect too; a
+        # named rack by its name), or nil if a Proc or an anonymous rack is
+        # in it (set documents can't save code there).
         def set_value(chain)
-          return nil if chain.nil? || chain.empty? || chain.any? { |f| !f.is_a?(Library::Entry) }
+          return nil if chain.nil? || chain.empty? || chain.any? { |f| !(f.is_a?(Library::Entry) || f.is_a?(Rack) && f.name) }
           vals = chain.map { |e|
+            family = e.is_a?(Rack) ? :preset : e.family
             hits = Library.index.entries(kind: :effect).select { |x| x.name == e.name }
-            hits.length == 1 ? e.name : { e.family => e.name }
+            hits.length <= 1 ? e.name : { family => e.name }
           }
           vals.length == 1 ? vals.first : vals
         end
