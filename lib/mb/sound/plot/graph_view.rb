@@ -11,12 +11,15 @@ module MB
       # :control, :notes }) their declared types (a stand-in Constant
       # would read as control); +out+ adds an output box at the
       # right fed by the roots; +title+ a line above the drawing;
-      # +max_boxes+ stops the walk (the inputs left unwalked show "…").
+      # +max_boxes+ stops the walk (the inputs left unwalked show "…");
+      # +replace+ ({ node => node }) draws each value where the walk meets
+      # its key (Session#graph_view joins the players' mix to where the
+      # master chain reads it).
       #
       #     MB::Sound::Plot.graph(110.hz.saw.filter(:lowpass, cutoff: 800)).show
       #     110.hz.saw.lp4(1200).draw     # the same, as a node method
-      def self.graph(node, ports: nil, port_types: nil, out: false, title: nil, max_boxes: GraphView::MAX_BOXES)
-        GraphView.new(node, ports: ports, port_types: port_types, out: out, title: title, max_boxes: max_boxes).graph
+      def self.graph(node, ports: nil, port_types: nil, out: false, title: nil, max_boxes: GraphView::MAX_BOXES, replace: nil)
+        GraphView.new(node, ports: ports, port_types: port_types, out: out, title: title, max_boxes: max_boxes, replace: replace).graph
       end
 
       # The walk behind Plot.graph (mb-sound's side of the plot boundary).
@@ -27,8 +30,9 @@ module MB
 
         attr_reader :graph
 
-        def initialize(node, ports: nil, port_types: nil, out: false, title: nil, max_boxes: MAX_BOXES)
+        def initialize(node, ports: nil, port_types: nil, out: false, title: nil, max_boxes: MAX_BOXES, replace: nil)
           @max = max_boxes
+          @replace = replace&.to_h { |from, to| [from, to] }&.compare_by_identity
           @port_types = port_types || {}
           @port_names = {}.compare_by_identity
           (ports || {}).each { |name, n| @port_names[key(n)[0]] = name }
@@ -69,8 +73,16 @@ module MB
 
         # [box node, output index] for graph value +x+: Tees, their
         # branches, and knob readers fold into what they read; outputs of
-        # a multi-output node into the node and their index.
+        # a multi-output node into the node and their index; a node in
+        # +replace+ into its replacement.
         def key(x)
+          k = fold(x)
+          return k unless @replace && (to = @replace[k[0]])
+
+          fold(to)
+        end
+
+        def fold(x)
           loop do
             case x
             when GraphNode::Tee::Branch, GraphNode::Tee
@@ -277,6 +289,8 @@ module MB
           return '+' if n.is_a?(GraphNode::Mixer)
           return n.operator.to_s if n.is_a?(GraphNode::BinaryOperation)
           return number(n.constant) if n.is_a?(GraphNode::Constant) && n.constant.is_a?(Numeric)
+          # (a MIDI transform's stream says its transform: "transpose(12)")
+          return n.to_s.delete_prefix('MIDI ') if n.is_a?(MIDI::Stream) && n.to_s != 'MIDI Stream'
 
           # (a multi-output node's recipe is on the output the DSL returned)
           outs = n.is_a?(GraphNode::MultiOutput) ? outputs(n) : []

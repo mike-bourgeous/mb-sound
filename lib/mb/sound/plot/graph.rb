@@ -125,8 +125,9 @@ module MB
         # +boxes+ (Boxes), +wires+ (Wires), an optional +title+ (a line
         # above the drawing) and +note+ (a line below it).
         def initialize(boxes:, wires:, title: nil, note: nil)
-          @boxes = boxes.to_a
-          @wires = wires.to_a
+          # (copies: freezing for Ractor sharing never freezes the caller's)
+          @boxes = boxes.to_a.dup
+          @wires = wires.to_a.dup
           @title = title&.to_s
           @note = note&.to_s
           check_wires

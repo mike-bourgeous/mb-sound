@@ -79,9 +79,14 @@ RSpec.describe(MB::Sound::Plot::Graph) do
     expect(ascii.map(&:length)).to eq(example.lines(color: :none).map(&:length))
   end
 
-  it 'is frozen and Ractor-shareable' do
+  it 'is frozen and Ractor-shareable, leaving the caller\'s Arrays as they were' do
     expect(example).to be_frozen
     expect(Ractor.shareable?(example)).to eq(true)
+    boxes = [g::Box.new(title: 'a'), g::Box.new(title: 'b', ins: [g::Slot.new(name: :input)])]
+    wires = [g::Wire.new(from: 0, to: 1)]
+    g.new(boxes: boxes, wires: wires)
+    expect(boxes).not_to be_frozen
+    expect(wires).not_to be_frozen
   end
 
   it 'colors wires by type through UI roles, or none' do
