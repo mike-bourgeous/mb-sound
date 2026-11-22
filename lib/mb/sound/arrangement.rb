@@ -360,6 +360,7 @@ module MB
           end
           fx = nil if fx.empty?
           raise ArgumentError, Fx.graph_track_message("track #{name.inspect}, fx:", name, values[0]) if fx && values[0]
+          raise ArgumentError, Fx.midi_track_message("track #{name.inspect}, fx:", name) if fx && values[3].is_a?(MIDI::Destination)
         end
         graph, clip, entry, voice = values
         patch = InstrumentPatch.patch(entry) if entry
@@ -415,7 +416,7 @@ module MB
         @mutex.synchronize {
           old = @tracks[name]
           # (the effect insert stays through a new instrument or patch unless fx: is given)
-          kept = fx.equal?(KEEP_FX) ? (patch ? old&.fx : nil) : fx
+          kept = fx.equal?(KEEP_FX) ? (patch && !voice.is_a?(MIDI::Destination) ? old&.fx : nil) : fx
           tr = @tracks[name] = Track.new(name: name, patch: patch, graph: graph, q: q, fade: fade, clip: clip || old&.clip, lead: lead, nudge: nudge, ahead: 0r, lead_max: lead_max, capped: false, clock: clock, clocked: nil, trigger: !!trigger,
                                          fx: kept)
         }

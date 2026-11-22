@@ -127,6 +127,38 @@ module MB
         end
         alias << write
 
+        # True if this output can send short messages on exact JACK frames
+        # (#write_at; JACK outputs).
+        def timed?
+          @api == :jack
+        end
+
+        # Queues one short message (+status+ with up to two data bytes; a
+        # channel message or a one-byte system message) to leave on JACK
+        # frame time +frame+ (32 bits, wrapping; see
+        # FastAudio::JackMIDIOutput#write_at), sorted among the port's other
+        # timed messages, without allocating.  Bypasses the NoteBalancer
+        # (timed senders keep their own note tables).  JACK outputs only.
+        # Returns false if the queue was full.
+        def write_at(frame, status, data1 = 0, data2 = 0)
+          raise ArgumentError, "#{@api} MIDI outputs can't send on exact frames (JACK only)" unless @api == :jack
+          @output.write_at(frame, status, data1, data2)
+        end
+
+        # Drops the timed messages queued and not sent yet (JACK outputs;
+        # see #write_at), e.g. for a panic.
+        def discard_timed
+          @output.discard_timed if @api == :jack && !@output.closed?
+          nil
+        end
+
+        # Counters of the port (JACK: messages, dropped, timed_sent,
+        # timed_late, timed_max_late, ...; see FastAudio::JackMIDIOutput#stats),
+        # or an empty Hash for RtMidi outputs.
+        def stats
+          @api == :jack && !@output.closed? ? @output.stats : {}
+        end
+
         # This output's port: the full JACK name (client:port), or a
         # description of the RtMidi port.
         def port
