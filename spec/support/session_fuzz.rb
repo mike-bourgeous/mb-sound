@@ -808,6 +808,23 @@ module SessionFuzz
       s.rng.rand < 0.5 ? "#{kit}; #{play}; #{insert}" : "#{kit}; #{play}; after(in: 2.beats) { #{insert} }; after(in: 1.bar) { fx :#{name}, :off }"
     },
     ->(s) {
+      # (master-rack-1) effect racks on the master: a named rack with a
+      # rack knob, an anonymous one, or the master chain kept as a rack (its
+      # rack document text loaded back, as master.save_rack writes it, and
+      # defined), landing at a launch point; or a rack as a track's insert
+      case s.rng.rand(4)
+      when 0 then "arack(:mfx) { |sig| sig.hp1(40).softclip(0, 0.9) * knob(:mix, #{s.pick([0.5, 0.8])}) }; master :mfx#{s.on}"
+      when 1 then "master arack { |sig| sig.lp4(#{s.pick([900, 3000])}).softclip }#{s.on}"
+      when 2
+        chain = s.pick(['{ |m| m.hp1(30).softclip(0, 0.9) }', '{ |l, r| [l, r.delay(0.004)] }', '{ |m| m.width(1.2).softclip }'])
+        "master #{chain}; Session.current.racks.define(Session::MasterRack.rack(Session.current, :mcap)); master :mcap#{s.on}"
+      else
+        next unless s.instruments
+
+        "arack(:tfx) { |sig| sig.lp4(1200) * knob(:mix, 0.7) }; fx :#{s.pick(s.instruments)}, :tfx#{s.on}"
+      end
+    },
+    ->(s) {
       # (fix-knob-reload, batch 42's soak seed 789008) a set document
       # loaded in a scheduled block lands its lines at the block's time,
       # as the same lines typed in the block do: a base tempo, and the

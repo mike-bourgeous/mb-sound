@@ -190,9 +190,10 @@ Rules: changes go through `Session#change`; scene graphs build ahead of their la
 
 ### [Master effects](master_effects.md)
 
-`Session#master` / console `master { |mix| mix.softclip }` runs the mix through a chain of `GraphNode::MixSource` channels; new chains start at launch points with the old one spilling over (`fade:` crossfades), `master nil` bypasses, and the master gain applies before the chain (`post: true` after it).
-Without a chain, realtime live output ends in a transparent -1 dBFS `Session::SafetyLimiter` (never in renders, stems, takes, taps).
-Mastering presets (`master :club`, `:streaming`, `:quiet`, `:vinyl`, `:hot`, `:match, reference:`; `mix.master(:club)` anywhere; `masters`) are frozen `Mastering::Preset` values: renders reach their loudness target exactly in two passes (`Mastering::Targeting`), live uses the preset's drive or `ride: true`; `:match` takes a reference track's loudness (`measure: :integrated | :loudest | :histogram`, read in both alike), true peak, and (renders) spectral tilt.
+`master { |mix| mix.softclip }` (`Session#master`) runs the mix through a chain on `GraphNode::MixSource` channels, starting at launch points while the old one spills over (`fade:` crossfades); `master nil` bypasses; the master gain applies before it (`post: true` after).
+Without a chain, live output ends in a transparent -1 dBFS `Session::SafetyLimiter` (not in renders, stems, takes).
+Mastering presets (`master :club`, `:streaming`, `:quiet`, `:vinyl`, `:hot`, `:match, reference:`; `mix.master(:club)`; `masters`) are frozen `Mastering::Preset`s: renders hit their loudness target exactly in two passes (`Mastering::Targeting`), live uses the drive or `ride: true`; `:match` takes a reference's loudness, true peak, and tilt.
+Effect racks play as the chain (`master :glue`); `master.save_rack :glue` keeps the chain as a rack document (`Session::MasterRack`).
 
 ### [Buses, sends, and bus sidechains](buses.md)
 
@@ -207,10 +208,11 @@ CUE is dry (pre-bus, pre-master) and never reaches renders, stems, or taps; phon
 
 ### [Racks, typed ports, and the inspection protocol](racks.md)
 
-A `MB::Sound::Rack` (`lib/mb/sound/rack.rb`, console `RackMethods`) is a frozen, Proc-like reusable graph with typed ports (`:notes`, `:audio`, `:control`): `mrack`, `irack`, `arack`, `lrack`, `modrack`, `rack(name, in:, out:, **ports)`; apply with `src.then(&r)`, `r.(src)`, `stream.through(r)`.
+A `MB::Sound::Rack` (`rack.rb`, console `RackMethods`) is a frozen, Proc-like graph with typed ports (`:notes`, `:audio`, `:control`): `mrack`, `irack`, `arack`, `lrack`, `modrack`, `rack(name, in:, out:)`; apply with `src.then(&r)`, `r.(src)`, `stream.through(r)`.
 Named racks join `Session::Names`; `knob :space, 0.3` in a rack block is a rack knob (`:"dub/space"`, per player once two instances play).
-Slots (R3): `sig.slot(:color) { }` / `midi.slot(:keys) { }` are swappable holes; `swap :"dub/color", arack { }, fade:` hands over on an exact frame like master chains (`Session::Handover`; instruments keep held notes); named racks made with `slot: true` swap their instances when redefined.
-Rack documents (`save :dub, rack(:dub)`) and graph documents reload bit for bit; every Traversable answers `port_info`, `params`, and frozen `param_info`/`param_snapshot`.
+Slots (R3): `sig.slot(:color) { }` / `midi.slot(:keys) { }` are swappable holes; `swap :"dub/color", arack { }, fade:` hands over on an exact frame like master chains (`Session::Handover`); named racks made with `slot: true` swap their instances when redefined.
+Rack and graph documents reload bit for bit; Traversables answer `port_info`, `params`, frozen `param_info`/`param_snapshot`.
+Effect racks play on the master (`master :dub`) and on tracks (`fx :keys, :dub`).
 
 ### [Genre templates (`lib/mb/sound/genre.rb`, `genre/`, console `GenreMethods`)](genres.md)
 
