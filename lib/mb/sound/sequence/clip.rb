@@ -773,10 +773,11 @@ module MB
           return NO_EDGES if @length <= 0 && @events.empty?
 
           if @loop
-            first = MB::M.max(cycle_of(from) - @lookback, 0)
+            here = cycle_of(from)
+            first = MB::M.max(here - @lookback, 0)
             last = cycle_of(to) + @lookahead
           else
-            first = last = 0
+            here = first = last = 0
           end
 
           # Allocation-free unless an edge lands in [from, to): each cycle's
@@ -786,11 +787,13 @@ module MB
           out = nil
           cycle = first
           while cycle <= last
-            if @units > 1
+            if @units > 1 && cycle >= here
               # Steered per unit (a beat, ...): each unit is decided once
               # the read reaches its decision point, cycle start + unit
               # start - lead (compared as unit starts against the read's
-              # ends relative to cycle start - lead: no arithmetic per unit)
+              # ends relative to cycle start - lead: no arithmetic per
+              # unit).  (Cycles before +from+'s were decided before it,
+              # and aren't being decided now: the plain path below.)
               base = cycle * @length - @steer_lead
               rel_to = to - base
               rel_from = from - base
@@ -806,17 +809,31 @@ module MB
               cycle += 1
               next
             end
+            if @units > 1
+              # (a cycle before +from+'s: every unit decided before it)
+              k = 0
+              while k < @units
+                table = edge_table(cycle, k)
+                out = table_edges(out, table, cycle, from, to, early, fills, false) if table.hi >= from && table.lo < to
+                k += 1
+              end
+              cycle += 1
+              next
+            end
             # A steered cycle is decided only once the read reaches its
-            # decision point (nothing of it starts before that)
-            if @steer_lead
+            # decision point (nothing of it starts before that; cycles
+            # before +from+'s were decided before it)
+            deciding = false
+            if @steer_lead && cycle >= here
               d = cycle * @length - @steer_lead
               if to <= d
                 cycle += 1
                 next
               end
+              deciding = from <= d
             end
             table = edge_table(cycle)
-            out = table_edges(out, table, cycle, from, to, early, fills, @steer_lead && from <= d) if table.hi >= from && table.lo < to
+            out = table_edges(out, table, cycle, from, to, early, fills, deciding) if table.hi >= from && table.lo < to
             cycle += 1
           end
 
@@ -897,13 +914,14 @@ module MB
             best = nil
           else
             return nil if pos > @length
-            first = last = 0
+            cycle = first = last = 0
             cap = nil
             best = @length
           end
 
           while first <= last
-            base = @steer_lead && first * @length - @steer_lead
+            # (cycles before +pos+'s are decided)
+            base = @steer_lead && first >= cycle && first * @length - @steer_lead
             k = 0
             while k < @units
               if base && pos < (d = @units > 1 ? base + @unit_starts[k] : base)
