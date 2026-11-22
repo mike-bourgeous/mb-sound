@@ -1366,8 +1366,9 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       expect(MB::Sound.transport.position).to eq(0)
     end
 
-    it 'rejects bars before the first' do
-      expect { MB::Sound.seek(0) }.to raise_error(ArgumentError)
+    it 'rejects bars before the first (seek 0 is the start: form_spec)' do
+      expect { MB::Sound.seek(0.5) }.to raise_error(ArgumentError)
+      expect { MB::Sound.seek(-1) }.to raise_error(ArgumentError)
     end
   end
 end
