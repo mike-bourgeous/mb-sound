@@ -179,9 +179,14 @@ module MB
       # the plan rebuild a swap makes are compiled before the first live
       # swap (cold, the first landing took 66-233 ms on the Mac container;
       # later ones 2-16 ms at 800-frame buffers).  Costs about 0.6 s of
-      # warm_up (0.8 -> 1.4 s on the Mac container).
+      # warm_up (0.8 -> 1.4 s on the Mac container).  The sandbox has its
+      # own Transport: on the shared one its buffers moved the timeline
+      # before the song started (to 4/125 at 128-frame buffers), so a song
+      # script's loops waited for bar 2 and a one-bar `--ui` run was
+      # silent (fix-script-ui-meters).
       def warm_up_slots(buffer)
-        s = Session.new(realtime: false, output: NullOutput.new(channels: 2, sleep: false, buffer_size: buffer), channels: 2, buffer_size: buffer)
+        s = Session.new(realtime: false, output: NullOutput.new(channels: 2, sleep: false, buffer_size: buffer), channels: 2, buffer_size: buffer,
+                        transport: Sequence::Transport.new)
         Session.with_context(session: s) do
           GraphNode::Recipe.quietly do
             notes = seq(Note.new(48), Note.new(55), nil, Note.new(60)).n16.loop
