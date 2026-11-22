@@ -17,6 +17,7 @@ RSpec.describe(MB::Sound::Session::Context, :aggregate_failures) do
   # key => what it holds
   keys = {
     mb_sound_context: 'Session::Context: who issued the commands running on this thread, and when',
+    mb_sound_midi_zero_based: 'MIDI::Channel.zero_based: channel arguments read 0-based while an old take\'s line replays',
     mb_sound_span: 'the span a Session renders on this thread (Session.span; render path)',
     mb_sound_plan_deferral: 'the plan rebuild deferral of the render (render path)',
     mb_sound_tee_new_branches: 'Tee.collect_branches: branches made while building',
