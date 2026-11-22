@@ -1,7 +1,7 @@
 # mb-sound graph document: a Ruby subset that MB::Sound.preset and
 # MB::Sound::GraphIO.load read without running it (no eval).
 graph 7,
-  name: "funk_beat",
+  name: "funk_kit",
   kind: :synth,
   saved: "2026-10-30T06:34:07Z",
   mb_sound: "0.12.0.usegit (28b121e2)",

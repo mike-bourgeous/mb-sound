@@ -75,7 +75,7 @@ module MB
         F4.n8, G4.n8, A4.n4.d, R.n4,
       ).loop(align: :launch)
 
-      role :beat, :funk_beat, about: 'mouth-drum kit: an 808 through a formant mouth, kick on the ONE'
+      role :beat, :funk_kit, about: 'mouth-drum kit: an 808 through a formant mouth, kick on the ONE'
       role :perc, :funk_perc, about: 'shaker, rim, and congas overdub'
       role :bass, :funk_bass, about: 'a ghost-noted funk bass'
       role :keys, :funk_keys, about: 'FM electric piano stabs, rootless voicings'

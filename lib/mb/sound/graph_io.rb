@@ -724,7 +724,7 @@ module MB
             # family, not a document; omnibus15, from the take)
             raise GraphIO::LoadError, "no preset #{name}: #{hint}"
           end
-          raise GraphIO::LoadError, "no preset #{name}#{GraphIO.suggest(name, names)} (looked in #{GraphIO.preset_dirs.join(', ')})"
+          raise GraphIO::LoadError, "no preset #{name}#{Library::Heads.renamed_hint(nil, name)}#{GraphIO.suggest(name, names)} (looked in #{GraphIO.preset_dirs.join(', ')})"
         end
         Library.index.note_path(path)
 

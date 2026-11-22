@@ -43,6 +43,15 @@ RSpec.describe MB::Sound::Library::Generators, 'the beat family', :aggregate_fai
     expect { MB::Sound::L.gen.word(:techno_beat) }.to raise_error(KeyError, /renamed: it is L\.gen\.beat\.techno now/)
   end
 
+  it 'renamed the funk kit preset (funk_beat is funk_kit) and says so where the old name is typed' do
+    expect(MB::Sound::L.inst.funk_kit.location).to end_with('presets/funk_kit.mbg.rb')
+    expect(MB::Sound::L.inst.funk_kit.to_ruby).to eq('preset(:funk_kit)')
+    expect(MB::Sound.genre(:funk).roles[:beat].patch).to eq(:funk_kit)
+    expect { MB::Sound::L.inst.funk_beat }.to raise_error(NoMethodError, /renamed: it is L\.inst\.funk_kit now/)
+    expect { MB::Sound.preset(:funk_beat) }.to raise_error(MB::Sound::GraphIO::LoadError, /renamed: it is L\.inst\.funk_kit now/)
+    expect(MB::Sound::Library::Heads::RENAMED.values.flat_map(&:keys)).to all(satisfy { |n| lib.index.find(n.to_s).entries.none? { |e| e.name == n } })
+  end
+
   it 'completes and finds with the full path: Tab, the popup, the picker, find' do
     expect(lib::Heads.completions('L.gen.tec')).to eq(['L.gen.techno', 'L.gen.beat.techno'])
     expect(lib::Heads.completions('L.gen.beat.te')).to eq(['L.gen.beat.techno'])
