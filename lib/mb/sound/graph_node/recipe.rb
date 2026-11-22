@@ -159,7 +159,7 @@ module MB
 
         @enabled = ENV['MB_SOUND_RECIPES'] != '0'
         @block_iseqs = ObjectSpace::WeakKeyMap.new
-        @frozen_bundles = ObjectSpace::WeakKeyMap.new # (see .bundle_of)
+        @other_bundles = ObjectSpace::WeakMap.new # (see .bundle_of)
         @seq = 0
         @wrapped = Hash.new { |h, k| h[k] = Set.new }
 
@@ -200,13 +200,13 @@ module MB
           # bundle holds its outputs, so every recorded bundle and the
           # graph behind it stayed alive for good: 0.8 million objects left
           # by one spec file, and major GCs 10x slower in long processes.)
-          # A frozen object can't take the variable: those go in a
-          # WeakKeyMap, the old way (kept for good if the bundle reaches
-          # them; none of the library's bundles has a frozen output).
+          # A frozen node or an output that isn't a GraphNode can't take the
+          # variable: a WeakMap (weak keys and values) finds its bundle while
+          # something else holds the bundle.
           def bundle_of(node)
-            return @frozen_bundles[node] if node.frozen?
+            return @other_bundles[node] unless node.is_a?(GraphNode) && !node.frozen?
 
-            node.instance_variable_get(:@graph_bundle) if node.instance_variable_defined?(:@graph_bundle)
+            node.instance_variable_get(:@graph_bundle)
           end
 
           # The Call that made +obj+ as seen from block scope +scope+ (the
@@ -403,12 +403,12 @@ module MB
           # Makes +bundle+ the bundle of +node+ (see .bundle_of) unless it
           # has one.
           def note_bundle(node, bundle)
-            return if node.nil? || node.is_a?(Numeric) || node.is_a?(Symbol) || node == true || node == false || !bundle_of(node).nil?
+            return if node.nil? || node.is_a?(Numeric) || !bundle_of(node).nil?
 
-            if node.frozen?
-              @frozen_bundles[node] = bundle
-            else
+            if node.is_a?(GraphNode) && !node.frozen?
               node.instance_variable_set(:@graph_bundle, bundle)
+            else
+              @other_bundles[node] = bundle
             end
           end
 

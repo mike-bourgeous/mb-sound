@@ -9,12 +9,6 @@ module MB
       module MultiOutput
         include Inspect # one-line #inspect (ux-fix-1)
 
-        # Set lazily by recording: the recorded bundle whose outputs this
-        # node owns (GraphNode::Recipe.bundle_of; multi-output nodes aren't
-        # GraphNodes, so they declare it themselves, see IvarPreset).
-        IvarPreset.attach(self)
-        IvarPreset.declare(self, :@graph_bundle)
-
         # When implemented, returns an Array of NodeOutput nodes that may be
         # sampled to retrieve the node's individual output values.
         def outputs
