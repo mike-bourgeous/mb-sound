@@ -84,11 +84,12 @@ module MB
       # Panes that commands open, not layouts (so no built-in layout shows
       # them): name => the command.
       ON_DEMAND_PANES = { message: 'ui.message n', page: 'help (a page while the tiled screen is up), ui.page false closes it',
-                         plot: 'plot, spectrum, chart { } (while the tiled screen is up), ui.plot false closes it' }.freeze
+                         plot: 'plot, spectrum, chart { } (while the tiled screen is up), ui.plot false closes it',
+                         midi_ports: 'ui.show :midi_ports (alias :midi_devices; or `pane :midi_ports` in a layout of yours)' }.freeze
 
       # The set's panes, shown by `ui :session` (and buses in :studio's
       # tabs) rather than on the :wall, which shows every other pane.
-      SESSION_PANES = %i[buses log lane clips clip racks rack midi midi_ports].freeze
+      SESSION_PANES = %i[buses log lane clips clip racks rack midi].freeze
 
       # The sound-design screen's panes, shown by `ui :sound` (the
       # inspector, its preview and code, the picker, the CUE line, the

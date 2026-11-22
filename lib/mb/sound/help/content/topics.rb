@@ -1654,8 +1654,9 @@ module MB
         (`midi_out(...).offset = 6.ms` while it plays).  `level :kronos,
         -6.db` sends CC 7.  Channels and programs count from 1, as on the
         synths.  `midi_out('SQ-80').test` plays a test note; `midi_out(port:
-        'to_surge')` makes a port another program connects to.  The
-        `:midi_ports` pane (alias `:midi_devices`) lists them too.
+        'to_surge')` makes a port another program connects to.  `ui.show
+        :midi_ports` (alias `:midi_devices`) shows them in a pane: Enter
+        puts a track line on the console, a plays a test note.
       TEXT
       commands :midi_out, :midi_ports
       note :midi
