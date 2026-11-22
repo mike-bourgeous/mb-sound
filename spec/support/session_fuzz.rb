@@ -836,6 +836,17 @@ module SessionFuzz
       body = "knob :cut, (100.hz..5000.hz).at(#{s.pick(%w[600 3000])}.hz)\\n#{body}" if s.knob
       "GraphIO.load(%(graph \#{GraphIO::FORMAT}, name: \"tempo\", kind: :set\\n#{body}\\n), session: Session.current)"
     },
+    ->(s) {
+      # (note-within-1) notes moved into a register by octaves: a clip, a
+      # generator (each cycle as it's made), or a looping clip's stream,
+      # played by a voice whose filter follows its note's frequency
+      # folded into a fixed range
+      source = s.pick([
+        'seq(E4, G4, B4, D5).n8.loop.within(E1..E2)', 'motifs(scale(:minor, :a), 4, seed: 3).within(C3...C4)',
+        'seq(C5, A4).n4.loop.within(60.hz..120.hz)', 'seq(G4, D5).n8.loop.stream.within(C3..C4)',
+      ])
+      "bg :#{s.bg_name}, #{source}.synth(voices: 2) { |v| v.tone.saw.lp4(v.freq.within(400.hz..800.hz)) * v.env * 0.1 }#{s.on}"
+    },
     # (new commands go here, at the end)
   ].freeze
 
