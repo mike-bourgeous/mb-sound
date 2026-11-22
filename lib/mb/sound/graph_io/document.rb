@@ -13,7 +13,7 @@ module MB
         # Header calls, in order: graph first, then inputs (typed since
         # format 4: `inputs sig: :audio, side: :audio`), outputs (format 4,
         # optional: `outputs :audio`), params, knobs, and a bundle's assets.
-        HEADER = %i[graph inputs outputs param knob clock asset].freeze
+        HEADER = %i[graph inputs outputs param knob slot clock asset].freeze
 
         # The rack kinds (MB::Sound::Rack#kind) a rack document's `kind:`
         # takes.
@@ -92,7 +92,7 @@ module MB
 
         # The `graph` line's interpreters: what reads each structural key.
         HEADER_INTERPRETERS = [
-          HeaderKeys.new('GraphIO::Loader', %i[name kind rack options], 'the document says how to build it'),
+          HeaderKeys.new('GraphIO::Loader', %i[name kind rack slot options], 'the document says how to build it'),
           HeaderKeys.new('the fit tools (FitPatch, HandTune, Take::Reader)', %i[from tuned], 'the tool that wrote the document'),
           HeaderKeys.new('Library::Index', %i[description tags], "the library's index words"),
           MB::Sound::Facts::Consumer.new('GraphIO::Document#meta', %w[graph.meta]),
@@ -164,6 +164,11 @@ module MB
         # A rack document's Rack, once loaded (see #rack?).
         attr_accessor :rack
 
+        # A rack document's slots by name, with their types (`slot :color,
+        # :audio`; racks-r3-2): { color: :audio }.  The body's
+        # `sig.slot(:color) { ... }` holds the default content.
+        attr_reader :slots
+
         # A bundle's assets: SHA-256 sums by file name (`asset
         # "assets/pad.flac", sha256: "..."`), checked when the files are read.
         attr_reader :assets
@@ -194,6 +199,7 @@ module MB
           @input_defaults = {}
           @outputs = []
           @rack = nil
+          @slots = {}
           @comment_inputs = nil
           @assets = {}
           @verified = {}

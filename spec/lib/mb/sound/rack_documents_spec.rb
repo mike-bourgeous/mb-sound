@@ -112,6 +112,40 @@ RSpec.describe('rack documents') do
       expect(session.knobs.keys).to contain_exactly(:"bass/dub/space", :"bass/dub/cut", :"keys/dub/space", :"keys/dub/cut")
     end
 
+    # (racks-r3-2, the maintainer's "yes" to a slot header line, and
+    # instance slots opt-in with slot: true)
+    it 'declares slots in slot lines and keeps slot: true, loading back the same rack and text' do
+      r = s.arack(:tinted, slot: true) { |sig| sig.slot(:color) { |c| c.softclip(0.3, 0.6) } * s.knob(:space, 0.5) }
+      text = io.dump(r)
+      expect(text).to match(/^graph #{io::FORMAT},\n  name: "tinted",\n  kind: :effect,\n  rack: :arack,\n  slot: true,\n/)
+      expect(text).to include("knob :space, 0.5\nslot :color, :audio\n")
+      expect(text).to include('sig.slot(:color) { |c|')
+      loaded = io.load(text)
+      expect(loaded.slot?).to eq(true)
+      expect(io.parse(text).slots).to eq(color: :audio)
+      expect(without_saved(io.dump(loaded))).to eq(without_saved(text))
+      a = 220.hz.saw.then(&r)
+      b = 220.hz.saw.then(&loaded)
+      expect(b).to be_a(MB::Sound::GraphNode::Slot::Output)
+      expect(b.sample(4800)).to eq(a.sample(4800))
+
+      inst = s.irack(:pluck) { |n| n.slot(:voice) { |m| m.synth { |v| v.hz.saw * v.amp_env } } }
+      itext = io.dump(inst)
+      expect(itext).to include("slot :voice, :notes\n")
+      expect(itext).not_to include('slot: true')
+      expect(io.load(itext).slot?).to eq(false)
+    end
+
+    it "refuses slot lines that don't match the body's slots, or outside rack documents" do
+      text = io.dump(s.arack(:t2) { |sig| sig.slot(:color) { |c| c * 0.5 } })
+      expect { io.load(text.sub("slot :color, :audio\n", '')) }.to raise_error(io::LoadError, /don't match the slots the rack makes \(color; slot :color, :audio\)/)
+      expect { io.load(text.sub('slot :color, :audio', 'slot :colour, :audio')) }.to raise_error(io::LoadError, /don't match/)
+      expect { io.load(text.sub('slot :color, :audio', 'slot :color, :sound')) }.to raise_error(io::LoadError, /slot takes a name and the type/)
+      expect { io.load("graph #{io::FORMAT}\nslot :x, :audio\n1.constant") }.to raise_error(io::LoadError, /slot lines belong to rack documents/)
+      # (format 12 and older: no slot lines)
+      expect(io.load(text.sub("slot :color, :audio\n", '').sub(/^graph \d+/, 'graph 12'))).to be_a(MB::Sound::Rack)
+    end
+
     it 'loads older documents with untyped inputs unchanged' do
       doc = io.parse("graph 3\ninputs :midi, :input\nparam :x, 1\ninput * x")
       expect(doc.input_types).to eq(midi: :notes, input: :audio)
