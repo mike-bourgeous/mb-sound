@@ -64,7 +64,10 @@ RSpec.describe(MB::Sound::Sequence::Clip, '#pregenerate', :aggregate_failures) d
       run.(between) if between && frame <= BAR * 7 / 4 && frame + n > BAR * 7 / 4
       counting = frame <= land && frame + n > land
       cycles = gens.sum { |g| g.stats[:cycles] }
-      out << s.process_buffer[0].dup
+      objects = GC.stat(:total_allocated_objects)
+      buf = s.process_buffer[0]
+      @landing_objects = GC.stat(:total_allocated_objects) - objects if counting
+      out << buf.dup
       counts[:cycles] += gens.sum { |g| g.stats[:cycles] } - cycles if counting
     end
     [SpecBuffers.join(out), counts.reject { |_, v| v == 0 }]
@@ -88,11 +91,16 @@ RSpec.describe(MB::Sound::Sequence::Clip, '#pregenerate', :aggregate_failures) d
     it "lands a #{path} of a steered beat computing nothing, and plays what it played before" do
       [800, *slow_tier([367])].each do |n|
         audio, counts = render(n, command)
+        objects = @landing_objects
         before, old = render_unprepared(n, command)
         expect(counts).to eq({}), "#{n} frames"
         expect(old[:cycles] + old[:tables]).to be > 0, "#{n} frames: the path before computed at the landing"
         expect(audio.to_binary.hash).to eq(before.to_binary.hash), "#{n} frames"
         expect(audio.abs.max).to be > 0.4
+        # (the landing buffer's allocations: 660-890 objects, 3200-3800
+        # before; the rest is the swap, the chase, and the notes)
+        expect(objects).to be < 1200, "#{n} frames"
+        expect(@landing_objects).to be > objects
       end
     end
   end
