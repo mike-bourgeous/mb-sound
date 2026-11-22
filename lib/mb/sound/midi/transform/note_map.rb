@@ -221,6 +221,30 @@ module MB
           end
         end
 
+        # Moves each note into a note or frequency range by whole octaves,
+        # keeping its pitch class (see Stream#within and
+        # MB::Sound::OctaveFold); note-offs and poly pressure follow the
+        # note as it was moved.  Frequency ends are read through the
+        # session Tuning at each note-on.
+        class Within < NoteMap
+          def initialize(parent, range, **options)
+            super(parent, **options)
+            @fold = MB::Sound::OctaveFold[range]
+            @node_type_name = "within(#{@fold})"
+          end
+
+          private
+
+          def map_on(e)
+            note = e.note
+            return [[e.with_note(Transpose.whole(@fold.note(note))), 0r]] if note.is_a?(Numeric)
+            # (a fixed frequency from a clip: folded in Hz, as Clip#within does)
+            return [[e.with_note(@fold.value(note)), 0r]] if note.is_a?(MB::Sound::Pitch) && (note.is_a?(MB::Sound::Note) || note.constant?)
+
+            [[e, 0r]]
+          end
+        end
+
         # Transposes each note by a step read at its note-on from a param
         # (MIDI::Param: `midi.transpose(seq(0, -4, 3, -2).n1.loop)`,
         # `transpose(knob(:shift))`); its note-off and poly pressure follow

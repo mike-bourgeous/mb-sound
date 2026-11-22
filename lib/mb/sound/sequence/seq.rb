@@ -374,6 +374,16 @@ module MB
           }
         end
 
+        # Returns a Seq with every note moved into +range+ by octaves (see
+        # Clip#within), chords and nested clips too.
+        def within(range)
+          fold = MB::Sound::OctaveFold[range]
+          map_steps { |s|
+            raise ArgumentError, "Pitch-marked hits (sampler chops) keep their keys; #{self} can't move into #{fold}" if s[:pitch]
+            s.to_h.merge(value: fold.value(s.value), clip: s.clip&.within(range), chord: s.chord&.map { |v| fold.value(v) })
+          }
+        end
+
         # Returns a Seq with the steps in reverse order (nested clips are
         # reversed too; see Clip#reverse), keeping unset lengths settable.
         # Ties (MB::Sound::Tie) stay after the note they hold.
@@ -540,7 +550,7 @@ module MB
 
         # Seq's own versions of Clip transforms also remember their source.
         track_derivations(
-          :loop, :repeat, :*, :stretch, :legato, :transpose, :vel, :reverse, :retrograde, :permute, :shuffle,
+          :loop, :repeat, :*, :stretch, :legato, :transpose, :within, :vel, :reverse, :retrograde, :permute, :shuffle,
           :accent, :acc, :a!, :slide, :s!, :up, :dn, :down, :oct, :acid, :chance, :maybe, :every
         )
       end

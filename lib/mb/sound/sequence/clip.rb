@@ -51,7 +51,7 @@ module MB
         DERIVATIONS = [
           :loop, :|, :&, :repeat, :*, :fill, :truncate, :roll, :ratchet, :stretch,
           :d, :dotted, :dd, :double_dotted, :t, :triplet,
-          :legato, :staccato, :note_length, :transpose, :vel,
+          :legato, :staccato, :note_length, :transpose, :within, :vel,
           :reverse, :retrograde, :permute, :shuffle, :rotate, :shift,
         ].freeze
 
@@ -547,6 +547,26 @@ module MB
             else
               e.with(value: steps.apply_value(e.value))
             end
+          }
+        end
+
+        # Returns a clip with every note moved into +range+ by whole
+        # octaves, keeping its pitch class, so its degree in the key
+        # (MB::Sound::OctaveFold, the rules MIDI::Stream#within and
+        # GraphNode#within share): +range+ is notes (`E1..E2`, plain numbers
+        # are MIDI note numbers) or frequencies (`40.hz..80.hz`, through the
+        # session Tuning); notes in the range stay, notes below move up by
+        # the fewest octaves, notes above down (`E1...E2` leaves out E2).
+        # Notes stay Notes, fixed frequencies Pitches.  On a generator
+        # clip every generated cycle moves (it keeps generating).
+        #
+        #     bass = lead.within(E1..E2)            # the lead's degrees, bass register
+        #     motifs(8).within(C4..C5)
+        def within(range)
+          fold = MB::Sound::OctaveFold[range]
+          map_clip { |e|
+            raise ArgumentError, "Pitch-marked hits (sampler chops) keep their keys; #{self} can't move into #{fold}" if e.pitch
+            e.with(value: fold.value(e.value))
           }
         end
 

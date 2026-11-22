@@ -30,7 +30,7 @@ module MB
           :select, :reject, :velocities, :map_notes, :vel, :rechannel, :to_channel,
           :note_length, :len, :shift, :rotate, :through,
           :swing, :chance, :maybe, :every, :legato, :ratchet, :ghost_chords,
-          :degrees, :lock, :groove,
+          :degrees, :lock, :groove, :within,
         ].freeze
 
         # Transforms that Sequence::Clip mirrors, returning Streams of the
@@ -266,6 +266,22 @@ module MB
           Stream.new(Transform::GhostChords.new(self, chords, per: per, scale: scale, root: root, size: size, harmonic: harmonic, tie: tie, passing: passing, **options))
         end
 
+        # Moves every note into +range+ by whole octaves, keeping its pitch
+        # class, so its degree in the key (Transform::Within; the same
+        # rules as Clip#within and GraphNode#within, MB::Sound::OctaveFold):
+        # +range+ is notes (`E1..E2`, plain numbers are MIDI note numbers)
+        # or frequencies (`40.hz..80.hz`, through the session Tuning); a
+        # note in the range stays, one below moves up by the fewest
+        # octaves, one above down; `E1...E2` leaves out the top.  A range
+        # narrower than an octave clamps notes it can't hold to the edge
+        # nearer in pitch.  Note-offs follow the moved note.
+        #
+        #     bass = lead_notes.within(E1..E2)    # the lead's degrees in the bass register
+        #     midi.within(C4..C5).synth { |v| v.hz.triangle * v.amp_env }
+        def within(range, **options)
+          Stream.new(Transform::Within.new(self, range, **options))
+        end
+
         # Moves notes into a scale: +scale+ a Scale, name, or Array of
         # offsets, with +root+; +:direction+ :nearest (ties down), :down,
         # or :up.  Without a scale (or a mode name without a root, or a
@@ -475,6 +491,7 @@ module MB
           swing: 'swing(0.6)', chance: 'chance(0.7)', maybe: 'maybe(0.7)', every: 'every(2, from: 1)', legato: 'legato(1.5)',
           ratchet: 'ratchet(4, rate: 1.n32)', ghost_chords: 'ghost_chords(1, 4, 7, 6, scale: scale(:minor, :a))',
           degrees: 'degrees(:minor_pentatonic, layout: :fit)', lock: 'lock(:play)', groove: 'groove(feel, amount: 0.6)',
+          within: 'within(E1..E2)',
         }.freeze
 
         # Other guesses at a transform's keywords, answered with the

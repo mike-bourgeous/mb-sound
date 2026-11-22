@@ -45,6 +45,15 @@ module MB::Sound
       'MIDI echo with an Array of gaps' => [-> { seq(C4, E4).n8.loop.notes.echo([3.n32, 5.n32], 3, pitch: [7.st, 5.st]).tone }, 'echo([3.n32, 5.n32], 3, pitch: [7.st, 5.st])'],
       'echo on a generator, per cycle' => [-> { motifs(scale(:minor, :a), 4, seed: 3).echo([3.n32, 1.n16], 2).tone }, 'motifs(scale(:minor, A4), 4, seed: 3).echo([3.n32, 1.n16], 2)'],
       'clip synth' => [-> { seq(C4, E4, G4).n8.loop.synth(voices: 2) { |v| v.tone.saw * v.env(0, 0.1, 0.5, 0.1) } }, 'seq(C4, E4, G4).n8.loop.synth(voices: 2)'],
+      # (note-within-1: notes and frequencies moved into ranges by octaves)
+      'within on clips, Seqs, and generators' => [
+        -> { (seq(C4, E4, 440.hz).n8.within(E1..E2) | motifs(scale(:minor, :a), 4, seed: 3).within(C4...C5)).loop.tone },
+        'seq(C4, E4, 440.hz).n8.within(E1..E2) | motifs(scale(:minor, A4), 4, seed: 3).within(C4...C5)',
+      ],
+      'within on a stream and a node of Hz' => [
+        -> { n = seq(C4, G4).n8.loop.notes.within(60.hz..120.hz); n.tone.saw * n.freq.within(2.hz..8.hz).tone.square },
+        'seq(C4, G4).n8.loop.notes.within(60.hz..120.hz)',
+      ],
     }.freeze
   end
 end
