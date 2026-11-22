@@ -152,7 +152,10 @@ RSpec.describe(MB::Sound::Drums::Kit, :aggregate_failures) do
     end
 
     it 'raises for rows and voices that are not 808 voices' do
-      expect { MB::Sound.tr808(MB::Sound.grid(16, tambourine: 'x')) }.to raise_error(ArgumentError, /doesn't name a TR-808 voice/)
+      # (a role with no voice and no fallback: drum-gen-1's chokes; a GM
+      # tambourine plays the maracas through Drums::Roles::FALLBACK)
+      expect { MB::Sound.tr808(MB::Sound.grid(16, crash_choke: 'x')) }.to raise_error(ArgumentError, /doesn't name a TR-808 voice/)
+      expect { MB::Sound.tr808(MB::Sound.grid(16, tambourine: 'x')) }.not_to raise_error
       expect { MB::Sound.tr808(MB::Sound.grid(16, kick: 'x'), tabla: { tune: 1 }) }.to raise_error(ArgumentError, /Unknown TR-808 voice/)
       expect { MB::Sound.tr808(MB::Sound.grid(16, kick: 'x'), kick: 3) }.to raise_error(ArgumentError, /Hash/)
       expect { MB::Sound.tr808(MB::Sound.seq(MB::Sound::Note.new(90)).n4) }.to raise_error(ArgumentError, /Nothing/)
