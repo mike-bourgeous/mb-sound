@@ -508,6 +508,34 @@ RSpec.describe(MB::Sound::UI::Tiles, :aggregate_failures) do
       expect(wait_settled(@tiles) { @tiles.tiler.focus == :tracks && !@tiles.tiler.layout.panes.include?(:page) }).to eq(true), state.inspect
     end
 
+    # (ux-friction-3: from the drums topic's "Commands" rows he retyped
+    # `help :tr808`)
+    it 'picks a listed page with Up/Down, reads it with Enter, and comes back with Backspace' do
+      start(:studio, rows: 50, cols: 120)
+      MB::Sound::UI.instance_variable_set(:@tiles, @tiles)
+      @term.type("MB::Sound::Help.show(MB::Sound::Help.page_for(:drums))\r")
+      expect(wait_settled(@tiles) { state == %i[page pane] }).to eq(true), state.inspect
+      expect(@term.wait_for('Up Down pick a page, Enter reads it')).to eq(true), @term.text
+      expect(page_pane.links.map(&:last)).to include(':tr808')
+      expect(page_pane.pick).to be_nil # (nothing picked until Up/Down)
+      @term.write("\e[B")
+      expect(wait_until { page_pane.pick == 0 }).to eq(true), page_pane.pick.inspect
+      @term.write("\e[B")
+      expect(wait_until { page_pane.pick == 1 }).to eq(true)
+      @term.write("\e[A")
+      expect(wait_until { page_pane.pick == 0 }).to eq(true)
+      @term.write("\r")
+      expect(wait_until { page_pane.full_text.start_with?('tr808(source') }).to eq(true), page_pane.full_text[0, 200]
+      expect(@term.wait_for('HELP · TR808')).to eq(true), @term.text
+      expect(@term.wait_for('Backspace back')).to eq(true), @term.text
+      @term.write("\x7f")
+      expect(wait_until { page_pane.full_text.start_with?('Drums') }).to eq(true), page_pane.full_text[0, 80]
+      expect(page_pane.pick).to eq(0) # (where it was)
+      expect(page_pane.history).to be_empty
+      @term.write('q')
+      expect(wait_settled(@tiles) { state == %i[repl repl] }).to eq(true), state.inspect
+    end
+
     # sd-ux-fixes-1 (the review's #5): a result taller than the REPL pane
     # opened the console Pry's pager (its own config, copied at start), and
     # the next typed lines went into it

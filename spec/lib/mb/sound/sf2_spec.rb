@@ -225,6 +225,9 @@ RSpec.describe(MB::Sound::Sampler::SF2, :aggregate_failures) do
         'zones playing ROM samples (not in the file)' => 1
       )
       expect { f.instrument(name: 'again') }.not_to output.to_stderr # once per preset
+      # once per font file too: a font opened again (a new Font, as after
+      # the cache's WeakRef lets go) doesn't repeat it (sf2-cost-1)
+      expect { described_class::Font.new(path).instrument }.not_to output.to_stderr
 
       # a file cut short keeps what it has
       bytes = File.binread(sine_font)

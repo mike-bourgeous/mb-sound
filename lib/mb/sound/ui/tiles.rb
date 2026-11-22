@@ -701,8 +701,11 @@ module MB
         # Ctrl-] is NAV as anywhere.  +help+ pages (Help.show) are titled
         # "HELP · <title>" (plain "HELP" without one); other text keeps
         # +title+ (`ui.page text, title:`).  `ui.page false` closes it.
-        # Returns self.
-        def page(text = nil, title: nil, help: false, opener: nil)
+        # +links+ ([[line index, subject], ...]) are rows naming other
+        # pages, which Up/Down pick and Enter opens through +follow+ (a
+        # Proc of the subject giving [text, title]; help pages,
+        # Help.page_links; ux-friction-3).  Returns self.
+        def page(text = nil, title: nil, help: false, opener: nil, links: nil, follow: nil)
           if text.nil? || text == false
             @page_close&.call
             @page_close = nil
@@ -712,7 +715,9 @@ module MB
           end
           if @panes[:page].respond_to?(:show)
             label = help ? ['HELP', title].compact.reject { |t| t.to_s.empty? }.join(' · ') : title
-            @panes[:page].show(text, title: label)
+            was = @panes[:page].title
+            @panes[:page].show(text, title: label, links: links, follow: follow)
+            @relayout = true unless @panes[:page].title == was # (a second page's title; see #pane_action)
           end
           unless @tiler.focus == :page
             @page_opener = opener || (@router.mode == :repl || @tiler.focus.nil? ? :repl : @tiler.focus)
@@ -1527,6 +1532,9 @@ module MB
           flash("clip #{@keyboard.clips.length}: ui.keyboard.clip (and in the REPL line: name it, e.g. riff = ...)", :ok)
         end
 
+        # What entering KEYS flashes while nothing is armed.
+        KEYS_UNARMED = 'KEYS: nothing armed, so the keys play the default patch; arm :name plays a track (arm :lead)'
+
         def enter_keys
           ensure_keyboard_pane
           @keyboard.active = true
@@ -1541,7 +1549,11 @@ module MB
           Thread.new do
             Thread.current.name = 'MB::Sound::UI keys'
             take_over_inspected
-            @keyboard.out.ensure_monitor if @keyboard.out.respond_to?(:ensure_monitor)
+            # (nothing armed: the keys play the default patch; ux-friction-3,
+            # the maintainer: "I keep forgetting that \"arm\" is a thing")
+            if @keyboard.out.respond_to?(:ensure_monitor) && @keyboard.out.ensure_monitor
+              flash(KEYS_UNARMED, :key)
+            end
           rescue StandardError => e
             flash("keyboard: #{e.class}: #{e.message}", :bad)
           end
@@ -1727,7 +1739,11 @@ module MB
           pane = @panes[name]
           return flash("#{name}: no pane", :warn) unless pane.respond_to?(:key_action)
           hint = pane.respond_to?(:enter_hint) ? pane.enter_hint(@states[name]) : nil
+          title = pane.title
           r = pane.key_action(action, @states[name], *args)
+          # (a key that changed the pane's title, the page pane following a
+          # link: the chrome draws titles, made again by a relayout)
+          @relayout = true unless pane.title == title
           # (a key that changed what Enter does and says nothing of its own,
           # Down after a section jump: the Enter hint replaces the earlier
           # flash at once; sd-ux-fixes-1, the review's #10, where the jump's

@@ -106,6 +106,7 @@ module MB
           @sample_rate = sample_rate.to_f
           @node_type_name = 'SamplerVoice'
           @buf = nil
+          @inputs = Array.new(7)
           build_tables
           reset
         end
@@ -187,7 +188,17 @@ module MB
           end
 
           @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
-          Kernels.sampler_play(@buf, @specs, @regions, @state, @counters, @rng, [trig, num, freq, gate, start, shift, choke], config)
+          # (one reused Array: a new one per voice per buffer was a third of
+          # a SoundFont kit's allocations, sf2-cost-1)
+          inputs = @inputs
+          inputs[0] = trig
+          inputs[1] = num
+          inputs[2] = freq
+          inputs[3] = gate
+          inputs[4] = start
+          inputs[5] = shift
+          inputs[6] = choke
+          Kernels.sampler_play(@buf, @specs, @regions, @state, @counters, @rng, inputs, config)
         end
 
         def sources
@@ -211,8 +222,10 @@ module MB
         private
 
         # The kernel's config, made again only when the tuning's A4 changes.
+        # (Tuning.current, not MB::Sound.tuning: its keyword splat made a
+        # Hash per voice per buffer, sf2-cost-1)
         def config
-          a4 = MB::Sound.tuning.frequency_of(69).to_f
+          a4 = Tuning.current.frequency_of(69).to_f
           return @config if @config && @config[0] == a4
 
           # (every region carries its own interpolation code; the sinc kernel

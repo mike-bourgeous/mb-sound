@@ -55,16 +55,7 @@ module MB
           # launch queued for bar 2 went to the stopped player and raised at
           # 367, and the track built its patch again: a new Synth, whose
           # unused lanes ran at another pitch)
-          _player, stopped, nodes, queued = @render_lock.synchronize {
-            @mutex.synchronize {
-              t = swap_target(name)
-              q = t[1] ? queued_start_by(name, nil) : nil
-              t[1] = false if q
-              t << q
-            }
-          }
-          time = stopped ? nil : (start_time ? start_time.to_r : launch_time(point, queued ? queued.starts : nodes))
-          queued = @render_lock.synchronize { @mutex.synchronize { queued_start_by(name, time) } } || queued if time
+          stopped, nodes, queued, time = swap_landing(name, point, start_time)
           if queued
             nodes = queued.starts.grep(MIDI::ClipSource)
             raise ArgumentError, "Player #{name.inspect} doesn't play any clips" if nodes.empty?
@@ -93,6 +84,21 @@ module MB
         # ended (or will have by the swap's time).
         class ClipsOver < ArgumentError; end
 
+        # True if a swap for player +name+ at launch point +at+ (or
+        # +start_time+, as #swap takes them) would land on one-shot clips
+        # that have ended by then, so #swap would raise ClipsOver: only
+        # the tail of the clip rings (ux-friction-3: the console's swap
+        # then starts a track again with the new clip, as bg does for a
+        # track that isn't playing; see PlaybackMethods#swap).  False when
+        # there is nothing to swap (#swap raises its own error then) or
+        # the player is stopped.
+        def swap_unheard?(name, at: nil, start_time: nil)
+          stopped, _nodes, _queued, time = swap_landing(name, at, start_time)
+          !stopped && clips_over_by?(name, time)
+        rescue ArgumentError
+          false
+        end
+
         # True if the player named +name+ (the current one, else the one a
         # queued change starts) plays clips, and every one of them is a
         # one-shot that has ended or will have ended by timeline position
@@ -116,6 +122,25 @@ module MB
         end
 
         private
+
+        # Where a swap for +name+ at launch point +point+ (or +start_time+)
+        # lands: [stopped?, the clip sources it swaps, a start queued to
+        # land by then (nil if none), its timeline position (nil for a
+        # stopped player, whose clips change when it resumes)].  Raises
+        # #swap_target's errors (no such player, no clips).
+        def swap_landing(name, point, start_time)
+          _player, stopped, nodes, queued = @render_lock.synchronize {
+            @mutex.synchronize {
+              t = swap_target(name)
+              q = t[1] ? queued_start_by(name, nil) : nil
+              t[1] = false if q
+              t << q
+            }
+          }
+          time = stopped ? nil : (start_time ? start_time.to_r : launch_time(point, queued ? queued.starts : nodes))
+          queued = @render_lock.synchronize { @mutex.synchronize { queued_start_by(name, time) } } || queued if time
+          [stopped, nodes, queued, time]
+        end
 
         # True if #swap_now has something to swap for +name+: a current or
         # stopped player, or a start waiting in the change queue (a capture

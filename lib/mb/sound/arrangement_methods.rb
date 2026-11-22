@@ -87,7 +87,9 @@ module MB
       # this first).  The tempo, meter, key, tuning, and master gain stay.
       # One undo step: undo puts the whole set back, its players at the
       # next bar.  Refused while a track is armed or wired.  Prints what
-      # it cleared.
+      # it cleared.  Plain bg players and stopped ones kept for resume go
+      # too.  The guesses `reset`, `clear_all`, `Session.clear`, ... and
+      # `help clear` point here; `clear` clears the screen.
       #
       #     clear_set
       #     undo               # the set is back

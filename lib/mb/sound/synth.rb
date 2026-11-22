@@ -1398,14 +1398,23 @@ module MB
       # (SKIP_GRID) ending a silent cell if the rest of this one is silent
       # (QuietRun#split_point), or the end of the block.  A lane holding a
       # note with no event for it in the block can't become idle, so it
-      # renders the whole block.
+      # renders the whole block.  Nor can a lane with an envelope that can't
+      # land before the grid point (Notes#busy_through?: a SoundFont kit's
+      # 100 s release after its one-shot ended) and no event for it before
+      # that point, so it renders on to the next grid point (sf2-cost-1:
+      # each such lane split every 512-frame block crossing a grid point,
+      # ~40% of the kit's time and most of its allocations).
       def sleep_candidate(idx, pos, o, count)
         g = @lane_runs[idx].split_point(pos, o, count)
         return count if g >= count
 
-        if @notes[idx].held?
-          clock = @clock_node[idx]
+        notes = @notes[idx]
+        clock = @clock_node[idx]
+        if notes.held?
           return count unless @allocator.lanes[idx].pending_before?(clock.next_cursor(count - o))
+        elsif notes.busy_through?(g - o) && !@allocator.lanes[idx].pending_before?(clock.next_cursor(g - o))
+          g += SKIP_GRID
+          return g >= count ? count : g
         end
 
         g
