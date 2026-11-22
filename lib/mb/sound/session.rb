@@ -607,6 +607,7 @@ module MB
             pending = @changes.reverse_each.find { |c| c.subject == name && START_KINDS.include?(c.kind) }
             if pending&.kind == :bg && pending.split && pending.time >= time
               cancel_changes(pending)
+              note_command_cancel(pending) # (undoing this command brings it back: Undo#revert_step)
               nil
             else
               pending&.kind == :bg && pending.graph ? pending : nil
@@ -643,6 +644,10 @@ module MB
             add_now(name: name, input: input, description: description, timeline_nodes: timeline_nodes, start: t, fade: fade, explicit_fade: explicit_fade,
                     carry: carried, clip: clip, spill: spill)
           }
+          if carried # (see Undo#revert_step)
+            c.carries = carried.old_input
+            c.base = undo_snapshot(snapshot_subject(c)) unless follows || c.lands # (queued: what plays now)
+          end
           hold&.hold(c, -> { start_time ? @transport.position : launch_time(point, timeline_nodes, default: default) })
           end_cue_at_start(name, time) unless carried # (see Cue; a rebuild of the name isn't a launch: its cue plays on)
         }
@@ -695,6 +700,7 @@ module MB
             if time.nil?
               waiting = waiting.select { |c| c.time.nil? || c.time <= due } if due
               cancel_changes(*waiting)
+              waiting.each { |c| note_command_cancel(c) } # (undo issues them again)
             end
 
             if playing || (time && !waiting.empty?)

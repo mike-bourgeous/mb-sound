@@ -2,7 +2,8 @@ RSpec.describe(MB::Sound::Session::Undo) do
   # 120 BPM at 48kHz: one bar (a whole note) is 96000 frames
   let(:transport) { MB::Sound::Sequence::Transport.new(bpm: 120) }
   let(:null_output) { MB::Sound::NullOutput.new(channels: 1, sleep: false) }
-  let(:session) { MB::Sound::Session.new(master_gain: 1, output: null_output, transport: transport, channels: 1, buffer_size: 800, realtime: false, raise_errors: true) }
+  let(:buffer_size) { 800 }
+  let(:session) { MB::Sound::Session.new(master_gain: 1, output: null_output, transport: transport, channels: 1, buffer_size: buffer_size, realtime: false, raise_errors: true) }
 
   after { session.close }
 
@@ -146,5 +147,115 @@ RSpec.describe(MB::Sound::Session::Undo) do
     run(800)
     expect(session.retired_graphs.length).to be <= 3
     expect(session.undo_steps.length).to eq(3)
+  end
+
+  # undo-one-step-1 (the maintainer, 2026-11-22: "Having undo step back
+  # only one step seems ideal"): a redefinition queued while an earlier one
+  # still waits for its launch point supersedes it (Session#add), and undo
+  # used to restore what was playing when the undone line ran, so lines
+  # faster than their landings undid several redefinitions at once.  Undo
+  # and redo now step through the journal's definitions one at a time,
+  # whether or not a definition ever got to play.
+  describe 'one step back after quick redefinitions' do
+    # (the cutoffs of the graphs playing as :t)
+    def playing
+      session.instance_variable_get(:@players).values.select { |p| p.name == :t && p.current? }.map { |p|
+        p.input.graph.grep(MB::Sound::GraphNode::Constant).map(&:constant).select { |c| c > 1000 }
+      }.flatten
+    end
+
+    def bars(n)
+      to = session.frame + (n * 96000).to_i
+      session.process_buffer while session.frame < to
+    end
+
+    def define(cutoff)
+      MB::Sound.track(:t, q: 1) { |clip| clip.hz.ramp.at(-20.db).filter(:lowpass, cutoff: cutoff, quality: 2) }
+    end
+
+    before do
+      within do
+        define(1200)
+        MB::Sound.bg(:t, MB::Sound.seq(MB::Sound::A2).n1.loop)
+      end
+      bars(1.5) # (mid-bar: the redefinitions wait for bar 3)
+      within { [1201, 1202, 1203].each { |c| define(c) } }
+    end
+
+    after { MB::Sound.rewind }
+
+    [800, 367].each do |size|
+      context "at #{size}-frame buffers" do
+        let(:buffer_size) { size }
+
+        it 'undoes and redoes one queued redefinition at a time before any lands' do
+          expect(session.queued(:t).length).to eq(1) # (each superseded the one before)
+          expect(session.undo_steps.map(&:label).last(3)).to eq(['track :t redefined'] * 3)
+
+          within { MB::Sound.undo }
+          expect(session.queued(:t).length).to eq(1)
+          bars(0.25)
+          expect(playing).to eq([1200])
+
+          within { MB::Sound.undo }
+          within { MB::Sound.redo! }
+          bars(1)
+          expect(playing).to eq([1202]) # (1203, undo 1202, undo 1201, redo 1202)
+          expect(session.journal.changes.last.to_s).to match(/bg :t landed 3:1/) # (the re-queued rebuild, carrying from 1200)
+
+          within { MB::Sound.undo }
+          bars(2)
+          expect(playing).to eq([1201])
+          within { MB::Sound.undo }
+          bars(2)
+          expect(playing).to eq([1200])
+          within { 3.times { MB::Sound.redo! } }
+          bars(2)
+          expect(playing).to eq([1203])
+        end
+
+        it 'undoes one redefinition at a time after the last one landed, and redoes them' do
+          bars(2)
+          expect(playing).to eq([1203])
+
+          [1202, 1201, 1200].each do |want|
+            within { MB::Sound.undo }
+            bars(2)
+            expect(playing).to eq([want])
+          end
+          [1201, 1202, 1203].each do |want|
+            within { MB::Sound.redo! }
+            bars(2)
+            expect(playing).to eq([want])
+          end
+        end
+      end
+    end
+  end
+
+  it 'undoes a stop for now by queueing again the start it dropped, its graph kept in step meanwhile' do
+    shared = 3.hz.lfo
+    within do
+      MB::Sound.bg(:o, shared * 0.01)
+      MB::Sound.bg(:x, 1.constant)
+    end
+    run(48000)
+    within do
+      MB::Sound.bg(:x, shared * 0.5 + 2, at: MB::Sound.bar(4))
+      MB::Sound.stop(:x, fade: 0)
+    end
+    expect(session.queued(:x)).to eq([])
+    expect(session.undo_steps.last.to_s).to eq('stop :x lands 1:3')
+    run(192_000)
+
+    # (the dropped graph's branch of the shared LFO kept up while the undo
+    # list held it: the Tee stays in lockstep, not a second behind)
+    tee = ObjectSpace.each_object(MB::Sound::GraphNode::Tee).find { |t| t.original_source.equal?(shared) }
+    expect(tee.branches.map { |b| b.reader&.length || 0 }.max).to eq(0)
+
+    within { MB::Sound.undo }
+    expect(session.queued(:x).map(&:to_s)).to eq(['restore :x lands 4:1 (queued)', 'bg :x lands 4:1 (queued)'])
+    data = run(96000)
+    expect(data[-1]).to be > 1.5 # (the dropped graph plays from bar 4)
   end
 end
