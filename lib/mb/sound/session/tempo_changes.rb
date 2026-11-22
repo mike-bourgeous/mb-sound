@@ -135,7 +135,7 @@ module MB
             else
               wnps = Sequence::TempoMap.whole_notes_per_second(map.bpm_at(pos))
             end
-            per_sample = wnps / rate
+            per_sample = Sequence::TempoMap.whole_notes_for(1 / rate, wnps) # (exact: Rationals, as Transport#whole_notes_per_frame)
             if (nb = map.next_break(pos))
               k = ((nb - pos) / per_sample).ceil
               k = 1 if k < 1
