@@ -453,6 +453,19 @@ module MB
         transpose(Interval.octave_semitones(octaves))
       end
 
+      # This pitch moved into +range+ (notes like `E1..E2` or frequencies
+      # like `60.hz..120.hz`) by whole octaves, keeping its pitch class
+      # (MB::Sound::OctaveFold): a Note stays a Note (`A4.within(E1..E2)`
+      # is A1), a fixed frequency a Pitch; a changing pitch (a voice's
+      # `v.hz`) follows its frequency node through GraphNode#within.  The
+      # DSL's #within would read the sine as frequencies.
+      def within(range)
+        fold = OctaveFold[range]
+        return fold.value(self) if is_a?(Note) || constant?
+
+        rebased(freq.within(fold.range))
+      end
+
       # The period of one cycle as a Length::Seconds (`220.hz.period` for a
       # Karplus-Strong delay or an envelope's hold:), and as a
       # Length::Samples at this pitch's sample rate; use #to_f for the plain

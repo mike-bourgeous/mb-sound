@@ -20,7 +20,9 @@
  * acceleration-limited follower (the DirectX Distortion's "slew").
  * derivative(x, out, state, settings) and integral(x, out, reset, state,
  * settings): GraphNode::Derivative's slope and GraphNode::Integral's running
- * sum (see mb_calculus.h for the state and settings).
+ * sum (see mb_calculus.h for the state and settings).  octave_fold(x, out,
+ * lo, hi, exclusive): GraphNode::Within, frequencies moved into a range by
+ * octaves.
  *
  * The Ruby mirrors (Notes::Smoother.smooth_ruby and the others) give exactly the same
  * samples (specs check it), so keep the operations identical; built with
@@ -398,6 +400,92 @@ static VALUE ruby_reset_run(VALUE self, VALUE x, VALUE out, VALUE state, VALUE r
 	return out;
 }
 
+/*
+ * One frequency moved into lo..hi (exclusive: below hi) by octaves,
+ * scaling by powers of two only (exact): MB::Sound::OctaveFold.fold_hz,
+ * the same operations.  Zero stays zero, negatives fold their size and
+ * keep their sign, NaN and infinities pass through.
+ */
+static double octave_fold_one(double x, double lo, double hi, int exclusive)
+{
+	if (isnan(x) || isinf(x) || x == 0) {
+		return x;
+	}
+	if (x < 0) {
+		return -octave_fold_one(-x, lo, hi, exclusive);
+	}
+	if (x >= lo && (exclusive ? x < hi : x <= hi)) {
+		return x;
+	}
+
+	int ex, eb;
+	double y, below;
+	frexp(x, &ex);
+	if (x < lo) {
+		frexp(lo, &eb);
+		y = ldexp(x, eb - ex);
+		while (y < lo) {
+			y *= 2;
+		}
+		while (y * 0.5 >= lo) {
+			y *= 0.5;
+		}
+		if (exclusive ? y < hi : y <= hi) {
+			return y;
+		}
+		below = y * 0.5;
+	} else {
+		frexp(hi, &eb);
+		y = ldexp(x, eb - ex);
+		while (exclusive ? y >= hi : y > hi) {
+			y *= 0.5;
+		}
+		while (exclusive ? y * 2 < hi : y * 2 <= hi) {
+			y *= 2;
+		}
+		if (y >= lo) {
+			return y;
+		}
+		below = y;
+	}
+
+	// (narrower than an octave: the octave nearest the middle, clamped)
+	return lo * hi <= 2 * below * below ? lo : hi;
+}
+
+/*
+ * octave_fold(x, out, lo, hi, exclusive): GraphNode::Within, every
+ * frequency of +x+ (an SFloat of Hz) moved into lo..hi Hz by octaves into
+ * +out+ (an SFloat as long), keeping its pitch class (octave_fold_one).
+ * +lo+ and +hi+ are rounded to float32 first (the signal's precision, so
+ * a note's frequency at an edge, as NoteFrequency computes it, counts as
+ * inside).  Mirror: GraphNode::Within.process_ruby.
+ */
+static VALUE ruby_octave_fold(VALUE self, VALUE x, VALUE out, VALUE lo_v, VALUE hi_v, VALUE exclusive_v)
+{
+	size_t length = check_array(x, numo_cSFloat, 0, "The input");
+	if (check_array(out, numo_cSFloat, 0, "The output") != length) {
+		rb_raise(rb_eArgError, "The output must have as many values as the input");
+	}
+	rb_check_frozen(out);
+
+	double lo = (float)NUM2DBL(lo_v);
+	double hi = (float)NUM2DBL(hi_v);
+	if (!(lo > 0) || !(hi >= lo) || isinf(hi)) {
+		rb_raise(rb_eArgError, "The range must run from a low frequency above 0 to a higher one");
+	}
+	int exclusive = RTEST(exclusive_v);
+
+	const float *xp = (const float *)(nary_get_pointer_for_read(x) + nary_get_offset(x));
+	float *op = mb_sfloat_ptr(out);
+	for (size_t i = 0; i < length; i++) {
+		op[i] = (float)octave_fold_one(xp[i], lo, hi, exclusive);
+	}
+
+	RB_GC_GUARD(x);
+	return out;
+}
+
 void Init_fast_control(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -413,4 +501,5 @@ void Init_fast_control(void)
 	rb_define_module_function(fast_control, "inertia", ruby_inertia, 7);
 	rb_define_module_function(fast_control, "derivative", ruby_derivative, 4);
 	rb_define_module_function(fast_control, "integral", ruby_integral, 5);
+	rb_define_module_function(fast_control, "octave_fold", ruby_octave_fold, 5);
 }

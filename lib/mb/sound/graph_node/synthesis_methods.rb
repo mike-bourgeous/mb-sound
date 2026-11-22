@@ -11,6 +11,18 @@ module MB
           ArgTypes.tag(MB::Sound.tuning.freq(self), :frequency)
         end
 
+        # Moves frequencies (Hz) into range by octaves, keeping pitch classes.
+        # The range is notes (`E1..E2`, MIDI numbers) or frequencies
+        # (`2.hz..8.hz`); `E1...E2` leaves out the top (GraphNode::Within).  The same `within` moves clips, Seqs,
+        # generators, and MIDI streams (MB::Sound::OctaveFold).
+        #
+        #     phaser(rate: notes.freq.within(2.hz..8.hz))          # the melody, sub-audio
+        #     play riff.freq.within(E1..E2).tone.saw.lp4(500) * riff.amp_env
+        def within(range)
+          # (tagged as a frequency for type-dispatched parameters; see ArgTypes)
+          ArgTypes.tag(Within.new(self, range), :frequency)
+        end
+
         # Uses this node as the frequency value for a full-scale oscillator.
         def tone
           MB::Sound::Tone[self]
