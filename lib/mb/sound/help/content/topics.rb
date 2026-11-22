@@ -993,8 +993,9 @@ module MB
         `house`, `dnb`, `techno` (`L.gen.rock` finds `L.gen.beat.rock`),
         each with the knobs energy and swing on its track:
         `track :drums, kit(:acoustic); bg :drums, L.gen.beat.rock;
-        turn :"drums/energy", 2.bars.lfo.square.at(0.2..1)` (busy and sparse
-        bars, starting busy on bar 1).
+        turn :"drums/energy", 2.bars.lfo.square.at(0.2..1)` (a busy bar, then
+        a sparse one, counted from where the turn lands: add `on: :bar`
+        when the song is already playing).
       TEXT
       commands :tones, :chord, :weights, :harmony, :progression, :generate, :strikes, :dice, :melody, :motifs, :beats, :rhythm
       note :generative
