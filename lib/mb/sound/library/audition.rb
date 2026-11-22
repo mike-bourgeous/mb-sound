@@ -72,10 +72,24 @@ module MB
 
           case entry.kind
           when :instrument
-            Playable.wrap(entry.(Playable.demo_phrase), "#{path} playing a demo phrase", true,
-              "an instrument plays notes: #{path}.(clip), or track :x, #{path}")
+            begin
+              Playable.wrap(entry.(Playable.demo_phrase), "#{path} playing a demo phrase", true,
+                "an instrument plays notes: #{path}.(clip), or track :x, #{path}")
+            rescue SourceMismatch, GraphIO::LoadError => e
+              # (a drum instrument plays none of the phrase's notes: the
+              # kit beat; ux-friction-4, `bg :drums, L.inst.funk_kit` raised
+              # "Nothing in Clip(...) plays a TR-808 voice")
+              raise unless e.is_a?(SourceMismatch) || e.cause.is_a?(SourceMismatch)
+              Playable.wrap(entry.(MB::Sound.grid(16, **KIT_DEMO).to_clip), "#{path} playing a beat", true,
+                "a drum instrument plays drum notes: #{path}.(clip), or track :drums, #{path}")
+            end
           when :kit
-            Playable.wrap(entry.(MB::Sound.grid(16, **kit_rows(entry, KIT_DEMO))), "#{path} playing a beat", true,
+            # (SoundFont kits play clips, not grids: `play L.kit.jazz` and
+            # `bg :x, L.kit.jazz` raised "Cannot make a MIDI stream from
+            # #<Kit ...>"; ux-friction-4)
+            beat = MB::Sound.grid(16, **kit_rows(entry, KIT_DEMO))
+            beat = beat.to_clip if entry.family == :installed
+            Playable.wrap(entry.(beat), "#{path} playing a beat", true,
               "a kit plays a grid: #{path}.(grid(16, kick: 'x...'))")
           when :clip
             entry.call
