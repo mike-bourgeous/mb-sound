@@ -38,8 +38,12 @@ module MB
       # - +group_hold+: the Warming::WarmHold that graphs started on this
       #   thread join, so they land together once the last is built (a
       #   form's first section: Warming#with_group_hold)
+      # - +section_end+: [session, proc] giving where the form section
+      #   pass starting on this thread ends (Form::Playback#begin_pass), for
+      #   `over: :section` (Knobs#section_over)
       Context = Data.define(:session, :time, :batch, :source, :perform_session, :perform_source, :forced, :now,
-                            :command, :take_line, :choices, :deadline, :patch_track, :song_replay, :tempo_anchor, :group_hold) do
+                            :command, :take_line, :choices, :deadline, :patch_track, :song_replay, :tempo_anchor, :group_hold,
+                            :section_end) do
         # The logical timeline position commands for +session+ resolve
         # launch points from, or nil to use its transport position: a
         # replayed line's issue time, else a scheduled block's time (see

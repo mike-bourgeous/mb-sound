@@ -640,6 +640,13 @@ module MB
         raise ArgumentError, "Scene names must be Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
         raise ArgumentError, "others: must be :stop (or :ring), :cut, or :keep (got #{others.inspect})" unless [*STOP_MODES, :keep].include?(others)
         check_quant(q) if q
+        # (a track hash, drums: { clip: beat, energy: 0.8 }, is the track's
+        # value and its knob values spelled out: .expand_track_hashes)
+        begin
+          values = Arrangement.expand_track_hashes(name, values, @session)
+        rescue ArgumentError => e
+          return MB::Sound.live_error(e)
+        end
         # (a knob's short name, :"bass/reso", is the knob's full name in the
         # scene: Session::Knobs#full_knob_name)
         values = values.transform_keys { |k| (k.is_a?(Symbol) && @session.full_knob_name(k)) || k }
@@ -729,6 +736,11 @@ module MB
         unless unknown.empty?
           why = @mutex.synchronize { unknown.filter_map { |u| "#{u.inspect}: #{@failed_tracks[u]}" if @failed_tracks[u] } }
           names = tracks.keys
+          # (a knob of a track that it doesn't have, from a track hash or a
+          # quoted key: the track's own knobs suggested; form-knobs-1)
+          if why.empty? && (u = unknown.find { |x| x.is_a?(Symbol) && (nm = Session::Name[x]).parts.length == 2 && names.include?(nm.owner) })
+            return MB::Sound.live_error(ArgumentError.new(@session.track_knob_message("Scene #{name.inspect}", Session::Name[u].owner, Session::Name[u].leaf)))
+          end
           hint = unknown.length == 1 ? Form.suggest(unknown.first, names) : ''
           return MB::Sound.live_error(ArgumentError.new(
             "Scene #{name.inspect} names #{unknown.map(&:inspect).join(', ')}, which #{unknown.length == 1 ? 'is not a track or knob' : 'are not tracks or knobs'}" \
@@ -1300,6 +1312,102 @@ module MB
         return [value, {}] unless value.is_a?(Array)
         v, options = value
         [v, (options || {}).slice(:over, :curve, :smooth, :from)]
+      end
+
+      # The key of a track hash (`drums: { clip: beat, energy: 0.8 }`) that
+      # gives the track its clip or state in a scene; every other key names
+      # one of the track's knobs (see .expand_track_hashes).
+      TRACK_HASH_CLIP = :clip
+
+      # Scene and section values with track hashes spelled out
+      # (form-knobs-1, the maintainer's decision of 2026-11-22: "the track
+      # hash"): `drums: { energy: [0.8, over: :section], fill: 0.7 }` is
+      # the knob values `"drums/energy": [0.8, over: :section],
+      # "drums/fill": 0.7` (knob names by Session::Knobs#track_knob_name)
+      # plus, in a scene, the track's value: its clip: (a Clip, Kit,
+      # generator, or state :on, :off, :cut, :keep), else :keep (the track
+      # plays on what it plays, even in a full scene).  One mechanism: the
+      # scene stores and launches the spelled-out values, and set documents
+      # print them back as track hashes (.track_hash_pairs).  +owner+ names
+      # the scene or section for errors; +section+ true refuses clip: (a
+      # section's clips come from its scene).  Raises ArgumentError for
+      # keys that aren't Symbols, a knob given twice, or a Hash on a knob's
+      # name.
+      def self.expand_track_hashes(owner, values, session, section: false)
+        return values unless values.any? { |_, v| v.is_a?(Hash) }
+        out = {}
+        add = ->(k, v) {
+          raise ArgumentError, "#{owner.inspect}: #{k.inspect} is given twice (once in a track hash)" if out.key?(k)
+          out[k] = v
+        }
+        values.each do |track, v|
+          next add.(track, v) unless v.is_a?(Hash)
+          if !track.is_a?(Symbol) || session.names.kind(track) == :knob || KEY_VALUES.include?(track) || TEMPO_VALUES.include?(track)
+            raise ArgumentError, "#{owner.inspect}: #{track.inspect} takes a value, not a Hash (a Hash of knob values goes on a track's name: drums: { energy: 0.8 })"
+          end
+          bad = v.keys.reject { |p| p.is_a?(Symbol) }
+          raise ArgumentError, "#{owner.inspect}, #{track}: knob names in a track hash are Symbols (got #{bad.map(&:inspect).join(', ')})" unless bad.empty?
+          if v.key?(TRACK_HASH_CLIP)
+            raise ArgumentError, "#{owner.inspect}, #{track}: a section turns knobs; the track's clip comes from the section's scene (scene #{owner.inspect}, #{track}: { clip: ... })" if section
+            add.(track, v[TRACK_HASH_CLIP])
+          elsif !section
+            add.(track, :keep)
+          end
+          v.each do |p, kv|
+            add.(session.track_knob_name(track, p), kv) unless p == TRACK_HASH_CLIP
+          end
+        end
+        out
+      end
+
+      # How a scene's or section's spelled-out +values+ print as track
+      # hashes (the inverse of .expand_track_hashes): [key, value] pairs in
+      # the values' order, where a track's knob values (two-part names
+      # :"drums/energy" whose owner the block accepts as a track) join the
+      # track's entry as a Hash (`[:drums, { clip: beat, energy: 0.8 }]`;
+      # clip: left out for :keep).  In a scene (+scene+ true) only tracks
+      # the scene gives a clip or state group (a knob of a track the scene
+      # doesn't name, which then stops, keeps its quoted key, as does a
+      # track given a level number); in a section a track's hash stands
+      # where its first knob was.  A knob whose leaf is clip, or that a
+      # track hash wouldn't name the same way back, keeps its key.
+      def self.track_hash_pairs(values, session, scene: true, &track)
+        groups = {}
+        values.each_key do |k|
+          next unless k.is_a?(Symbol)
+          nm = Session::Name[k]
+          next unless nm.parts.length == 2 && nm.leaf != TRACK_HASH_CLIP
+          owner = nm.owner
+          next unless track.call(owner)
+          next if scene ? !(values.key?(owner) && track_state_value?(values[owner])) : values.key?(owner)
+          next unless session.track_knob_name(owner, nm.leaf) == k
+          (groups[owner] ||= []) << k
+        end
+        return values.to_a if groups.empty?
+
+        owner_of = groups.flat_map { |o, ks| ks.map { |kn| [kn, o] } }.to_h
+        hash_of = ->(o, base) { groups[o].each_with_object(base) { |kn, h| h[Session::Name[kn].leaf] = values[kn] } }
+        pairs = []
+        done = {}
+        values.each do |k, v|
+          if (o = owner_of[k])
+            next if scene || done[o]
+            done[o] = true
+            pairs << [o, hash_of.(o, {})]
+          elsif scene && groups.key?(k)
+            pairs << [k, hash_of.(k, v == :keep ? {} : { TRACK_HASH_CLIP => v })]
+          else
+            pairs << [k, v]
+          end
+        end
+        pairs
+      end
+
+      # True for a scene's track value that a track hash's clip: holds (a
+      # clip, kit, generator, or state; not a number or ramp turning the
+      # track's level).
+      def self.track_state_value?(v)
+        !(v.is_a?(Numeric) || v.is_a?(Array) || v.is_a?(Hash))
       end
 
       # Scene and section values that change the session key (see

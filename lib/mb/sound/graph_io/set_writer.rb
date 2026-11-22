@@ -465,8 +465,13 @@ module MB
         def scenes
           @arrangement.scenes.flat_map { |name, sc|
             parts = [name.inspect]
-            sc.values.each do |k, v|
-              parts << "#{@lit.key_text(k)} #{scene_value(name, k, v)}"
+            # (a track's knob values as its track hash, `drums: { clip:
+            # beat, energy: 0.8 }`: Arrangement.track_hash_pairs;
+            # form-knobs-1)
+            pairs = Arrangement.track_hash_pairs(sc.values, @session) { |o| @arrangement.tracks.key?(o) }
+            pairs.each do |k, v|
+              text = v.is_a?(Hash) && @arrangement.tracks.key?(k) ? "{ #{v.map { |p, pv| "#{@lit.key_text(p)} #{scene_value(name, k, pv)}" }.join(', ')} }" : scene_value(name, k, v)
+              parts << "#{@lit.key_text(k)} #{text}"
             end
             parts << "q: #{lit(sc.q)}" if sc.q
             parts << "fade: #{lit(sc.fade)}" if sc.fade
@@ -522,7 +527,7 @@ module MB
 
         def sections
           @arrangement.sections.map { |name, s|
-            parts = [name.inspect, Form.ruby_value(s.length), *s.options.map { |k, v| "#{k}: #{Form.ruby_value(v)}" }]
+            parts = [name.inspect, Form.ruby_value(s.length), *s.options(@session).map { |k, v| Form.option_text(k, v) }]
             "section #{parts.join(', ')}"
           }
         end
@@ -531,7 +536,9 @@ module MB
           f = @arrangement.playback&.form || @arrangement.last_form
           return [] unless f
 
-          text = f.to_ruby
+          # (in the set's Session: section knob values of its tracks print as
+          # track hashes, Form.knob_options)
+          text = Session.with_context_fields(session: @session) { f.to_ruby }
           @problems << "the flow has a goto Proc (code), which set documents can't hold" if text.include?('->(f)')
           text.lines(chomp: true)
         end
