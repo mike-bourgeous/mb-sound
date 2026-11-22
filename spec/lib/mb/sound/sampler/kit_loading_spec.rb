@@ -83,6 +83,79 @@ RSpec.describe 'Loading SoundFont kits', :aggregate_failures do
       s&.close
     end
 
+    # A fresh copy of the kit's font (its own samples and tables).
+    def fresh_kit(name)
+      MB::Sound.sf2(SF2Writer.drum_kit(tmp_path("#{name}.sf2"), keys: [36, 38, 42, 46, 49, 51], name: 'Spec GM Kit', bank: 128, velocity_layers: 2), preset: [128, 0])
+    end
+
+    # 4 s of +inst+ playing the beat, +change+ (a Proc run in the Session's
+    # context) made at 0.5 s; returns the buffers and how many sample
+    # tables were built inside #process_buffer (the render thread's work).
+    def render_path(inst, change, frames: 192_000, n: 512)
+      MB::Sound.rewind
+      s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, buffer_size: n, sleep: false), realtime: false)
+      rendering = false
+      in_render = 0
+      allow(MB::Sound::Wavetable::Builder).to receive(:sample_levels).and_wrap_original { |m, *a| in_render += 1 if rendering; m.call(*a) }
+      out = []
+      MB::Sound::Session.with_context(session: s) {
+        MB::Sound.bpm 120
+        MB::Sound.track(:drums) { |c| inst.sampler(c, voices: 4) }
+        MB::Sound.bg(:drums, beat)
+      }
+      (frames / n).times do |i|
+        MB::Sound::Session.with_context(session: s) { change.call } if i == 24_000 / n
+        rendering = true
+        out << s.process_buffer.map(&:to_a)
+        rendering = false
+      end
+      [out, in_render]
+    ensure
+      s&.close
+    end
+
+    # Each way notes other than the beat's can reach the kit (the
+    # maintainer plays a kit track from the keyboard after a beat): what
+    # it plays equals a full build's, and no table is built while
+    # rendering.
+    {
+      'a swap to a clip with a new key' => -> { MB::Sound.swap(:drums, MB::Sound.grid(16, snare: '....x.......x...').to_clip.loop) },
+      'a bg of a clip with a new key' => -> { MB::Sound.bg(:drums, MB::Sound.grid(16, snare: '....x.......x...').to_clip.loop) },
+      'a transposed clip (36 -> 38)' => -> { MB::Sound.swap(:drums, MB::Sound.grid(16, kick: 'x...x...x...x...').to_clip.loop.transpose(2)) },
+      'a transpose knob (keys unknown ahead: the whole kit)' => -> {
+        MB::Sound.knob(:tr, 2, range: -12..12)
+        MB::Sound.swap(:drums, MB::Sound.grid(16, kick: 'x...x...x...x...').to_clip.loop.transpose(MB::Sound.knob(:tr)))
+      },
+      'a generator without values: (the whole kit)' => -> { MB::Sound.swap(:drums, MB::Sound.generate(1.bar) { |_c, _d| [[0r, 1/16r, 36, 1.0], [1/4r, 1/16r, 38, 1.0]] }.loop) },
+      'a beats clip with a role the kit plays through a fallback' => -> { MB::Sound.swap(:drums, MB::Sound.beats(16, seed: 3) { half_open_hat [1, 0] * 8; kick [1, 0, 0, 0] * 4 }) },
+      'wire (the monitor builds the whole kit)' => -> { MB::Sound.wire(:drums, MB::Sound.grid(16, snare: '....x.......x...').to_clip.loop.stream) },
+      'arm with an input stream (the monitor builds the whole kit)' => -> { MB::Sound.arm(:drums, input: MB::Sound.grid(16, snare: '....x...x...x...').to_clip.loop.stream) },
+    }.each do |what, change|
+      it "sounds every key it reaches after #{what}, with nothing built while rendering" do
+        reached, in_render = render_path(kit, change)
+        allow(MB::Sound::Sampler::Reach).to receive(:for).and_return(nil)
+        full, = render_path(fresh_kit('full'), change)
+        expect(reached).to eq(full)
+        expect(in_render).to eq(0)
+      end
+    end
+
+    it 'a note on a key nobody covered builds the rest of the kit and says so: the next hit sounds (the safety net)' do
+      MB::Sound.live = true
+      # (a generator that plays 38 though its values: say only 36)
+      liar = -> { MB::Sound.swap(:drums, MB::Sound.generate(1.bar, values: [36]) { |_c, _d| [[0r, 1/16r, 36, 1.0], [1/4r, 1/16r, 38, 1.0]] }.loop) }
+      reached = nil
+      expect { reached, = render_path(kit, liar, frames: 192_000) }.to output(/Spec GM Kit: key 38 had no playback table yet; building the rest of the kit's tables/).to_stdout
+      expect(built(kit).length).to eq(12) # (every key: the rest of the kit)
+      MB::Sound.live = false
+      allow(MB::Sound::Sampler::Reach).to receive(:for).and_return(nil)
+      full, = render_path(fresh_kit('full_net'), liar, frames: 192_000)
+      differ = reached.each_index.reject { |i| reached[i] == full[i] }
+      expect(differ.length).to be_between(1, 2) # (the first hit's first buffer only)
+    ensure
+      MB::Sound.live = false
+    end
+
     it 'builds only the tables of the regions on the clip\'s keys, and plays them as a full build does' do
       expect(kit.drum_map).not_to be_nil
       syn = kit.sampler(beat, voices: 4)

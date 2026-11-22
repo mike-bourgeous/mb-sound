@@ -23,8 +23,18 @@ module MB
       # thread.  Keys are only added, never dropped.
       #
       # Only drum kits (an Instrument with a #drum_map) without a split
-      # key reach part of their keys; anything else, and kits played from
-      # live MIDI, streams, or files, builds every table (.for gives nil).
+      # key reach part of their keys, and only for clips whose #values are
+      # all they play (Clip#values_known?: no variation that could invent
+      # notes, such as a transpose knob); anything else, and kits played
+      # from live MIDI, streams, or files (`arm`, `wire`: the monitor's
+      # patch), builds every table (.for gives nil).
+      #
+      # A safety net for a path that reaches a key nobody covered: a voice
+      # whose note lands on a stand-in region tells its Reach (#missed,
+      # counted in #misses, nothing allocated after the first), which
+      # builds the rest of the kit's tables off the render thread (the
+      # realtime scheduler thread; at once in renders) and says so at the
+      # console, so the next hit sounds.
       class Reach
         # The table read for regions out of reach: one level of silence.
         def self.placeholder
@@ -49,6 +59,7 @@ module MB
         # any value isn't one.
         def self.keys_of(clip)
           return nil unless clip.respond_to?(:values)
+          return nil if clip.respond_to?(:values_known?) && !clip.values_known?
           out = []
           clip.values.each do |v|
             n = v.is_a?(Integer) ? v : (v.respond_to?(:number) ? v.number : nil)
@@ -69,10 +80,15 @@ module MB
         # The keys covered (sorted, frozen).
         attr_reader :keys
 
+        # Buffers in which a voice played a stand-in region (see #missed).
+        attr_reader :misses
+
         def initialize(keys)
           @keys = keys.uniq.sort.freeze
           @mutex = Mutex.new
-          @tables = {} # [instrument, channel, rate, mips, interpolation] => [specs, rows, slots]
+          @tables = {} # [instrument, channel, rate, mips, interpolation] => [specs, rows, slots, holes]
+          @misses = 0
+          @missed = false
         end
 
         # True if region +r+ (an Instrument::Region) plays on a covered key.
@@ -81,38 +97,72 @@ module MB
           @keys.any? { |k| k >= lo && k <= hi }
         end
 
-        # [specs, rows] for +instrument+'s channel +c+ (see
+        # [specs, rows, holes] for +instrument+'s channel +c+ (see
         # Instrument#kernel_tables), shared by the voices of this Reach: its
-        # specs Array gets the real tables of keys covered later (#cover).
+        # specs Array gets the real tables of keys covered later (#cover),
+        # and +holes+ (true for each region reading the stand-in) is
+        # cleared as they come.
         def tables(instrument, c, sample_rate, mips:, interpolation:)
           key = [instrument, c, sample_rate, mips, interpolation]
           entry = @mutex.synchronize { @tables[key] } || begin
             specs, rows, slots = instrument.kernel_tables(c, sample_rate, mips: mips, interpolation: interpolation, reach: self, slots: true)
-            @mutex.synchronize { @tables[key] ||= [specs, rows, slots] }
+            holes = Array.new(rows.shape[0], false)
+            slots.each { |index, _regions, _m, interp, ks| ks.each { |k| holes[k] = true } if specs[index].equal?(Reach.placeholder_spec(sample_rate, interp)) }
+            @mutex.synchronize { @tables[key] ||= [specs, rows, slots, holes] }
           end
-          entry[0, 2]
+          [entry[0], entry[1], entry[3]]
+        end
+
+        # Called by a voice (on the render thread) whose note plays region
+        # +region+ of +instrument+, a stand-in: counts it and, the first
+        # time, has the rest of the kit's tables built off the render
+        # thread (see the class description).  Allocates nothing after the
+        # first call.
+        def missed(instrument, region)
+          @misses += 1
+          return if @missed
+          @missed = true
+          key = instrument.regions[region].keys[0]
+          runner = Generative::Ahead.runner
+          queued = runner && runner.background { fill_rest(instrument, key) }
+          fill_rest(instrument, key) unless queued
+        end
+
+        # Covers every key (the rest of the kit), saying why at the console
+        # (live mode): a note on key +key+ found no table.
+        def fill_rest(instrument, key)
+          if MB::Sound.live?
+            $stdout.puts "\e[2m#{instrument.name || 'sampler'}: key #{key} had no playback table yet; building the rest of the kit's tables\e[0m"
+            $stdout.flush
+          end
+          cover((0..127).to_a, notice: false)
+        rescue StandardError => e
+          warn "#{instrument.name || 'sampler'}: building the rest of the kit's tables failed: #{e.class}: #{e.message}"
         end
 
         # Adds the keys of +clip+ (a Clip, or an Array of note numbers),
         # building the tables of the regions on them on the calling thread
         # (yielding between tables) and putting them into every specs Array
-        # handed out.  Returns true if keys were added; false if all were
-        # covered; nil if +clip+'s keys aren't note numbers (nothing changes;
-        # its other notes stay silent).
-        def cover(clip)
-          keys = clip.is_a?(Array) ? clip : Reach.keys_of(clip)
-          return nil if keys.nil?
+        # handed out.  Returns true if keys were added, false if all were
+        # covered.
+        #
+        # A clip whose keys can't be known ahead (Clip#values_known? false)
+        # covers every key: the rest of the kit is built now, not where a
+        # note first misses its table.
+        def cover(clip, notice: true)
+          keys = clip.is_a?(Array) ? clip : (Reach.keys_of(clip) || (0..127).to_a)
           new_keys = keys - @keys
           return false if new_keys.empty?
 
           entries = @mutex.synchronize { @tables.to_a }
-          entries.map { |(inst, *), _| inst }.uniq.each { |inst| Reach.notice(inst, nil, new_keys) }
+          entries.map { |(inst, *), _| inst }.uniq.each { |inst| Reach.notice(inst, nil, new_keys) } if notice
           @mutex.synchronize { @keys = (@keys | new_keys).sort.freeze }
           Reach.yielding {
-            entries.each do |(_instrument, c, rate, _mips, _interp), (specs, _rows, slots)|
-              slots.each do |index, regions, m, interp|
+            entries.each do |(_instrument, c, rate, _mips, _interp), (specs, _rows, slots, holes)|
+              slots.each do |index, regions, m, interp, ks|
                 next unless specs[index].equal?(Reach.placeholder_spec(rate, interp)) && regions.any? { |r| covers?(r) }
                 specs[index] = Instrument.table_spec(regions[0].sample, c, m, rate, interp)
+                ks.each { |k| holes[k] = false }
               end
             end
           }

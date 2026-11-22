@@ -194,8 +194,8 @@ module MB
         # With a Sampler::Reach (+reach+), only the tables of regions on its
         # keys are built; the other slots hold Reach.placeholder's spec (the
         # same slots and rows as without it).  +slots+ true returns, third,
-        # each slot's [index, [regions], mips, interpolation] (Reach#cover
-        # fills the placeholders later).  A table built here gives the GVL
+        # each slot's [index, [regions], mips, interpolation, [region
+        # indices]] (Reach#cover fills the placeholders later).  A table built here gives the GVL
         # to other threads (Thread.pass) before the next one: building a
         # kit's tables takes seconds and holds it otherwise.
         def kernel_tables(c, sample_rate, mips: nil, interpolation: nil, reach: nil, slots: false)
@@ -205,26 +205,27 @@ module MB
           # spacing, as Sample::Audio#table keeps them, and interpolation)
           index = {}
           list = []
-          slot_of = ->(r, s, m, interp) {
-            i = index[[s.audio.object_id, c % s.channel_count, m, interp]] ||= (list << [r.sample, m, interp, []]).length - 1
+          slot_of = ->(r, k, s, m, interp) {
+            i = index[[s.audio.object_id, c % s.channel_count, m, interp]] ||= (list << [r.sample, m, interp, [], []]).length - 1
             list[i][3] << r
+            list[i][4] << k
             i
           }
 
-          rows = @regions.map { |r|
+          rows = @regions.each_with_index.map { |r, k|
             s = r.sample
             interp = (interpolation || s.interpolation || :optimal).to_sym
             code = Wavetable::INTERPOLATIONS.fetch(interp) { raise ArgumentError, "Unknown interpolation #{interp.inspect}" }
             m = mips.nil? ? (s.mips.nil? ? @mips : s.mips) : mips
-            row(s, slot_of.(r, s, m, interp), sample_rate, keys: r.keys, vel: r.vel, seq: r.seq, rand: r.rand, root: r.root || s.root, keytrack: r.keytrack,
+            row(s, slot_of.(r, k, s, m, interp), sample_rate, keys: r.keys, vel: r.vel, seq: r.seq, rand: r.rand, root: r.root || s.root, keytrack: r.keytrack,
                 veltrack: r.veltrack, tune: r.tune, gain: r.gain * (stereo ? Instrument.pan_gain(r.pan.to_f, c, s.channel_count) : 1.0), offset: r.offset, interp: code)
           }
-          tables = list.map { |s, m, interp, regs|
+          tables = list.map { |s, m, interp, regs, _|
             next Reach.placeholder_spec(sample_rate, interp) if reach && regs.none? { |r| reach.covers?(r) }
             Instrument.table_spec(s, c, m, sample_rate, interp)
           }
           out = [tables, Numo::DFloat.cast(rows)]
-          out << list.each_with_index.map { |(_, m, interp, regs), i| [i, regs, m, interp] } if slots
+          out << list.each_with_index.map { |(_, m, interp, regs, ks), i| [i, regs, m, interp, ks] } if slots
           out
         end
 

@@ -259,6 +259,16 @@ module MB
           @values || @events.map(&:value).uniq
         end
 
+        # True if #values lists every value the clip can play: no
+        # variations, or only generators (Generative::Producer) with the
+        # values they make given (a variation such as a transpose knob, or
+        # a generator without +values:+, can play others).
+        # Sampler::Reach builds a drum kit's tables for these keys only.
+        def values_known?
+          return true if @variations.empty?
+          !@values.nil? && @variations.all? { |v| v.block.is_a?(Generative::Producer) }
+        end
+
         # Yields each Event.
         def each(&block)
           @events.each(&block)
