@@ -23,8 +23,15 @@
 #include "rtmidi_build.h"
 
 
-// The longest message (e.g. SysEx) read at once
+// The longest message (e.g. SysEx) read at once, unless Input.new is given
+// another size.  RtMidi's C API reports a longer message's size without
+// copying it (the message is gone from its queue then), so #read drops
+// such messages and counts them (#dropped) instead of reading past the
+// buffer.  An ESQ-1/SQ-80 bank dump is 8166 bytes.
 #define MAX_MESSAGE 65536
+
+// The largest buffer Input.new accepts (16 MiB)
+#define MAX_MESSAGE_LIMIT (16 * 1024 * 1024)
 
 // The most messages one #read returns
 #define MAX_MESSAGES 4096
@@ -161,6 +168,8 @@ struct midi_input {
 	RtMidiInPtr device;
 	pid_t pid;
 	unsigned char *buf;
+	size_t buf_size; // bytes in buf: the longest message #read returns
+	size_t dropped; // messages longer than buf_size, dropped by #read
 };
 
 static void input_release(struct midi_input *in)
@@ -217,7 +226,7 @@ static struct midi_input *get_input(VALUE self)
 
 /*
  * call-seq:
- *   Input.new(api, client_name, port_index, port_name, queue_size)
+ *   Input.new(api, client_name, port_index, port_name, queue_size, max_message = 65536)
  *
  * Opens MIDI input through +api+ (a Symbol, or nil for RtMidi's choice)
  * as client +client_name+.  With an Integer +port_index+ (see
@@ -225,25 +234,39 @@ static struct midi_input *get_input(VALUE self)
  * +port_name+; with nil, creates a virtual port named +port_name+ that
  * other programs (DAWs, connection managers) connect to.  +queue_size+
  * messages are buffered between #read calls.  SysEx is received; MIDI
- * clock and active sensing are ignored.
+ * clock and active sensing are ignored.  Messages longer than +max_message+
+ * bytes (1 to 16 MiB) are dropped by #read and counted by #dropped.
  */
-static VALUE input_initialize(VALUE self, VALUE api, VALUE client_name, VALUE port_index, VALUE port_name, VALUE queue_size)
+static VALUE input_initialize(int argc, VALUE *argv, VALUE self)
 {
+	VALUE api, client_name, port_index, port_name, queue_size, max_message;
+	rb_scan_args(argc, argv, "51", &api, &client_name, &port_index, &port_name, &queue_size, &max_message);
+
 	struct midi_input *in;
 	TypedData_Get_Struct(self, struct midi_input, &input_type, in);
 	if (in->device != NULL) {
 		rb_raise(cError, "MIDI input is already open");
 	}
 
-	in->buf = malloc(MAX_MESSAGE);
-	if (in->buf == NULL) {
-		rb_raise(rb_eNoMemError, "Could not allocate the MIDI message buffer");
-	}
-
 	unsigned int queue = NUM2UINT(queue_size);
 	if (queue < 1) {
 		rb_raise(rb_eArgError, "Queue size must be positive");
 	}
+
+	size_t buf_size = NIL_P(max_message) ? MAX_MESSAGE : NUM2SIZET(max_message);
+	if (buf_size < 1 || buf_size > MAX_MESSAGE_LIMIT) {
+		rb_raise(rb_eArgError, "The longest MIDI message must be 1 to %d bytes", MAX_MESSAGE_LIMIT);
+	}
+
+	// A second initialize after a failed open reuses the struct
+	free(in->buf);
+	in->buf = malloc(buf_size);
+	if (in->buf == NULL) {
+		in->buf_size = 0;
+		rb_raise(rb_eNoMemError, "Could not allocate the MIDI message buffer");
+	}
+	in->buf_size = buf_size;
+	in->dropped = 0;
 
 	RtMidiInPtr device = rtmidi_in_create(sym_to_api(api), StringValueCStr(client_name), queue);
 	if (device == NULL || !device->ok) {
@@ -275,7 +298,9 @@ static VALUE input_initialize(VALUE self, VALUE api, VALUE client_name, VALUE po
  *
  * Returns the messages received since the last read (without waiting; an
  * empty Array if none), each with the seconds since the previous message
- * and its bytes as a binary String.
+ * and its bytes as a binary String.  A message longer than the input's
+ * longest (see Input.new) is dropped and counted (#dropped); the next
+ * message's delta still counts from it.
  */
 static VALUE input_read(VALUE self)
 {
@@ -283,17 +308,37 @@ static VALUE input_read(VALUE self)
 	VALUE messages = rb_ary_new();
 
 	for (int i = 0; i < MAX_MESSAGES; i++) {
-		size_t size = MAX_MESSAGE;
+		size_t size = in->buf_size;
 		double delta = rtmidi_in_get_message(in->device, in->buf, &size);
 		check(in->device, "Reading MIDI");
 		if (size == 0) {
 			break;
+		}
+		if (size > in->buf_size) {
+			// RtMidi didn't copy it (see MAX_MESSAGE)
+			in->dropped++;
+			continue;
 		}
 
 		rb_ary_push(messages, rb_ary_new_from_args(2, DBL2NUM(delta), rb_str_new((const char *)in->buf, size)));
 	}
 
 	return messages;
+}
+
+/*
+ * The messages #read dropped because they were longer than the input's
+ * longest message (see Input.new).
+ */
+static VALUE input_dropped(VALUE self)
+{
+	return SIZET2NUM(get_input(self)->dropped);
+}
+
+/* The longest message #read returns, in bytes (see Input.new). */
+static VALUE input_max_message(VALUE self)
+{
+	return SIZET2NUM(get_input(self)->buf_size);
 }
 
 /* The MIDI API in use, as a Symbol (:core, :alsa, :jack). */
@@ -479,8 +524,10 @@ void Init_fast_midi(void)
 
 	VALUE input = rb_define_class_under(fast_midi, "Input", rb_cObject);
 	rb_define_alloc_func(input, input_alloc);
-	rb_define_method(input, "initialize", input_initialize, 5);
+	rb_define_method(input, "initialize", input_initialize, -1);
 	rb_define_method(input, "read", input_read, 0);
+	rb_define_method(input, "dropped", input_dropped, 0);
+	rb_define_method(input, "max_message", input_max_message, 0);
 	rb_define_method(input, "api", input_api, 0);
 	rb_define_method(input, "ports", input_ports, 0);
 	rb_define_method(input, "close", input_close, 0);

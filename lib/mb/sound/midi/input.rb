@@ -165,9 +165,14 @@ module MB
         # connections); +:port_name+ names our port (default: midi_in, or
         # midi_in_2 etc. on JACK if taken; the script's name for CoreMIDI
         # virtual sources); +:queue_size+ messages are kept between reads.
-        def initialize(connect: nil, port_name: nil, api: nil, queue_size: 1024)
+        # +:max_message+ is the longest message RtMidi input returns
+        # (FastMIDI::Input; default 64 KiB; longer ones are dropped and
+        # counted by #dropped); JACK input keeps messages up to 64 KiB.
+        # +:from_env+ false ignores MIDI_DEVICE (for a caller that already
+        # chose the source, e.g. MIDI::SysExCapture).
+        def initialize(connect: nil, port_name: nil, api: nil, queue_size: 1024, max_message: nil, from_env: true)
           @api = self.class.api(api)
-          connect = ENV['MIDI_DEVICE'] if ENV['MIDI_DEVICE'] && !ENV['MIDI_DEVICE'].empty?
+          connect = ENV['MIDI_DEVICE'] if from_env && ENV['MIDI_DEVICE'] && !ENV['MIDI_DEVICE'].empty?
           client = DeviceOutput.client_name
 
           index = nil
@@ -190,7 +195,7 @@ module MB
             FastAudio.jack_connect(@connected_to, @input.port_name) if @connected_to
           else
             @port_name = port_name || (@api == :core && connect.nil? ? client : 'midi_in')
-            @input = self.class.rtmidi_quietly { FastMIDI::Input.new(@api, client, index, @port_name, queue_size) }
+            @input = self.class.rtmidi_quietly { FastMIDI::Input.new(@api, client, index, @port_name, queue_size, max_message) }
           end
 
           DeviceOutput.track(self, true)
@@ -210,6 +215,12 @@ module MB
           events = @input.read(false)
           warn_repeats if @input.repeated != 0
           events
+        end
+
+        # Messages lost before #read_raw: too long for RtMidi's buffer (see
+        # +:max_message+), or (JACK) too long or with the queue full.
+        def dropped
+          @api == :jack ? @input.stats[:dropped] : @input.dropped
         end
 
         # True if #read_raw gives JACK frame times, false for RtMidi deltas.

@@ -1679,8 +1679,10 @@ module MB
         `same_key: :count`).  Channels and programs count from 1, as on
         synths: `midi.channel(10)` keeps the drums, `cc(1, channel: 2)`
         listens to channel 2, `C4.to_midi(channel: 1)` (channel 0 raises).
+        `sysex.capture` saves patch dumps from hardware to .syx files in
+        the background (`sysex.load` reads them).
       TEXT
-      commands :midi, :midi_file, :midi_stream, :synth, :per_voice, :close_midi, :mod_sum, :mod_scale
+      commands :midi, :midi_file, :midi_stream, :synth, :per_voice, :close_midi, :mod_sum, :mod_scale, :sysex
       dsl :gate, :trigger, :velocity, :amp_env, :hz, :cutoff, :reso, :arp, :echo, :chord, :within
       note :midi
       see :record, :midi_files, :wire, :midi_out

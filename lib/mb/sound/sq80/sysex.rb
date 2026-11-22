@@ -1,3 +1,5 @@
+require_relative '../midi/sysex'
+
 module MB
   module Sound
     module SQ80
@@ -7,7 +9,7 @@ module MB
       # Manual MIDI implementation, checked against three open-source code
       # bases and local bank dumps).
       #
-      # Messages start F0 0F 02 0n (Ensoniq, ESQ family, MIDI channel n),
+      # Messages start F0 0F 02 0n (Ensoniq, ESQ family, MIDI channel n + 1),
       # then 01 (one program, 204 nybbles) or 02 (40 programs, 8160
       # nybbles), then F7.  Each 102-byte program travels as nybbles, low
       # first.
@@ -80,10 +82,10 @@ module MB
 
         # The SysEx bytes (an Array) of +programs+: one all-program message
         # for exactly 40 Programs, else one single-program message each, on
-        # MIDI +channel+ (0..15).
-        def dump(programs, channel: 0)
+        # MIDI +channel+ (1..16, counted from 1; MIDI::Channel).
+        def dump(programs, channel: 1)
           programs = Array(programs)
-          head = [0xF0, ENSONIQ, FAMILY, channel & 0x0F]
+          head = [0xF0, ENSONIQ, FAMILY, MIDI::Channel.of(channel)]
           nyb = ->(ps) { ps.flat_map(&:to_bytes).flat_map { |b| [b & 0x0F, b >> 4] } }
           if programs.length == BANK_PROGRAMS
             head + [ALL_PROGRAMS] + nyb.(programs) + [0xF7]
@@ -93,10 +95,81 @@ module MB
         end
 
         # Writes +programs+ to +path+ (see .dump).
-        def write(path, programs, channel: 0)
+        def write(path, programs, channel: 1)
           File.binwrite(path, dump(programs, channel: channel).pack('C*'))
         end
+
+        # Dump request message types.
+        REQUESTS = { program: 0x09, all: 0x0A }.freeze
+
+        # The bytes (an Array) of a dump request for the instrument on MIDI
+        # +channel+ (1..16, its base channel): +what+ :program asks for the
+        # current program (type 09), :all for the 40 internal programs (0A).
+        # Send it with `sysex.transmit(bytes, to: ...)` while a capture
+        # listens.  From the manual's MIDI implementation; not yet tried on
+        # hardware.
+        def request(what = :program, channel: 1)
+          type = REQUESTS[what] or raise ArgumentError, "SQ-80 dump requests are #{REQUESTS.keys.map(&:inspect).join(' and ')} (got #{what.inspect})"
+          [0xF0, ENSONIQ, FAMILY, MIDI::Channel.of(channel), type, 0xF7]
+        end
+
+        # Names of the other ESQ message types, for descriptions.
+        MESSAGE_TYPES = {
+          0x09 => 'current program dump request', 0x0A => 'all programs dump request',
+          0x0E => 'virtual keypad events', 0x10 => 'compare button status',
+        }.freeze
+
+        # True if +bytes+ (an Array) is an ESQ-family message.
+        def esq?(bytes) = bytes[1] == ENSONIQ && bytes[2] == FAMILY && bytes.length >= 6
+
+        # A description of the ESQ message +bytes+ (an Array) for
+        # MIDI::SysEx.describe, with the base MIDI channel counted from 1;
+        # nil for other messages.
+        def describe(bytes)
+          return nil unless esq?(bytes)
+
+          family = 'Ensoniq ESQ-1/SQ-80'
+          ch = "channel #{MIDI::Channel.show(bytes[3] & 0x0F)}"
+          case bytes[4]
+          when ONE_PROGRAM, ALL_PROGRAMS
+            programs = begin
+              read(bytes)
+            rescue FormatError => e
+              return "#{family} #{bytes[4] == ONE_PROGRAM ? 'program' : 'bank'} dump (#{ch}; unreadable: #{e.message})"
+            end
+            if programs.length == 1
+              "#{family} program #{programs.first.name.rstrip.inspect} (#{ch})"
+            else
+              names = programs.first(4).map { |p| p.name.rstrip.inspect }.join(', ')
+              "#{family} bank of #{programs.length} programs: #{names}, ... (#{ch})"
+            end
+          when 0x03..0x08, 0x0C, 0x0D, 0x20..0x22
+            "#{family} sequence data (type #{format('%02X', bytes[4])}, #{ch})"
+          else
+            "#{family} #{MESSAGE_TYPES[bytes[4]] || format('message type %02X', bytes[4])} (#{ch})"
+          end
+        end
+
+        # A file-name part for ESQ dumps: sq80-program-<name>, sq80-bank.
+        def slug(bytes)
+          return nil unless esq?(bytes)
+
+          case bytes[4]
+          when ONE_PROGRAM then "sq80-program-#{read(bytes).first.name}"
+          when ALL_PROGRAMS then 'sq80-bank'
+          else "sq80-#{MESSAGE_TYPES[bytes[4]] || format('type-%02x', bytes[4])}"
+          end
+        end
+
+        # The Programs of a one- or all-program message (an Array of bytes);
+        # [] for other messages.
+        def decode(bytes)
+          esq?(bytes) && [ONE_PROGRAM, ALL_PROGRAMS].include?(bytes[4]) ? read(bytes) : []
+        end
       end
+
+      MIDI::SysEx.register(SysEx::ENSONIQ, 'ESQ-1/SQ-80',
+                           describe: SysEx.method(:describe), decode: SysEx.method(:decode), slug: SysEx.method(:slug))
 
       # One ESQ-1/SQ-80 program in panel units: +name+ (6 characters), +envs+
       # (4 Hashes: l1..l3 -63..63, t1..t4 0..63, second_release, lv 0..63,
@@ -228,6 +301,36 @@ module MB
         def sq80_only?
           oscs.any? { |o| o[:wave] >= 32 } || envs.any? { |e| e[:second_release] }
         end
+
+        # Every field in panel units, a few lines (Pry prints this; #inspect
+        # stays the Data).
+        def summary
+          sgn = ->(v) { v.positive? ? "+#{v}" : v.to_s }
+          mods = ->(list) { list.map { |src, amt| "#{src} #{sgn.(amt)}" }.join(', ') }
+          on = ->(h, keys) { keys.select { |k| h[k] }.join(' ') }
+          lines = ["SQ-80 program #{name.rstrip.inspect}#{' (SQ-80 only: waves 32+ or a second release)' if sq80_only?}"]
+          oscs.each_with_index do |o, i|
+            lines << format('  OSC%d %-6s oct %+d semi %d fine %d  level %d %s  pitch mods %s  dca mods %s',
+                            i + 1, wave_name(i), o[:octave], o[:semitone], o[:fine], o[:level], o[:on] ? 'on' : 'off',
+                            mods.(o[:mods]), mods.(o[:dca_mods]))
+          end
+          lines << "  DCA4 #{dca4}  pan #{pan} (8 center; mod #{mods.([pan_mod])})  glide #{glide}"
+          lines << "  FILTER fc #{filter[:fc]} q #{filter[:q]} keyboard #{filter[:keyboard]}  mods #{mods.(filter[:mods])}"
+          envs.each_with_index do |e, i|
+            lines << format('  ENV%d L1 %d L2 %d L3 %d  T1 %d T2 %d T3 %d T4 %d%s  LV %d (bits %d) T1V %d TK %d',
+                            i + 1, e[:l1], e[:l2], e[:l3], e[:t1], e[:t2], e[:t3], e[:t4], e[:second_release] ? ' 2nd release' : '',
+                            e[:lv], e[:lv_bits], e[:t1v], e[:tk])
+          end
+          lfos.each_with_index do |l, i|
+            extra = on.(l, %i[human reset])
+            lines << "  LFO#{i + 1} #{l[:wave]} freq #{l[:freq]} L1 #{l[:l1]} L2 #{l[:l2]} delay #{l[:delay]}#{" #{extra}" unless extra.empty?}  mod #{l[:mod]}"
+          end
+          set = on.(flags, flags.keys)
+          lines << "  flags #{set.empty? ? 'none' : set}  split bytes #{split.inspect}"
+          lines.join("\n")
+        end
+
+        def pretty_print(q) = q.text(summary)
 
         # A program with every field at its init value (a SAW on OSC1,
         # ENV4 a gate), for building synthetic dumps.

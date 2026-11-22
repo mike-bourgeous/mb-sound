@@ -142,7 +142,7 @@ Texture nodes in `fast_texture` and `fast_resonator` (exact Ruby mirrors, the sa
 
 ### [SQ-80 voice, patches, and (designed) SysEx import](sq80.md)
 
-`sq80(source = nil, :patch, **settings)` (`SQ80Methods`, `lib/mb/sound/sq80/`) is the SQ-80-flavored voice as a library patch: original tables only (nothing from the ROM), three oscillators into a driven lp4, panel-unit `sq80_env` envelopes; settings merge over `SQ80::Voice::DEFAULTS`, patches in `SQ80::PATCHES` (presets `preset :sq80_glass, midi:`), printed as `sq80(clip, :chop, ...)`.  The wave voices (`wave_voice(midi, :digibrass | :organ_reso | :square_bass, grit:)`) ship as presets.  SysEx programs parse (`SQ80::SysEx`, `SQ80::Program`); mapping them onto the voice is designed only.  Never commit real .syx banks or anything derived from them; SQ-80 is banned from demos for now.
+`sq80(source = nil, :patch, **settings)` (`SQ80Methods`, `lib/mb/sound/sq80/`) is the SQ-80-flavored voice as a library patch: original tables only (nothing from the ROM), three oscillators into a driven lp4, panel-unit `sq80_env` envelopes; settings merge over `SQ80::Voice::DEFAULTS`, patches in `SQ80::PATCHES` (presets `preset :sq80_glass, midi:`), printed as `sq80(clip, :chop, ...)`.  The wave voices (`wave_voice(midi, :digibrass | :organ_reso | :square_bass, grit:)`) ship as presets.  SysEx programs parse (`SQ80::SysEx`, `SQ80::Program`), and `sysex.capture` saves the instrument's dumps (midi.md); mapping programs onto the voice is designed only.  Never commit real .syx banks or anything derived from them; SQ-80 is banned from demos for now.
 
 ## Notes and structure
 
