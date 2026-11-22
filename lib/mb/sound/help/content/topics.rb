@@ -865,7 +865,9 @@ module MB
         default for loops, about 3x the time to make; `lock: :peaks`
         for the plain vocoder's phases, also how unlooped stretches
         run unless they ask for `lock: :shape`); a loop's phases close
-        over its last half second or so, or evenly over the loop with
+        over its last half second or so, or its last 50 ms where the
+        loop point is an attack (`closure_length: :auto`, the
+        default), or evenly over the loop with
         `lock: :peaks`, or over `closure_length: 0.5` before its end,
         or with a pitch change of a few cents (`closure: :shift`, with
         `lock: :peaks`).

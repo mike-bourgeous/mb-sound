@@ -277,17 +277,11 @@ module MB
         # Offline: the stretch made at once (#stretched).  Live (on a
         # realtime render thread, Restretch.background?): a stretch not
         # made yet goes to a worker, and the player plays the interim
-        # meanwhile, crossfading (SWAP_FADE) whenever what it plays
-        # changes.
+        # meanwhile.  Both crossfade (SWAP_FADE) whenever what plays
+        # changes (#play_target).
         def play_stretch(ratio, phase)
           key = ratio.round(12)
-          unless Restretch.background?
-            data = stretched(ratio)
-            @playing = data
-            @playing_key = key
-            @fade_from = nil
-            return read_into(@buf, data, true, phase)
-          end
+          return play_target(stretched(ratio), key, key, phase) unless Restretch.background?
 
           target = @stretches[key] || take_full(key)
           if target.nil? && @failed_key != key
@@ -305,6 +299,16 @@ module MB
             target_key = @playing_key
             return BufferHelper.zero(@buf) if target.nil?
           end
+          play_target(target, target_key, key, phase)
+        end
+
+        # Fills @buf from +target+ (the stretch made for +target_key+) at
+        # loop +phase+s for the ratio +key+, crossfading over SWAP_FADE
+        # from what played before whenever it changes: live and offline
+        # alike (stretches for two tempos have unrelated phases, so until
+        # stretch-attacks-1 an offline render's hard switch clicked at
+        # every tempo change and every 1/4 BPM step of a ramp).
+        def play_target(target, target_key, key, phase)
           unless target.equal?(@playing)
             if @playing
               @fade_from = @playing

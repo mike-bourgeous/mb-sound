@@ -1201,7 +1201,10 @@ module MB
       # Spectral::SHIFT_CENTS (keeping its shape, but it dulls the
       # top above 2 kHz: the frames disagree by a few samples), and
       # +closure_length+ (seconds or a Length) closes only that long
-      # before the loop point, the rest as with its own ends.  (A
+      # before the loop point, the rest as with its own ends; :auto
+      # (the default) leaves it to the material: with the shape lock,
+      # 50 ms ending before the frames of an attack at the loop point,
+      # else 0.51 s (Spectral::SHAPE_CLOSING_ATTACK, SHAPE_CLOSING).  (A
       # bass loop through its track's waveshaper lost 2.4 dB of sub
       # with the closed loop; lock: :shape gave it back,
       # stretch-fixes-6, and became the loops' default in
@@ -1719,11 +1722,12 @@ module MB
           raise ArgumentError, "closure: is one of #{Spectral::CLOSURES.map(&:inspect).join(', ')} (got #{closure.inspect})" unless Spectral::CLOSURES.include?(closure)
           kw[:closure] = closure
         end
+        closure_length = nil if closure_length == :auto
         kw[:closure_length] = closure_length unless closure_length.nil?
         raise ArgumentError, "lock: is one of #{Spectral::LOCKS.map(&:inspect).join(', ')} (got #{lock.inspect})" unless lock.nil? || Spectral::LOCKS.include?(lock)
         kw[:lock] = lock unless lock.nil?
         close_n = closure_length.nil? ? nil : position(closure_length).round
-        raise ArgumentError, "closure_length: is a length above zero (got #{closure_length.inspect})" unless close_n.nil? || close_n > 0
+        raise ArgumentError, "closure_length: is :auto or a length above zero (got #{closure_length.inspect})" unless close_n.nil? || close_n > 0
 
         n = position(window.nil? ? (paul ? Spectral::PAUL_WINDOW : Spectral::WINDOW.samples) : window).round
         n += 1 if n.odd?
@@ -1734,7 +1738,7 @@ module MB
         edit(:stretch, [ratio], kw, whole: true, read: stretch_read(ratio), bpm: @bpm && @bpm / ratio.to_f) { |chans|
           if wrap
             Spectral.looped(chans, ratio.to_f, window: n, overlap: overlap, onsets: onsets, randomize: randomize, seed: seed, link: link, shape: shape, span: span, noise: noise,
-                            closure: closure || :spread, closure_length: close_n, lock: lock)
+                            closure: closure || :spread, closure_length: close_n, lock: lock, sample_rate: sample_rate)
           elsif randomize >= 1 && onsets.nil?
             Spectral.paul(chans, ratio.to_f, window: n, overlap: overlap, seed: seed, link: link, shape: shape)
           else
