@@ -135,10 +135,13 @@ module MB
         150 Hz above the note, a node of Hz for `cutoff:`; two Pitches
         added raise).  `pitch.period` is a length (one cycle),
         `pitch.frequency` the number in Hz, `40.constant` a fixed value for
-        arithmetic.
+        arithmetic.  `within(E1..E2)` moves a note, clip, stream, or node
+        of Hz into a range by octaves, keeping its pitch class
+        (`A4.within(E1..E2)` is A1; `notes.freq.within(2.hz..8.hz)` is a
+        rate that follows the melody; `E1...E2` leaves out E2).
       TEXT
       commands :tuning
-      dsl :transpose, :up, :dn, :oct, :period, :frequency
+      dsl :transpose, :up, :dn, :oct, :within, :period, :frequency
       note :numbers_lengths_phases
       see :tones, :tempo, :key
       example 'a fifth above, by name' do
@@ -146,6 +149,10 @@ module MB
       end
       example 'an octave below a note' do
         bg :try, A4.dn.saw.lp4(800).at(-24.db).until(1.bar)
+      end
+      example 'a phaser whose rate follows the melody, octaves down' do
+        riff = seq(A2, C3, E3, G3).n4.loop
+        bg :try, (riff.tone.saw.at(-18.db) * riff.amp_env).phaser(rate: riff.freq.within(2.hz..8.hz)).until(2.bars)
       end
     end
     Help::TOPIC_ALIASES.merge!(pitches: :pitch, note: :pitch, hz: :pitch, tuning_and_notes: :pitch)
@@ -912,14 +919,20 @@ module MB
         `clip.show` prints a clip as text: `:grid` (grid characters, so a
         kit's `show.rows` parse back), `:roll` (a piano roll), or
         `:degrees` (scale degrees in the session key).
+        `lead.within(E1..E2)` moves every note into a register by octaves
+        (same degrees; generators keep generating, streams too).
       TEXT
       commands :seq, :grid, :events, :rest, :euclid, :melody, :acid, :chord, :arp, :strum, :echo, :scale
-      dsl :loop, :n8, :n16, :transpose, :swing, :humanize, :chance, :every, :reverse, :rotate, :shift, :halftime, :doubletime, :synth, :tone, :amp_env, :swap
+      dsl :loop, :n8, :n16, :transpose, :within, :swing, :humanize, :chance, :every, :reverse, :rotate, :shift, :halftime, :doubletime, :synth, :tone, :amp_env, :swap
       note :sequences
       see :tempo, :sets
       example 'a looping arpeggio' do
         clip = seq(A3, C4, E4, G4).n16.loop
         bg :try, clip.tone.triangle.at(-12.db) * clip.amp_env
+      end
+      example "a lead's notes in the bass register" do
+        bass = seq(E4, G4, B4, D5).n8.loop.within(E1..E2)
+        bg :try, bass.tone.saw.lp4(500).at(-16.db) * bass.amp_env
       end
       example 'a beat turned around, swung, and printed as a grid', sound: false do
         beat = grid(16, kick: 'X...x...x..x....', snare: '....X.......X..?', hat: 'x.x.x.x.x.x.x.x.')
@@ -1565,7 +1578,7 @@ module MB
         `same_key: :count`).
       TEXT
       commands :midi, :midi_file, :midi_stream, :synth, :per_voice, :close_midi, :mod_sum, :mod_scale
-      dsl :gate, :trigger, :velocity, :amp_env, :hz, :cutoff, :reso, :arp, :echo, :chord
+      dsl :gate, :trigger, :velocity, :amp_env, :hz, :cutoff, :reso, :arp, :echo, :chord, :within
       note :midi
       see :record, :midi_files, :wire
     end
