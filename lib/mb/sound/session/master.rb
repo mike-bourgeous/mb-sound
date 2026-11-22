@@ -69,6 +69,8 @@ module MB
           :preset, :mastering, :capture, :rng,
           :recipe, # (a slot content's recorded `slot` call; see GraphNode::Slot)
           :instance, # (a rack instance slot's content: the Rack applied; see Session::Slots)
+          :ring, # (seconds the chains this one replaces by spill-over ring at most, nil for MAX_TAIL_SECONDS; slot swaps' ring:, racks-r3-2)
+          :max_tail, # (seconds this chain's spill-over tail rings at most, nil for MAX_TAIL_SECONDS; see Handover.start)
           keyword_init: true
         ) do
           def bypass?

@@ -146,10 +146,14 @@ module MB
       # Latencies of racks by Rack (identity; see #latency).
       LATENCIES = ObjectSpace::WeakMap.new
 
-      @instance_slots = true
+      # (racks-r3-2, the maintainer 2026-11-21: "opt in by default"; an
+      # instance slot costs a copy into its feed and a plan boundary, +6%
+      # CPU for a small effect rack)
+      @instance_slots = false
       class << self
-        # Whether named audio racks wrap each application in an instance
-        # slot (see #instance_slot?; default true).
+        # Whether every named audio or instrument rack plays its
+        # applications in instance slots, as if defined with `slot: true`
+        # (see #instance_slot?; default false).
         attr_accessor :instance_slots
       end
 
@@ -320,6 +324,12 @@ module MB
       # The block that builds an instance.
       attr_reader :block
 
+      # True if applications of this named rack play in instance slots
+      # (`arack :dub, slot: true`; see #instance_slot?).
+      def slot?
+        @slot
+      end
+
       # The constructor that made the rack (:mrack, :arack, :rack, ...),
       # for printing.
       attr_reader :constructor
@@ -334,8 +344,9 @@ module MB
       # block builds under), +drawn+ (true if the application drew it),
       # +knobs+ (knob start values by name), and +application+ (the
       # Application of the call that applied the rack, for printing its
-      # knobs' current values).
-      def initialize(name = nil, in:, out: nil, constructor: :rack, block: nil, bound: {}, parts: nil, listener: false, ports: {}, quiet: false, settings: {})
+      # knobs' current values).  +slot+ (true for a named rack) plays its
+      # applications in instance slots (see #instance_slot?).
+      def initialize(name = nil, in:, out: nil, constructor: :rack, block: nil, bound: {}, parts: nil, listener: false, ports: {}, quiet: false, settings: {}, slot: false)
         main_type = binding.local_variable_get(:in)
         raise ArgumentError, "Rack names are Symbols (got #{name.inspect})" unless name.nil? || name.is_a?(Symbol)
 
@@ -345,6 +356,8 @@ module MB
         @parts = parts&.freeze
         @listener = listener
         @bound = bound.dup.freeze
+        raise ArgumentError, "slot: is true or false (got #{slot.inspect})" unless slot == true || slot == false
+        @slot = slot
 
         if parts
           @block = nil
@@ -511,10 +524,10 @@ module MB
       # instance slot (racks R3): named racks taking audio and making audio,
       # and named instrument racks (notes in, `out: :audio`: irack), so
       # re-defining the rack swaps instances that play (see
-      # Session::Slots#swap_rack_instances).  Rack.instance_slots = false
-      # turns it off.
+      # Session::Slots#swap_rack_instances).  Opt-in (racks-r3-2): racks
+      # defined with `slot: true`, or every one while Rack.instance_slots.
       def instance_slot?(main)
-        return false unless Rack.instance_slots && !@name.nil? && !@listener
+        return false unless (@slot || Rack.instance_slots) && !@name.nil? && !@listener
         if @input.type == :notes
           # (instruments: notes in, audio out; swapped with patch persist)
           @out == :audio && GraphNode::Slot.notes?(main)
@@ -548,10 +561,11 @@ module MB
 
       # A copy of this rack named +name+ (a Symbol, or nil for anonymous;
       # not registered anywhere): how a document's rack loads under a new
-      # name (`racks: :rename`).
-      def renamed(name)
+      # name (`racks: :rename`).  +slot+: whether the copy plays its
+      # applications in instance slots (see #slot?).
+      def renamed(name, slot: @slot)
         raise ArgumentError, "#{label} is composed; rename its parts" if @parts
-        copy(name: name)
+        copy(name: name, slot: slot)
       end
 
       # Builds the block on stand-ins for every port, without recording
@@ -729,20 +743,20 @@ module MB
 
       # Racks are values: equal when made the same way.
       def ==(other)
-        other.is_a?(Rack) && other.name == @name && other.block.equal?(@block) && other.bound == @bound && other.parts == @parts
+        other.is_a?(Rack) && other.name == @name && other.block.equal?(@block) && other.bound == @bound && other.parts == @parts && other.slot? == @slot
       end
       alias eql? ==
 
       def hash
-        [@name, @block, @bound, @parts].hash
+        [@name, @block, @bound, @parts, @slot].hash
       end
 
       private
 
-      # A copy of this rack with +changes+ (name:, bound:, settings:).
-      def copy(name: @name, bound: @bound, settings: @settings)
+      # A copy of this rack with +changes+ (name:, bound:, settings:, slot:).
+      def copy(name: @name, bound: @bound, settings: @settings, slot: @slot)
         Rack.new(name, in: @input.type, out: @out, constructor: @constructor, block: @block, bound: bound,
-          listener: @listener, ports: @ports.transform_values(&:type), quiet: true, settings: settings)
+          listener: @listener, ports: @ports.transform_values(&:type), quiet: true, settings: settings, slot: slot)
       end
 
       public

@@ -19,7 +19,8 @@ module MB
       #   from the switch frame, so tails ring out, and are dropped on the
       #   exact frame their tail has been quiet for QuietRun::QUIET_SECONDS
       #   (or faded over Master::TAIL_FADE_SECONDS from the frame it has
-      #   rung Master::MAX_TAIL_SECONDS).
+      #   rung Master::MAX_TAIL_SECONDS, or the new chain's +ring+ seconds,
+      #   which a slot swap sets: racks-r3-2).
       # - :fade: both are fed; the new chain's gain rises and the old ones'
       #   falls by +step+ per frame from the switch frame.
       # - :cut: a fade over one frame.
@@ -32,7 +33,11 @@ module MB
         def start(chain, older, offset, mode, step)
           if mode == :spill
             chain.input_from = offset
+            ring = chain.ring
             older.each do |c|
+              # (a shorter ring shortens tails still spilling from earlier
+              # swaps too; a longer one never lengthens them)
+              c.max_tail = c.max_tail ? MB::M.min(c.max_tail, ring) : ring if ring && c.started
               next unless c.started && c.feeding
               c.feeding = false
               c.input_until = offset
@@ -73,7 +78,7 @@ module MB
         # QuietRun::QUIET_SECONDS (a QuietRun ending on the exact frame:
         # session-2, the maintainer's "Exact frame"), and fades out over
         # Master::TAIL_FADE_SECONDS from the exact frame it has rung
-        # Master::MAX_TAIL_SECONDS.  Returns how many of the frames to mix:
+        # Master::MAX_TAIL_SECONDS (Chain#max_tail seconds if set).  Returns how many of the frames to mix:
         # all of them, or fewer when the tail ends inside them (the chain
         # is then done: Chain#tail_done).
         def track_tail(c, data, count, rate, frame)
@@ -82,7 +87,7 @@ module MB
             c.quiet = QuietRun.new((QuietRun::QUIET_SECONDS * rate).round, from: c.tail_start)
           end
 
-          cap = c.tail_start + (Master::MAX_TAIL_SECONDS * rate).round
+          cap = c.tail_start + ((c.max_tail || Master::MAX_TAIL_SECONDS) * rate).round
           if c.gain_step >= 0 && cap < frame + count
             c.gain_step = -1.0 / (Master::TAIL_FADE_SECONDS * rate)
             c.ramp_from = MB::M.max(cap - frame, 0)

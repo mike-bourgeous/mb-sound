@@ -31,21 +31,25 @@ module MB
       # output against +out:+ if given; +ports+ declare extra ports by type
       # (`side: :audio`), taken as keywords of the block (`|sig, side:|`;
       # a default makes one optional).  A +name+ registers it (see #racks);
-      # without one it is an anonymous value.  Returns the Rack.
+      # without one it is an anonymous value.  +slot: true+ (a named rack
+      # making audio: an effect or an instrument) plays each application in
+      # an instance slot, so defining the rack again swaps the instances
+      # playing (racks R3; without it they keep playing as they were built).
+      # Returns the Rack.
       #
       # Without a block, returns the named rack +name+.
       #
       #     rack(:sc, in: :audio, kick: :notes) { |sig, kick:| sig * (1 - kick.amp_env(release: 0.2) * 0.5) }
       #     rack(:sc)                      # => the rack
-      def rack(name = nil, in: nil, out: nil, **ports, &block)
+      def rack(name = nil, in: nil, out: nil, slot: false, **ports, &block)
         main = binding.local_variable_get(:in)
         if block.nil?
-          raise ArgumentError, 'rack(:name) looks up a named rack; pass a block to define one (rack(:x, in: :audio) { |sig| ... })' unless name.is_a?(Symbol) && main.nil? && out.nil? && ports.empty?
+          raise ArgumentError, 'rack(:name) looks up a named rack; pass a block to define one (rack(:x, in: :audio) { |sig| ... })' unless name.is_a?(Symbol) && main.nil? && out.nil? && ports.empty? && !slot
           return Session.current.racks.fetch(name)
         end
         raise ArgumentError, 'rack needs in: (:notes, :audio, :control, or :auto); or use mrack, irack, arack, lrack, modrack' if main.nil?
 
-        define_rack(name, main, out, ports, block, :rack)
+        define_rack(name, main, out, ports, block, :rack, slot: slot)
       end
 
       # A note rack: notes in (a Stream, Clip, or Notes), notes out (or
@@ -53,16 +57,16 @@ module MB
       #
       #     mrack { it.chord(:min7).strum(20.ms) }
       #     mrack(:pads) { |stream| stream.chord(:min7) }
-      def mrack(name = nil, out: nil, **ports, &block)
-        define_rack(name, :notes, out, ports, block, :mrack)
+      def mrack(name = nil, out: nil, slot: false, **ports, &block)
+        define_rack(name, :notes, out, ports, block, :mrack, slot: slot)
       end
       alias note_rack mrack
 
       # An instrument rack: notes in, audio out.  See #rack.
       #
       #     irack(:keys) { |stream| stream.synth { |v| v.hz.triangle * v.amp_env } }
-      def irack(name = nil, **ports, &block)
-        define_rack(name, :notes, :audio, ports, block, :irack)
+      def irack(name = nil, slot: false, **ports, &block)
+        define_rack(name, :notes, :audio, ports, block, :irack, slot: slot)
       end
       alias instrument_rack irack
 
@@ -71,8 +75,8 @@ module MB
       #
       #     arack(:dub) { |sig| sig.reverb(:hall, mix: 0.3) }
       #     arack :pump, side: :audio do |sig, side:| sig.duck(side) end
-      def arack(name = nil, out: nil, **ports, &block)
-        define_rack(name, :audio, out, ports, block, :arack)
+      def arack(name = nil, out: nil, slot: false, **ports, &block)
+        define_rack(name, :audio, out, ports, block, :arack, slot: slot)
       end
       alias audio_rack arack
 
@@ -169,16 +173,25 @@ module MB
 
       private
 
-      def define_rack(name, main, out, ports, block, constructor, listener: false)
+      def define_rack(name, main, out, ports, block, constructor, listener: false, slot: false)
+        unless slot == true || slot == false
+          raise ArgumentError, "slot: is true or false (got #{slot.inspect}); it isn't a port (ports can't be named slot)"
+        end
+        if slot
+          raise ArgumentError, "slot: true goes with named racks (#{constructor}(:name, slot: true) { ... }); swap an anonymous rack's own slots by name" if name.nil?
+          if main == :control || out == :notes || out == :control || (main == :notes && out != :audio)
+            raise ArgumentError, "slot: true goes with racks making audio (arack, irack, or mrack with out: :audio); #{name.inspect} makes notes or control"
+          end
+        end
         unless name.nil? || name.is_a?(Symbol)
           raise ArgumentError, "Rack names are Symbols (got #{name.inspect}); extra ports are keywords (#{constructor}(:name, side: :audio) { ... })"
         end
 
-        r = Rack.new(name, in: main, out: out, constructor: constructor, block: block, ports: ports, listener: listener)
+        r = Rack.new(name, in: main, out: out, constructor: constructor, block: block, ports: ports, listener: listener, slot: slot)
         if name
           racks = Session.current.racks
-          # (defined again: instances playing swap to it on the next bar;
-          # racks R3, see Session::Slots#swap_rack_instances)
+          # (defined again: instances playing in instance slots swap to it
+          # on the next bar; racks R3, see Session::Slots#swap_rack_instances)
           if racks[name]
             racks.redefine(r, label: "#{constructor} #{name.inspect}")
           else

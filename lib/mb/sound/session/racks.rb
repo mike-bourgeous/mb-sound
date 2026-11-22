@@ -10,8 +10,8 @@ module MB
       # remembered (weakly) so #info can say where it plays.
       #
       # Defining a named rack again replaces it for later applications;
-      # instances already built keep playing as they were (live swaps of
-      # racks and slots are a later phase).
+      # instances playing in instance slots swap to it (racks R3; see
+      # #redefine), others keep playing as they were built.
       class Racks
         # A named rack, its applications, the output type seen last, and
         # the knobs' Specs seen last ({ name => Knob::Spec }).
@@ -66,22 +66,53 @@ module MB
         # launch point (+at:+/+on:+/+in:+, +fade:+, +start_time+; see
         # Slots#swap_rack_instances), as one undo step labeled +label+.
         # Returns +rack+.
+        #
+        # Only instances in instance slots swap (racks defined with `slot:
+        # true`, or every named rack while Rack.instance_slots; racks-r3-2,
+        # the maintainer's "opt in by default"): others keep playing as
+        # they were built, as before slots, which live mode says in one
+        # line.
         def redefine(rack, label:, **swap)
           name = rack.name
           before = self[name]
+          changed = before && !before.block.equal?(rack.block)
+          held = changed ? unslotted_players(name) : []
           Session.with_context(session: @session) {
             @session.command(label) {
               define(rack) or next
               @session.note_undo_extra(self, { name => before }, { name => rack })
-              @session.swap_rack_instances(name, rack, **swap) if before && !before.block.equal?(rack.block)
+              @session.swap_rack_instances(name, rack, **swap) if changed
             }
           }
+          if !held.empty? && MB::Sound.live?
+            warn "rack #{name.inspect}: #{held.map(&:inspect).join(', ')} #{held.length == 1 ? 'keeps' : 'keep'} playing the old definition " \
+                 "(only instance slots swap: #{rack.constructor} #{name.inspect}, slot: true, then play it again)"
+          end
           rack
         end
 
+        # Names of the players (playing, or stopped for resume) whose graphs
+        # hold an instance of named rack +name+ outside an instance slot,
+        # which re-defining the rack leaves as they were built (see
+        # #redefine).
+        def unslotted_players(name)
+          e = @mutex.synchronize { @entries[name]&.dup }
+          return [] unless e
+          insts = e.instances.filter_map { |w| w.__getobj__ if w.weakref_alive? }.reject { |i| Racks.instance_slot_output?(i) }
+          players_holding(insts, stopped: true)
+        end
+
+        # True if +result+ (an application's result) is an instance slot's
+        # output (a node or a bundle of them; see MB::Sound::Rack#instance_slot?).
+        def self.instance_slot_output?(result)
+          outs = result.is_a?(GraphNode::Channels) ? result.outputs : [result]
+          outs.all? { |o| o.is_a?(GraphNode::Slot::Output) && o.owner_slot.instance_of }
+        end
+
         # Replaces the definition of rack +name+ with +rack+ as one undo
-        # step labeled +label+ (instances playing swap to it at the next
-        # launch point: see #redefine; later applications use +rack+).
+        # step labeled +label+ (instances playing in instance slots swap to
+        # it at the next launch point: see #redefine; later applications
+        # use +rack+).
         # Returns +rack+.
         def replace(name, rack, label:)
           before = self[name]
@@ -166,7 +197,7 @@ module MB
             out = r.out || e.out
             used = uses_text(e)
             list = e.knobs.empty? ? '' : "knobs #{e.knobs.map { |n, spec| Racks.spec_text(n, spec) }.join(', ')}, "
-            [r.name, "#{r.kind(out)} #{r.signature(out)}, #{list}#{slots_text(r)}#{used}"]
+            [r.name, "#{r.kind(out)} #{r.signature(out)}, #{'in instance slots, ' if r.slot?}#{list}#{slots_text(r)}#{used}"]
           }
         end
 
@@ -483,11 +514,17 @@ module MB
         # Names of the current players whose graphs hold an instance of
         # entry +e+.
         def players_using(e)
-          insts = e.instances.filter_map { |w| w.__getobj__ if w.weakref_alive? }
+          players_holding(e.instances.filter_map { |w| w.__getobj__ if w.weakref_alive? })
+        end
+
+        # Names of the current players (and with +stopped+, those stopped
+        # for resume) whose graphs hold one of +insts+.
+        def players_holding(insts, stopped: false)
           return [] if insts.empty?
 
           players = @session.instance_variable_get(:@players)
-          list = @session.instance_variable_get(:@mutex).synchronize { players.values.select(&:current?) }
+          kept = @session.instance_variable_get(:@stopped)
+          list = @session.instance_variable_get(:@mutex).synchronize { players.values.select(&:current?) + (stopped ? kept.values : []) }
           list.select { |p|
             p.input.nodes.any? { |n|
               nodes = n.respond_to?(:graph) ? n.graph : [n]

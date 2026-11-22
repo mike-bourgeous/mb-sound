@@ -862,6 +862,7 @@ module MB
             args << "in: #{rack.input.type.inspect}" if rack.constructor == :rack
             args << "out: #{rack.out.inspect}" if rack.out && !%i[irack instrument_rack lrack amrack listener_rack].include?(rack.constructor)
             rack.ports.each_value { |p| args << "#{w.key_text(p.name)} #{p.type.inspect}" }
+            args << 'slot: true' if rack.slot? # (racks-r3-2: instance slots are opt-in)
             text = "#{rack.constructor}(#{args.join(', ')}) { |#{rack.param_list}|\n#{lines.map { |l| "  #{l}" }.join("\n")}\n}"
             [text, w.problems.uniq]
           end

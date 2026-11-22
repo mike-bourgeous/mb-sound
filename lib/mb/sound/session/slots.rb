@@ -22,6 +22,14 @@ module MB
         # the Proc or Rack that built the content playing before).
         SlotState = Data.define(:contents)
 
+        # Seconds an instrument slot's old content rings out after a swap
+        # by spill-over before it fades (Session::Handover; effect slots,
+        # master and bus chains keep Master::MAX_TAIL_SECONDS).  racks-r3-2,
+        # the maintainer 2026-11-21: "if the swap is during composition/sound
+        # design/arrangement, probably not more than 1s ringout"; a swap's
+        # +ring:+ gives a longer one (a pad finishing its chord live).
+        INSTRUMENT_RING_SECONDS = 1
+
         Undo.claim :slot_undo_subject, order: 25
         Undo.claim :rack_undo_subject, order: 26
 
@@ -87,11 +95,15 @@ module MB
         # (+at:+, a LaunchPoint; the next bar while anything plays, like
         # #add), or at +start_time+ (whole notes).  The old content spills
         # over (+fade:+ nil, the default), crossfades over +fade:+ bars, or
-        # is cut (+fade: 0+).  Each slot builds its own copy now (its rack
-        # knobs join the Session as the player's), warmed in a sandbox
+        # is cut (+fade: 0+).  A spill-over rings out for +ring:+ (a length:
+        # seconds, or a Length such as 4.bars) at most, then fades; without
+        # it an instrument slot's old content rings for
+        # INSTRUMENT_RING_SECONDS, an effect slot's up to
+        # Master::MAX_TAIL_SECONDS.  Each slot builds its own copy now (its
+        # rack knobs join the Session as the player's), warmed in a sandbox
         # first (Session::Warming); the change lands on its exact frame.
         # Returns the Change.
-        def swap_slot(name, content = nil, at: nil, on: nil, in: nil, fade: nil, start_time: nil, &block)
+        def swap_slot(name, content = nil, at: nil, on: nil, in: nil, fade: nil, ring: nil, start_time: nil, &block)
           raise IOError, 'Session is closed' if @closed
           point = LaunchPoint.of(binding) or return nil
           content ||= block
@@ -103,14 +115,15 @@ module MB
           end
           content = slot_content(name, content, targets.first.notes? ? :notes : :audio)
           mode, bars = master_mode(fade)
+          ring = ring_seconds(ring)
           built = targets.map { |s| [s, build_slot_content(s, content)] }
           chains = built.map(&:last)
           desc = "swap #{name.inspect} -> #{chains.first.description}"
           warm_slot_swap(content, targets.first, chains.first, warm_time(point, start_time))
 
           time = start_time ? start_time.to_r : launch_time(point, chains.flat_map(&:timeline_nodes))
-          c = change(:slot, name, time, data: { description: desc, fade: fade }, graph: SlotGraph.new(chains, nil)) { |_t|
-            land_slot_swap(built, mode, bars)
+          c = change(:slot, name, time, data: { description: desc, fade: fade, ring: ring }, graph: SlotGraph.new(chains, nil)) { |_t|
+            land_slot_swap(built, mode, bars, ring: ring)
           }
           start_thread if @realtime
           c
@@ -120,18 +133,22 @@ module MB
         # +rack+ (its new definition), each on the same input with the same
         # extra port values, at a launch point (+at:+ a LaunchPoint, else
         # the next bar while anything plays) or +start_time+, handing over
-        # as #swap_slot does (+fade:+).  Each new instance's rack knobs join
-        # the old instance's (same names, values kept).  Instances in
-        # players that aren't playing (stopped for resume) keep theirs.
-        # Returns the Change, or nil if no instance plays.  Called by
-        # Racks#redefine inside its undo step.
-        def swap_rack_instances(name, rack, at: nil, on: nil, in: nil, fade: nil, start_time: nil)
+        # as #swap_slot does (+fade:+, +ring:+).  Each new instance's rack
+        # knobs join the old instance's (same names, values kept).
+        # Instances in players stopped for resume swap too, by a cut (they
+        # play the new definition when they start again; racks-r3-2, the
+        # maintainer's "stopped also").  Only instance slots swap (see
+        # Racks#redefine).  Returns the Change, or nil if no instance plays
+        # or waits.  Called by Racks#redefine inside its undo step.
+        def swap_rack_instances(name, rack, at: nil, on: nil, in: nil, fade: nil, ring: nil, start_time: nil)
           raise IOError, 'Session is closed' if @closed
           point = LaunchPoint.of(binding) or return nil
-          slots = rack_instance_slots(name)
+          stopped = {}.compare_by_identity
+          slots = rack_instance_slots(name, stopped: stopped)
           return nil if slots.empty?
 
           mode, bars = master_mode(fade)
+          ring = ring_seconds(ring)
           built = slots.filter_map do |sl|
             [sl, build_instance_content(sl, rack)]
           rescue ArgumentError, TypeError, NoMethodError => e
@@ -143,26 +160,35 @@ module MB
           desc = "rack #{name.inspect} -> #{built.length} instance#{'s' if built.length != 1}"
           warm_rack_swap(rack, built.first[0], chains.first, warm_time(point, start_time))
           time = start_time ? start_time.to_r : launch_time(point, chains.flat_map(&:timeline_nodes))
-          c = change(:rack, name, time, data: { description: desc, fade: fade }, graph: SlotGraph.new(chains, nil)) { |_t|
-            land_slot_swap(built, mode, bars)
+          c = change(:rack, name, time, data: { description: desc, fade: fade, ring: ring }, graph: SlotGraph.new(chains, nil)) { |_t|
+            land_slot_swap(built, mode, bars, ring: ring, cut: stopped)
           }
           start_thread if @realtime
           c
         end
 
-        # The instance slots of named rack +name+ in the graphs of the
-        # players playing (GraphNode::Slot made by MB::Sound::Rack#call).
-        def rack_instance_slots(name)
-          players = @mutex.synchronize { @players.values.select(&:current?) }
+        # The instance slots of named rack +name+ (GraphNode::Slot made by
+        # MB::Sound::Rack#call) in the graphs of the players playing (or
+        # fading out after a stop) and, with +stopped+ (a Hash filled with
+        # those slots), of players stopped for resume (racks-r3-2, the
+        # maintainer's "stopped also": they take the new definition when
+        # they start again).
+        def rack_instance_slots(name, stopped: nil)
+          players, kept = @mutex.synchronize {
+            fading = @players.values.select { |p| !p.current? && p.keep && p.fade_out && !p.handed && !p.ring }
+            [@players.values.select(&:current?) + fading, stopped ? @stopped.values : []]
+          }
           found = []
           seen = {}.compare_by_identity
-          players.each do |p|
+          (players + kept).each_with_index do |p, i|
+            idle = i >= players.length
             p.input.nodes.flat_map { |n| [n, *n.graph] }.each do |n|
               next unless n.is_a?(GraphNode::Slot::Output)
               sl = n.owner_slot
               next if seen[sl] || sl.instance_of&.name != name
               seen[sl] = true
               found << sl
+              stopped[sl] = true if idle
             end
           end
           found
@@ -301,14 +327,32 @@ module MB
         end
 
         # Lands a swap (in its change, under the render lock): each slot
-        # gets its content to start on the landing frame.
-        def land_slot_swap(built, mode, bars)
+        # gets its content to start on the landing frame, by +mode+ (with
+        # +bars+ of a fade), or by a cut for slots in +cut+ (a Hash: those
+        # of players stopped for resume).  A spill-over's old contents ring
+        # for +ring+ seconds at most (nil: INSTRUMENT_RING_SECONDS for an
+        # instrument slot, else Master::MAX_TAIL_SECONDS).
+        def land_slot_swap(built, mode, bars, ring: nil, cut: nil)
           frame = @landing_frame || @frame
           step = mode == :fade ? fade_step(bars, output_open? ? sample_rate : 48000) : 1.0
           built.each do |s, chain|
-            s.queue(chain, frame, mode: mode, step: step, session: self)
+            if cut&.key?(s)
+              s.queue(chain, frame, mode: :cut, step: 1.0, session: self)
+            else
+              chain.ring = ring || (s.notes? ? INSTRUMENT_RING_SECONDS : nil) if mode == :spill
+              s.queue(chain, frame, mode: mode, step: step, session: self)
+            end
             @waiting_slots[s] = true
           end
+        end
+
+        # +ring+ (a swap's ring: a length, seconds, or nil) in seconds, or
+        # nil.
+        def ring_seconds(ring)
+          return nil if ring.nil?
+          s = Length.seconds(ring, sample_rate: output_open? ? sample_rate : 48000, transport: Sequence.current_transport)
+          raise ArgumentError, "ring: is a length of time, at least 0 (got #{ring.inspect})" unless s.is_a?(Numeric) && s.real? && s >= 0
+          s.to_f
         end
 
         # The graphs of slot contents that landed but haven't started (see
@@ -329,17 +373,16 @@ module MB
         end
 
         # Puts the slots back to their contents before +original+ at
-        # +time+ (rebuilt from what built them, handed over as the swap
-        # was).
+        # +time+ (rebuilt from what built them) by a cut: undo goes straight
+        # back, without the swap's handover (racks-r3-2, the maintainer:
+        # "cut"; redo cuts too).
         def restore_slot_change(subject, original, time)
           state = original.before
           return nil unless state.is_a?(SlotState)
-          fade = original.entry.data[:fade]
-          mode, bars = master_mode(fade)
           built = state.contents.map { |s, content| [s, build_slot_content(s, content)] }
           desc = "swap #{subject.name.inspect} -> #{built.first&.last&.description}"
-          change(:slot, subject.name, time, data: { description: desc, fade: fade }, undoes: original.seq, graph: SlotGraph.new(built.map(&:last), nil)) { |_t|
-            land_slot_swap(built, mode, bars)
+          change(:slot, subject.name, time, data: { description: desc, fade: 0 }, undoes: original.seq, graph: SlotGraph.new(built.map(&:last), nil)) { |_t|
+            land_slot_swap(built, :cut, nil)
           }
         end
 
@@ -348,23 +391,21 @@ module MB
           RackSubject.new(c.subject) if c.kind == :rack
         end
 
-        # What the instances of the rack +subject+ names play (a SlotState
-        # of [Slot, the Rack applied]).
+        # What the instances of the rack +subject+ names play, stopped
+        # players' too (a SlotState of [Slot, the Rack applied]).
         def rack_undo_snapshot(subject)
-          SlotState.new(contents: rack_instance_slots(subject.name).map { |sl| [sl, sl.latest.instance || sl.instance_of] })
+          SlotState.new(contents: rack_instance_slots(subject.name, stopped: {}.compare_by_identity).map { |sl| [sl, sl.latest.instance || sl.instance_of] })
         end
 
         # Puts the rack's instances back to the definitions they played
-        # before +original+ (rebuilt), handed over as the swap was.
+        # before +original+ (rebuilt) by a cut (see #restore_slot_change).
         def restore_rack_change(subject, original, time)
           state = original.before
           return nil unless state.is_a?(SlotState)
-          fade = original.entry.data[:fade]
-          mode, bars = master_mode(fade)
           built = state.contents.filter_map { |sl, applied| applied && [sl, build_instance_content(sl, applied)] }
           desc = "rack #{subject.name.inspect} -> #{built.length} instance#{'s' if built.length != 1}"
-          change(:rack, subject.name, time, data: { description: desc, fade: fade }, undoes: original.seq, graph: SlotGraph.new(built.map(&:last), nil)) { |_t|
-            land_slot_swap(built, mode, bars)
+          change(:rack, subject.name, time, data: { description: desc, fade: 0 }, undoes: original.seq, graph: SlotGraph.new(built.map(&:last), nil)) { |_t|
+            land_slot_swap(built, :cut, nil)
           }
         end
 

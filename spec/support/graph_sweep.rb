@@ -718,6 +718,16 @@ module GraphSweep
         slot.queue(slot.build(->(x) { x.lp4(c.mod(400, 1200)) }), 300, mode: :spill)
         out
       }],
+      # (racks-r3-2: a spill-over's ring cap, as an instrument slot's
+      # second or a swap's ring: sets it, fading the tail on its own frame)
+      ['slot handing over (spill-over, ring cap)', ->(c) {
+        out = c.sig(110).slot(:hand) { |x| x.delay(0.003, feedback: 0.9) }
+        slot = out.owner_slot
+        chain = slot.build(->(x) { x * 0.5 })
+        chain.ring = 0.005
+        slot.queue(chain, 300, mode: :spill)
+        out
+      }],
       ['slot handing over (crossfade)', ->(c) {
         out = c.sig(110).slot(:hand) { |x| x.softclip(0.2, 0.4) }
         slot = out.owner_slot
@@ -775,6 +785,7 @@ module GraphSweep
     'drums with knob settings (live kit knobs)' => 'knob moves are performance (turns, in a take), not the graph',
     'slot handing over (spill-over)' => 'slot swaps are performance (swap commands, in a take), not the graph',
     'slot handing over (crossfade)' => 'slot swaps are performance (swap commands, in a take), not the graph',
+    'slot handing over (spill-over, ring cap)' => 'slot swaps are performance (swap commands, in a take), not the graph',
   }.freeze
 
   # Node classes the sweep doesn't build, with reasons.

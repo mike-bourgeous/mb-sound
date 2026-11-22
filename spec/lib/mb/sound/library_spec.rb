@@ -176,10 +176,7 @@ RSpec.describe MB::Sound::Library do
       expect(rack).to be_a(MB::Sound::Rack)
       expect(rack.kind).to eq(:instrument)
       synth = MB::Sound.preset(:glass_keys, midi: MB::Sound::Notes.new(MB::Sound.seq(MB::Sound::C3).n4))
-      # (a named instrument rack's instance plays in its instance slot, so
-      # defining the rack again swaps it: racks R3)
-      expect(synth).to be_a(MB::Sound::GraphNode::Slot::Output)
-      expect(synth.graph.grep(MB::Sound::Synth).length).to eq(1)
+      expect(synth).to be_a(MB::Sound::Synth)
       expect(render(synth, 10).abs.max).to be > 0.01
       expect(MB::Sound.preset(:dubby)).to be_a(MB::Sound::Rack)
       expect(index.lookup(:clip, :walk_a).call.events.length).to eq(4)

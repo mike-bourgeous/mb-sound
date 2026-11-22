@@ -309,7 +309,7 @@ RSpec.describe('rack slots') do
 
   describe 're-defining a named rack' do
     it 'swaps every playing instance on the next bar, keeping its knobs and ports, as one undo step' do
-      s.arack(:dub, side: :audio) { |sig, side:| sig * s.knob(:space, 0.5) + side * 0.0 }
+      s.arack(:dub, side: :audio, slot: true) { |sig, side:| sig * s.knob(:space, 0.5) + side * 0.0 }
       session.add(1.constant.then(&s.rack(:dub).with(side: 0.constant)), name: :bass)
       session.add(2.constant.then(&s.rack(:dub).with(side: 0.constant)), name: :keys)
       render(800)
@@ -317,7 +317,7 @@ RSpec.describe('rack slots') do
       render(800)
       expect(render(800).to_a.uniq).to eq([1.25])
 
-      s.arack(:dub, side: :audio) { |sig, side:| sig * s.knob(:space, 0.5) * 2 + side }
+      s.arack(:dub, side: :audio, slot: true) { |sig, side:| sig * s.knob(:space, 0.5) * 2 + side }
       bar = frame_of(1) - 2400
       e = session.journal.changes.last
       expect(e.kind).to eq(:rack)
@@ -336,7 +336,7 @@ RSpec.describe('rack slots') do
     end
 
     it "lands on the exact frame with swap :name, rack, on:, fade: 0, and documents print the new definition" do
-      s.arack(:tone) { |sig| sig * 0.25 }
+      s.arack(:tone, slot: true) { |sig| sig * 0.25 }
       g = 1.constant.then(&s.rack(:tone))
       session.add(g, name: :a)
       render(800)
@@ -346,14 +346,14 @@ RSpec.describe('rack slots') do
       out = render(sw + 100)
       expect(out[sw - 1]).to eq(0.25)
       expect(out[sw]).to eq(0.75)
-      expect(MB::Sound::GraphIO.dump(g, name: 'x')).to include("arack(:tone) { |x|\n  x * 0.75\n}")
+      expect(MB::Sound::GraphIO.dump(g, name: 'x')).to include("arack(:tone, slot: true) { |x|\n  x * 0.75\n}")
     end
 
     it "names the new definition's slots as the old ones were, so swaps find them" do
-      s.arack(:dc) { |sig| sig.slot(:color) { |x| x * 0.25 } }
+      s.arack(:dc, slot: true) { |sig| sig.slot(:color) { |x| x * 0.25 } }
       session.add(1.constant.then(&s.rack(:dc)), name: :a)
       render(800)
-      s.arack(:dc) { |sig| sig.slot(:color) { |x| x * 0.5 } + 1 }
+      s.arack(:dc, slot: true) { |sig| sig.slot(:color) { |x| x * 0.5 } + 1 }
       render(48000 * 2)
       expect(render(800).to_a.uniq).to eq([1.5])
       session.swap_slot(:"dc/color", ->(x) { x * 2 }, on: :now, fade: 0)
@@ -365,8 +365,73 @@ RSpec.describe('rack slots') do
       expect(1.constant.then(&s.arack { |x| x * 2 })).to be_a(MB::Sound::GraphNode::Multiplier)
       s.lrack(:lvl) { |x| x.abs }
       expect(1.constant.then(&s.rack(:lvl))).not_to be_a(MB::Sound::GraphNode::Slot::Output)
-      s.arack(:wrapped) { |x| x * 2 }
+      s.arack(:wrapped, slot: true) { |x| x * 2 }
       expect(1.constant.then(&s.rack(:wrapped))).to be_a(MB::Sound::GraphNode::Slot::Output)
+    end
+
+    # (racks-r3-2, the maintainer 2026-11-21: instance slots "opt in by
+    # default": they cost a copy and a plan boundary)
+    it 'takes slot: true only on named racks making audio, and Rack.instance_slots for every one' do
+      expect { s.arack(slot: true) { |x| x } }.to raise_error(ArgumentError, /named racks/)
+      expect { s.mrack(:m, slot: true) { |x| x } }.to raise_error(ArgumentError, /making audio/)
+      expect { s.arack(:o, out: :notes, slot: true) { |x| x } }.to raise_error(ArgumentError, /making audio/)
+      expect { s.arack(:o, slot: :audio) { |x| x } }.to raise_error(ArgumentError, /true or false/)
+      s.arack(:every) { |x| x * 2 }
+      expect(1.constant.then(&s.rack(:every))).to be_a(MB::Sound::GraphNode::Multiplier)
+      begin
+        MB::Sound::Rack.instance_slots = true
+        expect(1.constant.then(&s.rack(:every))).to be_a(MB::Sound::GraphNode::Slot::Output)
+      ensure
+        MB::Sound::Rack.instance_slots = false
+      end
+      expect(s.rack(:every).slot?).to eq(false)
+      expect(s.racks[:every]).not_to include('instance slots')
+      s.arack(:slotted, slot: true) { |x| x }
+      expect(s.racks[:slotted]).to match(/\Aeffect audio\(x\) -> \S+, in instance slots, /)
+      expect(s.irack(:inst, slot: true) { |n| n.synth { |v| v.gate } }.slot?).to eq(true)
+    end
+
+    it 'leaves instances outside instance slots playing as they were built, saying so in live mode' do
+      s.arack(:plain) { |sig| sig * 0.25 }
+      g = 1.constant.then(&s.rack(:plain))
+      expect(g).not_to be_a(MB::Sound::GraphNode::Slot::Output)
+      session.add(g, name: :a)
+      render(800)
+      allow(MB::Sound).to receive(:live?).and_return(true)
+      expect { s.arack(:plain) { |sig| sig * 0.75 } }.to output(/rack :plain: :a keeps playing the old definition \(only instance slots swap: arack :plain, slot: true/).to_stderr
+      expect(session.journal.changes.map(&:kind)).not_to include(:rack)
+      render(48000 * 2)
+      expect(render(800).to_a.uniq).to eq([0.25])
+      expect(1.constant.then(&s.rack(:plain)).sample(4).to_a.uniq).to eq([0.75]) # (later applications use it)
+    end
+
+    it "refuses swap :name of a rack whose instances playing aren't in instance slots" do
+      s.arack(:plain2) { |sig| sig * 0.25 }
+      session.add(1.constant.then(&s.rack(:plain2)), name: :a)
+      render(800)
+      expect { s.swap(:plain2, s.arack { |x| x * 0.75 }, on: :now) }.to raise_error(ArgumentError, /instances in :a aren't in instance slots.*arack :plain2, slot: true/)
+      expect(s.rack(:plain2).to_ruby).to include('0.25')
+    end
+
+    # (racks-r3-2, the maintainer's "stopped also unless there's a good
+    # reason not to")
+    it 'swaps the instances of stopped players by a cut, so they play the new definition when resumed' do
+      s.arack(:st, slot: true) { |sig| sig * 0.25 }
+      session.add(1.constant.then(&s.rack(:st)), name: :a)
+      render(800)
+      session.remove(:a)
+      render(800)
+      expect(session.stopped.keys).to eq([:a])
+      s.arack(:st, slot: true) { |sig| sig * 0.75 }
+      render(800)
+      expect(session.resume(:a, at: :now)).to eq(:a)
+      out = render(1600)
+      expect(out[-800..].to_a.uniq).to eq([0.75])
+      expect(out.to_a.uniq - [0.0, 0.75]).to be_empty # (the old definition never plays again)
+
+      session.undo(on: :now)
+      render(800)
+      expect(render(800).to_a.uniq).to eq([0.25])
     end
   end
 
@@ -379,7 +444,7 @@ RSpec.describe('rack slots') do
       MB::Sound::Session.with_context(session: sess) {
         clip = s.events([0r, 1/2r, 60, 0.8], [1/4r, 1/8r, 64, 0.8], length: 1)
         if rack
-          s.irack(:keys) { |n| n.synth(voices: 4) { |v| v.gate * 0.25 } }
+          s.irack(:keys, slot: true) { |n| n.synth(voices: 4) { |v| v.gate * 0.25 } }
           sess.add(clip.then(&s.rack(:keys)), name: :lead)
           s.swap(:keys, s.irack { |n| n.synth(voices: 4) { |v| v.gate * 0.5 } }, at: s.bar(1, beat: 1.5), on: :now, fade: fade)
         else
@@ -413,12 +478,65 @@ RSpec.describe('rack slots') do
       expect(x[f.(1/2r)]).to eq(0)
     end
 
+    # A note held across the swap: the old content rings out for
+    # INSTRUMENT_RING_SECONDS (then fades over Master::TAIL_FADE_SECONDS),
+    # or for ring: (racks-r3-2, the maintainer: "probably not more than 1s
+    # ringout" while composing; longer, live, by asking)
+    def ring_render(ring: nil, rack: false)
+      sess = MB::Sound::Session.new(master_gain: 1, output: MB::Sound::NullOutput.new(channels: 1, sleep: false, buffer_size: 800),
+                                    transport: MB::Sound::Sequence::Transport.new(bpm: 120), channels: 1, buffer_size: 800, realtime: false, raise_errors: true)
+      MB::Sound::Session.with_context(session: sess) {
+        clip = s.events([0r, 2r, 60, 0.8], length: 2)
+        if rack
+          s.irack(:rkeys, slot: true) { |n| n.synth(voices: 2) { |v| v.gate * 0.25 } }
+          sess.add(clip.then(&s.rack(:rkeys)), name: :lead)
+          s.swap(:rkeys, s.irack { |n| n.synth(voices: 2) { |v| v.gate * 0.5 } }, at: s.bar(1, beat: 1.5), on: :now, ring: ring)
+        else
+          sess.add(clip.notes.slot(:keys) { |n| n.synth(voices: 2) { |v| v.gate * 0.25 } }, name: :lead)
+          sess.swap_slot(:"lead/keys", ->(n) { n.synth(voices: 2) { |v| v.gate * 0.5 } }, start_time: 1/8r, ring: ring)
+        end
+        out = []
+        (48000 * 4 / 800).times { out << sess.process_buffer(800)[0].dup }
+        SpecBuffers.join(out)
+      }.tap { sess.close }
+    end
+
+    it 'rings the old voices out for a second at most, or for ring:' do
+      sw = (1/8r * 96000).round
+      x = ring_render
+      expect(x[sw + 47_999]).to eq(0.25)
+      expect(x[sw + 48_000 + 4800]).to eq(0) # (faded over TAIL_FADE_SECONDS from 1 s)
+      expect(ring_render(rack: true)[sw + 48_000 + 4800]).to eq(0)
+
+      y = ring_render(ring: 2.seconds)
+      expect(y[sw + 96_000 - 1]).to eq(0.25)
+      expect(y[sw + 96_000 + 4800]).to eq(0)
+      expect(ring_render(ring: 1.bar)[sw + 96_000 - 1]).to eq(0.25) # (a bar at 120 BPM)
+      expect { ring_render(ring: -1) }.to raise_error(ArgumentError, /ring: is a length of time/)
+    end
+
     it 'cuts the old voices with fade: 0' do
       x = persist_render(800, fade: 0)
       f = ->(pos) { (pos * 96000).round }
       expect(x[f.(1/8r) - 1]).to eq(0.25)
       expect(x[f.(1/8r)]).to eq(0)
       expect(x[f.(1/4r)]).to eq(0.5)
+    end
+  end
+
+  # (racks-r3-2, the maintainer: undo of a swap's handover "cut")
+  describe 'undo' do
+    it 'goes straight back to the old content by a cut, whatever the handover was' do
+      session.add(1.constant.slot(:d) { |x| x * 0.25 }, name: :p)
+      render(800)
+      session.command('swap') { session.swap_slot(:"p/d", ->(x) { x * 0.75 }, on: :now, fade: 1/8r) }
+      render(48000)
+      expect(render(800).to_a.uniq).to eq([0.75])
+      e = session.undo(on: :now)
+      out = render(1600)
+      expect(out.to_a.uniq).to eq([0.25]) # (from the landing frame on: no crossfade back)
+      expect(session.racks.slots_for(:"p/d").first.chains.length).to eq(1)
+      expect(e).not_to be_nil
     end
   end
 

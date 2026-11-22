@@ -638,6 +638,17 @@ module MB
       # graph` earlier, or nothing yet) replaces its graph, or starts it,
       # as `bg :x, graph` at the swap's launch point.  See Session#swap.
       #
+      # A rack slot's name swaps the slot's content (racks R3; see
+      # Session#swap_slot): the old content spills over (an instrument
+      # slot's rings for a second at most, +ring:+ a length for longer),
+      # crossfades over +fade:+ bars, or is cut (`fade: 0`).  A named
+      # rack's name defines the rack again from a rack or block, and its
+      # instances in instance slots (`arack :dub, slot: true`) swap the same
+      # way (see Session::Racks#redefine).
+      #
+      #     swap :"dub/color", arack { |s| s.diode(900) }, fade: 1.n8
+      #     swap :"keys/inst", irack { |n| n.synth { |v| v.hz.triangle * v.amp_env } }, ring: 4.bars
+      #
       #     bg :hum, 55.hz.saw.lp4(300)
       #     swap :hum, 55.hz.square.lp4(500)        # the new hum on the next bar
       #
@@ -651,17 +662,18 @@ module MB
       #     beat2 = grid(16, kick: 'x..x..x.', snare: '....x..x')
       #     swap :drums, beat => beat2               # swaps each matching row
       #     swap :drums, beat2                       # the same: rows by name (rows it lacks go silent)
-      def swap(name, clips = nil, at: nil, on: nil, in: nil, fade: nil, **pairs, &block)
+      def swap(name, clips = nil, at: nil, on: nil, in: nil, fade: nil, ring: nil, **pairs, &block)
         point = LaunchPoint.of(binding) or return nil
         if name.is_a?(Symbol) && pairs.empty? && Internal.slot_name?(name)
           # A rack slot (racks R3): its content swaps on the launch point
-          return swap_slot_command(name, clips || block, point, fade)
+          return swap_slot_command(name, clips || block, point, fade, ring)
         end
         if name.is_a?(Symbol) && pairs.empty? && Session.existing&.names&.kind(name) == :rack
           # A named rack (racks R3): defined again, its instances swap
-          return swap_rack_command(name, clips || block, point, fade)
+          return swap_rack_command(name, clips || block, point, fade, ring)
         end
         raise ArgumentError, "swap #{name.inspect}: fade: goes with rack slots (swap :\"dub/color\", arack { ... }, fade: 1.n8)" unless fade.nil?
+        raise ArgumentError, "swap #{name.inspect}: ring: goes with rack slots (swap :\"keys/inst\", irack { ... }, ring: 4.bars)" unless ring.nil?
         if name.is_a?(Hash) && clips.nil? && pairs.empty?
           # (ux-notes-1: the maintainer's `swap({bowl: riff})`, a Hash in
           # parentheses, which Ruby passes as the name)
@@ -734,9 +746,9 @@ module MB
       end
 
       # The console side of #swap for a rack slot (see Session#swap_slot).
-      def swap_slot_command(name, content, point, fade)
+      def swap_slot_command(name, content, point, fade, ring)
         session_command(name, label: "swap #{name.inspect}", kind: :slot) { |session, time|
-          session.swap_slot(name, content, at: point, fade: fade, start_time: point.given? ? nil : time)
+          session.swap_slot(name, content, at: point, fade: fade, ring: ring, start_time: point.given? ? nil : time)
           name
         }
       end
@@ -746,17 +758,26 @@ module MB
       # block taking what the rack takes) becomes rack +name+'s definition,
       # and its instances playing swap to it on the launch point (see
       # Session::Racks#redefine).
-      def swap_rack_command(name, content, point, fade)
+      def swap_rack_command(name, content, point, fade, ring)
         session = Session.current
         old = session.racks.fetch(name)
         rack = case content
-               when Rack then content.composed? ? raise(ArgumentError, "swap #{name.inspect}: a composed rack (>>) can't be a named rack's definition") : content.renamed(name)
-               when Proc then Rack.new(name, in: old.input.type, out: old.out, constructor: old.constructor, block: content, ports: old.ports.transform_values(&:type), quiet: true)
+               when Rack then content.composed? ? raise(ArgumentError, "swap #{name.inspect}: a composed rack (>>) can't be a named rack's definition") : content.renamed(name, slot: old.slot? || content.slot?)
+               when Proc then Rack.new(name, in: old.input.type, out: old.out, constructor: old.constructor, block: content, ports: old.ports.transform_values(&:type), quiet: true, slot: old.slot?)
                else raise ArgumentError, "swap #{name.inspect}: the rack's new definition is a rack or a block (got #{content.class})"
                end
+        held = session.racks.unslotted_players(name)
+        if !held.empty? && session.send(:rack_instance_slots, name).empty?
+          # (racks-r3-2: instance slots are opt-in; a swap that couldn't
+          # reach any instance playing changes nothing)
+          return MB::Sound.live_error(ArgumentError.new(
+            "swap #{name.inspect}: its instances in #{held.map(&:inspect).join(', ')} aren't in instance slots, so they can't swap " \
+            "(define it with #{old.constructor} #{name.inspect}, slot: true, then play it again)"
+          ))
+        end
         context = Session.context
         last = session.journal.changes.last&.seq || -1
-        session.racks.redefine(rack, label: "swap #{name.inspect}", at: point, fade: fade, start_time: point.given? ? nil : context&.time)
+        session.racks.redefine(rack, label: "swap #{name.inspect}", at: point, fade: fade, ring: ring, start_time: point.given? ? nil : context&.time)
         session.journal.changes.reverse.find { |c| c.seq > last && c.kind == :rack && c.subject == name } || rack
       end
       private :swap_rack_command
