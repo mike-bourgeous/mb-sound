@@ -360,7 +360,13 @@ module MB
             return
           end
 
-          @port = Ports.find(@target, :out)
+          @port = begin
+            Ports.find(@target, :out)
+          rescue Ports::NotFound
+            # (a port of this process named on purpose: a loopback into our
+            # own MIDI input, e.g. a library synth playing `midi`)
+            Ports.find(@target, :out, own: true)
+          end
           @output = Destination.output_for([@port.api, @port.name]) {
             if @port.api == :jack
               Output.new(api: :jack).tap { |o| FastAudio.jack_connect(o.port, @port.name) }

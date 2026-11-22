@@ -102,6 +102,20 @@ RSpec.describe('MIDI out on JACK (timing)', :aggregate_failures) do
     [got.map { |f, b| [delta(lag, f) & 0xffff_ffff, b.bytes] }, sent, dest.output.stats, out.stats, lag]
   end
 
+  it "plays to one of this process's own ports when named (a loopback into the Session's MIDI input)" do
+    inp = open(MB::Sound::MIDI::Input.new) # our own midi_in
+    dest = MB::Sound.midi_out("#{ENV['JACK_CLIENT_NAME']}:midi_in")
+    expect(dest.port.own).to eq(true)
+    dest.test(64, length: 0.05)
+    got = []
+    deadline = MB::U.clock_now + 2
+    while got.length < 2 && MB::U.clock_now < deadline
+      got.concat(inp.read_raw.map { |_, b| b.bytes })
+      sleep 0.01
+    end
+    expect(got).to eq([[0x90, 64, 100], [0x80, 64, 0]])
+  end
+
   [120, 137].each do |bpm|
     it "sends each note on the JACK frame of its audio plus the offset, exactly, at five buffer sizes (#{bpm} BPM)" do
       clip = MB::Sound.seq(MB::Sound::C3, MB::Sound::E3, MB::Sound::G3, MB::Sound::B3, MB::Sound::D4, nil, MB::Sound::A3, MB::Sound::F3).n32
