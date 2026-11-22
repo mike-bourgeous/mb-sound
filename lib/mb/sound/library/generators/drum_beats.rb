@@ -27,10 +27,10 @@ module MB
                  '(track :drums, kit(:acoustic); bg :drums, L.gen.beat.rock)',
           params: BEAT_PARAMS.(11, 0.5) do |seed:, energy:, swing:|
           beats(16, hold: 2, over: 4, energy: energy, swing: swing, seed: seed) do
-            kick [1, 0, 0, 0, 0, 0, 0.2, 0, 1, 0, 0.45, 0, 0, 0, 0.12, 0], keep: [0, 8], drift: 0.08
+            kick [1, 0, 0, 0.1, 0, 0, 0.25, 0, 1, 0, 0.45, 0, 0, 0.1, 0.15, 0], keep: [0, 8], drift: 0.08
             snare [0, 0, 0, 0, 1, 0, 0, 0] * 2, keep: [4, 12]
-            row :ghost, [0, 0, 0, 0.08, 0, 0, 0.1, 0, 0, 0.08, 0, 0.1, 0, 0, 0, 0.15], note: 38, level: 0.25, drift: 0.1
-            hat [1, 0.1, 0.95, 0.1] * 4, keep: [0, 4, 8, 12], level: 0.7, drift: 0.05
+            row :ghost, [0, 0.08, 0, 0.12, 0, 0, 0.15, 0.08, 0, 0.12, 0, 0.15, 0, 0.08, 0, 0.2], note: 38, level: 0.25, drift: 0.1
+            hat [1, 0.2, 0.95, 0.2] * 4, keep: [0, 4, 8, 12], level: 0.7, drift: 0.05
             half_open_hat [0] * 14 + [0.3, 0], level: 0.6
             crash [0.08] + [0] * 15, level: 0.7
             fill every: 8, last: 1.beat, energy: true, snare: 0.55, low_floor_tom: 0.3
@@ -39,7 +39,7 @@ module MB
 
         beat :pop, kit: :acoustic, tags: %i[drums backbeat four_on_the_floor],
           about: 'A four-on-the-floor pop beat, 100-128 BPM: kick on every beat, snare on 2 and 4, closed hats on the beat and half-open hats on the offbeats; ' \
-                 'energy adds the offbeat hats, sixteenths, a clap on the snare, tambourine eighths, and fills ' \
+                 'energy adds the offbeat hats, sixteenths, a clap on the snare, tambourine eighths, shaker sixteenths, and fills ' \
                  '(track :drums, kit(:acoustic); bg :drums, L.gen.beat.pop)',
           params: BEAT_PARAMS.(12, 0.5) do |seed:, energy:, swing:|
           beats(16, hold: 2, over: 4, energy: energy, swing: swing, seed: seed) do
@@ -49,6 +49,7 @@ module MB
             hat [1, 0.12, 0, 0.12] * 4, keep: [0, 4, 8, 12], level: 0.6, drift: 0.05
             half_open_hat [0, 0, 0.65, 0] * 4, level: 0.55
             tambourine [0.3, 0, 0.3, 0] * 4, level: 0.45, drift: 0.1
+            shaker [0, 0.2] * 8, level: 0.35, drift: 0.1
             fill every: 8, last: 1.beat, energy: true, snare: 0.5
           end
         end

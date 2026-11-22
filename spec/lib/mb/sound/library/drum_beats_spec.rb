@@ -50,6 +50,31 @@ RSpec.describe MB::Sound::Library::Generators, 'drum beats', :aggregate_failures
     end
   end
 
+  # The maintainer, 2026-11-22: "energy acted kind of like a density
+  # control on the techno beat": on every beat energy is density with the
+  # techno beat's law, on any kit (velocity, hat openness, and cymbal
+  # choice are other knobs).
+  it 'treats energy as density, as on the techno beat: anchors near 0, as written at 0.5, more hits at every step up, a wide range' do
+    levels = [0.01, 0.25, 0.5, 0.75, 1.0]
+    beats.each do |e|
+      per_bar = levels.map { |en| [3, 4, 5].sum { |sd| c = e.call(seed: sd, energy: en); (0...7).sum { |cy| hits(c, cy).length } } / 21.0 }
+      per_bar.each_cons(2) { |a, b| expect(b).to be > a, "#{e.name}: #{levels.zip(per_bar.map { |x| x.round(1) }).to_h}" }
+      expect(per_bar.last / per_bar.first).to be >= 2.2, "#{e.name}: #{per_bar.map { |x| x.round(1) }}"
+      # near 0 only the anchors play: the same hits for every seed
+      # (the law scales probabilities by 2 x energy: at 0.01 a written 0.5
+      # still plays once in a hundred bars; at 0.001, once in a thousand)
+      low = [3, 4, 5].map { |sd| c = e.call(seed: sd, energy: 0.001); (0...7).flat_map { |cy| hits(c, cy).map { |h| [cy, *h] } } }
+      common = low.reduce(:&)
+      low.each { |l| expect((l - common).length).to be <= 2, "#{e.name}: #{(l - common).inspect} beyond the anchors near 0" }
+      # 0.5 plays the rows as written (the default)
+      expect((0...8).map { |cy| hits(e.call(seed: 3), cy) }).to eq((0...8).map { |cy| hits(e.call(seed: 3, energy: 0.5), cy) })
+      # energy changes hits, never their velocities
+      a = e.call(seed: 3, energy: 0.3).events_for(2).to_h { |x| [[x.start, x.value], x.velocity] }
+      b = e.call(seed: 3, energy: 0.9).events_for(2).to_h { |x| [[x.start, x.value], x.velocity] }
+      a.each { |k, v| expect(b[k]).to eq(v), "#{e.name}: the velocity of #{k.inspect} moved with energy" }
+    end
+  end
+
   it 'plays a sensible number of hits per bar per role, and the backbeat where its genre puts it' do
     beats.each do |e|
       [0.1, 0.5, 1.0].each do |en|
@@ -135,13 +160,12 @@ RSpec.describe MB::Sound::Library::Generators, 'drum beats', :aggregate_failures
     SF2Writer.drum_kit(File.join(dir, 'Black_Pearl_Spec.sf2'), keys: 35..61, name: 'Black Pearl')
     MB::Sound::Sampler::FontPath.only = [dir]
     kit = MB::Sound.sf2('Black_Pearl_Spec', preset: [0, 0])
-    keys = kit.regions.map { |r| r.keys[0] }.uniq
+    plays = ->(k) { kit.regions.any? { |r| k.between?(*r.keys) } }
     beats.each do |e|
       c = e.call(seed: 3, energy: 1.0)
       written = (0...8).flat_map { |cy| hits(c, cy).map(&:last) }.uniq
       written.each do |k|
-        played = kit.drum_map.remap.fetch(k, k)
-        expect(keys).to include(played), "#{e.name}: #{role_of(k)} (#{k}) plays #{played.inspect} on the acoustic layout"
+        expect(plays.(k)).to eq(true), "#{e.name}: #{role_of(k)} (#{k}) plays nothing on the acoustic layout (#{kit.drum_map.remap[k].inspect})"
         expect(MB::Sound::Drums::TR909::GM_MAP.values.flatten).to include(k), "#{e.name}: #{role_of(k)} (#{k}) on the 909"
       end
       MB::Sound.bpm(120)
