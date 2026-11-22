@@ -531,6 +531,23 @@ RSpec.describe('session fuzzing') do
     end
   end
 
+  # (fixes-16's new draw, seed 794890 shrunk: a render that stopped early
+  # inside a tempo ramp caps a master chain's tail at its end bar; the cap
+  # was estimated at the tempo where the render stopped, 230400 frames at
+  # 367 and 230382 at 800.  Session#frames_to_position steps the ramp's
+  # cells: 230292, where the end bar lands when a sound plays up to it.)
+  it 'caps a tail at the end bar inside a tempo ramp at any buffer size (seed 794890)' do
+    lines = [
+      'at_bar(3, beat: 3) { master { |m| m.softclip(0, 0.9) } }',
+      'at_bar(3, beat: 9/2r) { tempo 180, over: 1, on: :now }',
+    ]
+    song = SessionFuzz::Song.new(header: ['bpm 150'], lines: lines, bars: 3)
+    expect(SessionFuzz.check(:buffer_size, song)).to be_nil
+    playing = SessionFuzz::Song.new(header: ['bpm 150'], lines: ['bg :x, 0.000001.constant', *lines], bars: 3)
+    expect(SessionFuzz.render(song.code, 3, buffer_size: 800)[0].length).to eq(230_292)
+    expect(SessionFuzz.render(playing.code, 3, buffer_size: 367)[0].length).to eq(230_292)
+  end
+
   # (batch 16's soak, fix-fuzz-1106: the parity-1 kit swap of t3's first
   # grid landed while the flow played :s2, whose beats clip has no kit
   # rows: a user error by design, ClipSwaps#kit_swap_mapping; kit swaps
