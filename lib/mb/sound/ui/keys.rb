@@ -85,6 +85,7 @@ module MB
           doc 'Alt-Up Alt-Down', 'step the number at the cursor and run the line again (UI::NudgeKeys)'
           doc 'Alt-S-Up/Down Ctrl-Alt-Up/Down', 'a fine step (one more decimal), a coarse step (10)'
           doc 'Alt-S-Left/Right', 'the cursor to the previous, next number'
+          doc 'Tab Down (L. list)', 'into the library list typing L. shows (UI::LibraryPopup): Up Down PgUp PgDn move, Enter or Tab put it on the line, Esc back; until then Enter runs the line, Up is history'
           doc 'Ctrl-C Ctrl-Z', 'interrupt, hide the tiles'
         end
 
@@ -192,6 +193,7 @@ module MB
           ['Ctrl-S-Del', 'delete to the end of the line', 'delete to the end of the line'],
           ['Alt-Up Alt-Down', 'step the number at the cursor, run the line again (Esc then Up/Down within 0.5 s too)', 'step the number at the cursor, run the line again (Esc then Up/Down within 0.5 s too)'],
           ['Alt-S-Left/Right', 'the cursor to the previous, next number', 'the cursor to the previous, next number'],
+          ['Tab Down (L. list)', 'into the library list (Enter while typing runs the line)', 'into the library list (Enter while typing runs the line)'],
           ['Ctrl-C', 'interrupt', 'interrupt'],
           ['Ctrl-Z', 'nothing (the band stays; ui off)', 'nothing (Reline ignores it)'],
         ].freeze

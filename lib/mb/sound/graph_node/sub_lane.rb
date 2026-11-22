@@ -599,14 +599,24 @@ module MB
         # lane event, so without one in the rest of the block there's no
         # split (a piano layer looping a silent stretch of its sample would
         # otherwise split every buffer crossing a grid point, which takes its
-        # Tees out of lockstep).
+        # Tees out of lockstep).  Nor can an envelope that can't land before
+        # the grid point (Envelope#busy_through?: a SoundFont layer's long
+        # release), so without a lane event before it the piece runs on to
+        # the next grid point (sf2-cost-1).
         def sleep_candidate(a, pos, o, count)
           g = @sleep_run.split_point(pos, o, count)
           return count if g >= count
 
-          if a[:idle].any? { |n| n.respond_to?(:sustaining?) && n.sustaining? }
+          idle = a[:idle]
+          if idle.any? { |n| n.respond_to?(:sustaining?) && n.sustaining? }
             from = @clock_lag == 0 ? @reader.cursor : @lane.advance(@reader.cursor, @clock_lag, @rate)
             return count if @lane.first_pending_time(from, @lane.advance(from, count - o, @rate)).nil?
+          elsif idle.any? { |n| n.respond_to?(:busy_through?) && n.busy_through?(g - o) }
+            from = @clock_lag == 0 ? @reader.cursor : @lane.advance(@reader.cursor, @clock_lag, @rate)
+            if @lane.first_pending_time(from, @lane.advance(from, g - o, @rate)).nil?
+              g += Synth::SKIP_GRID
+              return g >= count ? count : g
+            end
           end
 
           g

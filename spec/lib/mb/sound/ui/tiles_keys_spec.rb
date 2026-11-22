@@ -303,6 +303,31 @@ RSpec.describe('UI::Tiles KEYS mode', :aggregate_failures) do
     expect(out.sounding).to be_empty
   end
 
+  # (ux-friction-3, the maintainer: "I keep forgetting that \"arm\" is a
+  # thing")
+  it 'flashes arm :name on entering KEYS while nothing is armed (the default patch plays), and nothing once a track is armed' do
+    monitor = true
+    asked = 0
+    out.define_singleton_method(:ensure_monitor) { asked += 1; monitor }
+    start
+    flashes = []
+    allow(@tiles).to receive(:flash).and_wrap_original { |m, text, *rest| flashes << text; m.call(text, *rest) }
+    @tiles.keys
+    expect(@term.wait_for(' KEYS ')).to eq(true)
+    expect(wait_until { flashes.include?(MB::Sound::UI::Tiles::KEYS_UNARMED) }).to eq(true), flashes.inspect
+    expect(MB::Sound::UI::Tiles::KEYS_UNARMED).to include('arm :name')
+    expect(@term.wait_for('arm :name plays a track')).to eq(true), @term.text
+    @term.write("\x1d")
+    expect(@term.wait_for(' NAV ')).to eq(true)
+    flashes.clear
+    monitor = false # (a track armed: the monitor rings out)
+    before = asked
+    @term.write("\x1d")
+    expect(wait_mode(@tiles, :grab)).to eq(true)
+    expect(wait_settled(@tiles) { asked > before }).to eq(true)
+    expect(flashes).not_to include(MB::Sound::UI::Tiles::KEYS_UNARMED)
+  end
+
   # (Wall-clock timing: a realtime Session and typed keys.  At 240 bpm a
   # loaded check-mode run once typed two keys a 1 s bar apart, so the
   # phrase was one note; at 120 bpm a bar is 2 s.)
