@@ -59,8 +59,10 @@ module MB
       # ui.focus, layouts' pane and tabs lines, the palette) takes these,
       # and `ui.panes` lists them beside the name.  The maintainer,
       # 2026-11-21, after closing the help pager and not finding its name:
-      # ":pager should be an alias".
-      PANE_ALIASES = { pager: :page }.freeze
+      # ":pager should be an alias"; and of the library picker, titled
+      # "library" on screen, ":library should be an alias for it" (the
+      # `help :library` topic is another namespace).
+      PANE_ALIASES = { pager: :page, library: :picker }.freeze
       MB::Term::Viewports.pane_aliases = PANE_ALIASES
 
       # Every pane there is (`ui.panes`): built-in, defined with `pane`,

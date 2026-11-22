@@ -93,6 +93,36 @@ RSpec.describe('UI listings', :aggregate_failures) do
     term&.close
   end
 
+  # (the maintainer, 2026-11-21: the picker is titled "library" on screen,
+  # ":library should be an alias for it"; `help :library` is a help topic,
+  # another namespace)
+  it 'takes :library for the picker everywhere a pane name goes, beside :pager, and did-you-means a mistyped one' do
+    expect(ui::PANE_ALIASES).to eq(pager: :page, library: :picker)
+    expect(ui.pane_catalog[:picker].aliases).to eq([:library])
+    expect(ui.pane_catalog.to_s).to match(/picker, library/)
+    expect(ui.pane_catalog.names).not_to include(:library)
+    expect(ui.layout_table.map(&:first)).not_to include(:library)
+    expect(MB::Term::Viewports.layout(:alias_test2, focus: :library) { tabs :library, :scope, active: :library }.panes).to eq(%i[picker scope])
+
+    term = UIHelpers::FakeTerminal.new(40, 120)
+    tiles = ui::Tiles.new(layout: ui.tiles_layout_named(:tiles), input: term.slave, output: term.slave, repl: :none, probe: false,
+                          size: [40, 120], clock: -> { 0.0 }, source: -> { ui_fake_snapshot },
+                          keyboard: ui::Keyboard.new(out: UIHelpers::NullKeyboardOut.new))
+    tiles.start(thread: false)
+    tiles.show(:library)
+    expect(tiles.layout.panes).to include(:picker)
+    tiles.focus(:library)
+    expect(tiles.list.panes.find(&:focused).name).to eq(:picker)
+    tiles.close(:library)
+    expect(tiles.layout.panes).not_to include(:picker)
+    expect(tiles.instance_variable_get(:@flash)&.first).to start_with('closed picker (also :library): ui.undo brings it back')
+    expect { tiles.show(:libary) }.to raise_error(ArgumentError, /\ANo pane :libary \(did you mean :library.*\) \(ui.panes lists them\)/)
+    expect { tiles.jump(:libary) }.to raise_error(ArgumentError, /No pane :libary/)
+  ensure
+    tiles&.stop
+    term&.close
+  end
+
   it 'answers with no screen up' do
     allow(ui).to receive(:screen).and_return(nil)
     l = ui.list
