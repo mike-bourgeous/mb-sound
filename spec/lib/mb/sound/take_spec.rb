@@ -644,6 +644,21 @@ RSpec.describe(MB::Sound::Take) do
     expect(frames).to be_between(192000, 193600)
   end
 
+  # (ux-friction-3: `seek 0` is the start, as seek 1, since the
+  # maintainer asked for it back)
+  it 'replays seek 0 as a seek to the start' do
+    r = MB::Sound::Take::Replay.new(bpm: 120, bar_length: 1r, master_gain: 0.5, fade_in: nil, fade_out: nil, rng: nil, ends: 4r) { |rp|
+      rp.line(0r, [0r], 'bg :x, 0.1.constant')
+      rp.line(2r, [2r], 'seek 0')
+    }
+    seeks = nil
+    allow(MB::Sound::Session).to receive(:new).and_wrap_original { |m, *a, **k|
+      m.call(*a, **k).tap { |s| seeks = -> { s.journal.changes.select { |c| c.kind == :seek }.map(&:to_s) } }
+    }
+    r.render(MB::Sound::NullOutput.new(channels: 2, sleep: false), tail: 0)
+    expect(seeks.call).to eq(['seek 1 landed 3:1'])
+  end
+
   it 'stops a replay that never reaches its end after its length plus EXTRA_SECONDS, or MAX_SECONDS' do
     stub_const('MB::Sound::Take::Replay::EXTRA_SECONDS', 0.5)
     stub_const('MB::Sound::Take::Replay::MAX_SECONDS', 0.25)
