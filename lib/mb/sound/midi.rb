@@ -9,5 +9,6 @@ end
 require_relative 'midi/input'
 require_relative 'midi/output'
 require_relative 'midi/sysex'
+require_relative 'midi/sysex_capture'
 require_relative 'midi/tempo_map'
 require_relative 'midi/midi_file'
