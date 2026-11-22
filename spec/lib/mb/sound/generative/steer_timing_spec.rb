@@ -144,6 +144,31 @@ RSpec.describe('MB::Sound generator steering: when values are read (beats-timing
     expect(got[12..15]).to eq([1.0] * 4)
   end
 
+  it 'decides units a kit reads ahead for early flams at their own timeline positions' do
+    # A clip launched at bar 2 counting from its launch (align: :launch):
+    # unit b of cycle c starts at timeline 1 + c + b/4, where a 2-bar
+    # square is low in bar 2, high in bar 3.  The kit plays flam-marked
+    # notes early, so it reads units ahead of the main read (that read set
+    # no steering origin: it asked the LFO for clip positions as if the
+    # clip started at 0)
+    seen = []
+    s = new_session(bpm: 120)
+    MB::Sound::Session.with_context(session: s) {
+      clip = MB::Sound::Sequence::Clip.generate(1.bar, values: [38], seed: 1, lead: 0, decide: 1.beat, align: :launch,
+                                                params: { busy: 2.bars.lfo.square.at(0.0..1.0) }) { |c, _d, busy:|
+        seen << [c, busy]
+        Array.new(4) { |b| [b * 1r / 4, 1r / 16, 38, 0.2 + 0.6 * busy, { flam: true }] }
+      }
+      seen.clear # (the clip's own events: cycle 0 previewed at build)
+      MB::Sound.bg(:d, MB::Sound.tr909(clip), at: MB::Sound.bar(2))
+      360.times { s.process_buffer }
+    }
+    expect(seen.select { |c, _| c == 0 }.map(&:last).uniq).to eq([0.0])
+    expect(seen.select { |c, _| c == 1 }.map(&:last).uniq).to eq([1.0])
+  ensure
+    s&.close
+  end
+
   describe 'with constant values' do
     # Plain numbers take the unsteered path, unchanged by this branch: a
     # knob resting on the same number (exact in float32) must give the same
