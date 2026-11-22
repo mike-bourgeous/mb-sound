@@ -108,6 +108,15 @@ RSpec.describe(MB::Sound::Session::ClipSwaps) do
     expect { session.swap(:beat, MB::Sound.grid(16, kick: 'x...')) }.to raise_error(ArgumentError, /: `bg :beat, kit` builds the track's patch for the kit's rows/)
   end
 
+  # (the maintainer's take, 2026-11-21: `swap :acid, L.gen.acid_rhythm` with
+  # no :acid said only "No background player :acid is playing or stopped")
+  it 'says what plays, the near name, and how to start a player swap found nothing for' do
+    session.add(bass.number, name: :drums)
+    run(800)
+    expect { session.swap(:acid, bass2) }.to raise_error(ArgumentError, /\ANo background player :acid is playing or stopped \(playing or stopped: :drums\); bg :acid, clip starts one\z/)
+    expect { session.swap(:drum, bass2) }.to raise_error(ArgumentError, /\(did you mean drums\?\); bg :drum, clip starts one/)
+  end
+
   it 'swaps in a transformed Kit (parity-1: Kits transform per row)' do
     beat = MB::Sound.grid(16, kick: 'x...', snare: '..x.', closed_hat: 'xx..').loop
     session.add(beat[:kick].gate + beat[:snare].gate * 2 + beat[:closed_hat].gate * 4, name: :drums)

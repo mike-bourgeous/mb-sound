@@ -290,6 +290,8 @@ RSpec.describe(MB::Sound::MIDI::Transform::Echo, :midi_transforms) do
     expect { one_note.echo(1/4r, 1, scale: :nope) }.to raise_error(ArgumentError, /Unknown scale/)
     expect { one_note.echo(1/4r, 1, jump: :nope) }.to raise_error(ArgumentError, /jump/)
     expect { one_note.echo(1/4r, 1, gate: -1) }.to raise_error(ArgumentError, /gate/)
+    # (the maintainer's take, 2026-11-21: an LFO as the pitch step)
+    expect { one_note.echo(1/4r, 3, pitch: 3.bars.lfo.at(4)) }.to raise_error(ArgumentError, /fixed as each note is played, so a signal can't move it \(got 3\.bars\.hz\.lfo\.at\(4\)\): give a number/)
   end
 
   describe 'entry points' do
