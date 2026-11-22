@@ -957,6 +957,37 @@ module MB
         idle? || stage == STAGE_ENDED || (stage == STAGE_SUSTAIN && @state[STATE_LEVEL] == 0)
       end
 
+      # True if this envelope can't become #idle? or #sleep_ready? within
+      # the next +frames+ samples unless an input event (a gate edge, a
+      # trigger, a choke) comes first: it is in a segment whose time is a
+      # fixed length (not a node) and more than +frames+ samples of that
+      # segment remain (a segment stays a segment until it lands, and only
+      # landing can make it idle).  Synth lanes ask it before splitting a
+      # block at a grid point where they might fall asleep, so a lane
+      # waiting out a long release (SoundFont kits release one-shots over
+      # 100 s) isn't split at every grid point (sf2-cost-1).  Never true
+      # when unsure (a time node of unknown range), so a lane that may sleep
+      # is still split.
+      def busy_through?(frames)
+        return false unless @state[STATE_STAGE] == STAGE_SEGMENT && @names
+
+        seg = @state[STATE_SEGMENT].to_i
+        name = @names[seg] or return false
+        t = min_segment_samples(name) or return false
+        t *= @state[STATE_RELEASE_SCALE] if @release_node && seg >= @release_node
+        # (a margin for single-precision time products)
+        Envelope.length_samples(t) * 0.999 - @state[STATE_POSITION] > frames + 2
+      end
+
+      # The shortest the segment named +name+ can be, in samples, or nil if
+      # unknown (see #busy_through?): its fixed length.
+      def min_segment_samples(name)
+        time = @times[name]
+        return nil if time.nil? || time.node?
+
+        time.constant_samples(@sample_rate)
+      end
+
       # True when a one-shot has finished (see the class description).
       def ended?
         @state[STATE_STAGE] == STAGE_ENDED
