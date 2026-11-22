@@ -290,6 +290,37 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
       expect(plain.looped.stretch(2, mode: :paul).data(0)).not_to eq(plain.stretch(2, mode: :paul, wrap: false).data(0))
     end
 
+    it 'reads the loop point as a circle for its attack: a cut from a loud end into a quieter pluck' do
+      # A loud bass to the end, cut by a click whose most lies in the
+      # last samples (where no frame of one pass reaches), into a quieter
+      # pluck: a bass loop's own first attack.  The loop point needed a
+      # rise from the end's frames to the start's alone, found none, and
+      # the looped stretch smeared the pluck (stretch-attacks-1: 2 dB
+      # lower over its first 10 ms here, 3 dB on a real bass loop)
+      n = 48_040
+      tt = Numo::DFloat.new(n).seq / 48000
+      x = Numo::NMath.sin(tt * (2 * Math::PI * 55)) * (tt / 0.2).clip(0, 1) * 0.5
+      x += Numo::NMath.sin(tt * (2 * Math::PI * 220)) * Numo::NMath.exp(-tt / 0.005) * 0.2
+      k = Numo::DFloat.new(48).seq
+      click = Numo::NMath.sin(k * (2 * Math::PI * 3000 / 48000.0)) * (0.5 - 0.5 * Numo::NMath.cos(k * (2 * Math::PI / 48))) * 0.4
+      x[-36..] += click[0...36]
+      x[0...12] += click[36..]
+      s = MB::Sound::Sample[Numo::SFloat.cast(x)].looped
+      expect(s.onsets(wrap: true)).to eq([0])
+      [1.285, 0.8].each do |r|
+        d = Numo::DFloat.cast(s.stretch(r, mode: :spectral).data(0))
+        expect(20 * Math.log10(rms(d[0...480]) / rms(x[0...480]))).to be_within(0.5).of(0), "ratio #{r}"
+        expect((d[0...240] - x[0...240]).abs.max).to be < 0.02, "ratio #{r}"
+      end
+      # (an attack placed within a window of the loop point is the loop
+      # point's; one before it is not found twice)
+      y = x.dup
+      y[-36..] -= click[0...36]
+      y[0...12] -= click[36..]
+      y[200...248] += click
+      expect(MB::Sound::Sample[Numo::SFloat.cast(y)].looped.onsets(wrap: true)).to eq([0])
+    end
+
     it 'stretches for loop players as a loop' do
       player = MB::Sound::GraphNode::LoopPlayer
       expect(player.loop_stretch({ mode: :spectral })).to eq({ mode: :spectral, wrap: true })
