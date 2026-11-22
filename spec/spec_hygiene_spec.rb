@@ -11,6 +11,13 @@ RSpec.describe('spec hygiene') do
       'joins buffers in quadratic time (each step copies the growing result: 12000 64-sample buffers took 2.2 s)',
       'SpecBuffers.join(list) in specs, first.concatenate(*rest) in lib',
     ],
+    [
+      # (fixes-16: library/drum_beats_spec compared a set saved twice as
+      # text, a flake whenever the two saves fell in different seconds)
+      /expect\((?:MB::Sound::)?(?:io|GraphIO)\.dump\([^()]*(?:\([^()]*\)[^()]*)*\)\)\.to eq\(/,
+      'compares a document saved now with another as text, saved: stamps included (they differ when the saves fall in different seconds)',
+      "compare both without the stamp: text.sub(/saved: \"[^\"]*\"/, '') (see rack_documents_spec's without_saved)",
+    ],
   ]
 
   rules.each do |pattern, why, instead|
