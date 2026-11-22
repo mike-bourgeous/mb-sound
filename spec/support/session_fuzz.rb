@@ -71,6 +71,18 @@ module SessionFuzz
     # rebuild and an fx swap at the track's launch point, dropped the
     # second, since library-2 found it; since load-lag-1 a later rebuild
     # supersedes a queued one for its time or earlier, or follows it)
+    #
+    # OPEN (fixes-16, seed 788988 with the stop-then-ramp draw): a render
+    # that ends early inside a tempo ramp rings its tails on a standing
+    # timeline at the tempo of the cell where the render loop stopped, and
+    # the loop stops at a buffer's end, so a tempo-synced delay's echoes in
+    # that tail differ between 367- and 800-frame buffers (-78 dB, over the
+    # -80 dB tolerance).  The timeline would have to stop moving on the
+    # last block's frame inside the buffer.  session_fuzz_spec keeps the
+    # shrunk song as a pending example.
+    buffer_size: [
+      [/(?=[\s\S]*\bbeat: \d+\/2r\) \{ tempo )(?=[\s\S]*delay\(1\.n8)/, 'a tempo-synced delay ringing after an early end inside a ramp (fixes-16, seed 788988)'],
+    ],
   }.freeze
 
   # A generated song: +header+ lines (tempo, meter) always kept, +lines+

@@ -536,6 +536,26 @@ RSpec.describe('session fuzzing') do
   # was estimated at the tempo where the render stopped, 230400 frames at
   # 367 and 230382 at 800.  Session#frames_to_position steps the ramp's
   # cells: 230292, where the end bar lands when a sound plays up to it.)
+  # (OPEN, fixes-16's soak of its own draw, seed 788988 shrunk: after the
+  # early end inside the ramp, the bus delay (1.n8, tempo-synced) rings on
+  # a standing timeline at the tempo of the cell where the render loop
+  # stopped, which depends on the buffer size; SessionFuzz::KNOWN skips
+  # such songs for :buffer_size.  Pending until a fix round; it fails
+  # loudly once fixed.)
+  it 'holds buffer_size for a tempo-synced delay ringing after an early end inside a ramp (seed 788988)' do
+    pending 'the early-end tail rings at the tempo of the cell where the render loop stopped'
+    stub_const('SessionFuzz::KNOWN', {}) # (checked without the skip that names it)
+    song = SessionFuzz::Song.new(header: ['bpm 137.5'], lines: [
+      'track(:t1, q: 1/4r) { |clip| clip.synth(voices: 3) { |v| v.hz.saw * v.amp_env(0.002, 0.05, 0.6, 0.02) } * 0.3 }',
+      'at_bar(1) { bg :t1, seq(C4, E4, G4, C5).n8.loop, on: :now }',
+      'bus(:fx) { |sig| sig.delay(1.n8, feedback: 0.3) * 0.5 }',
+      'at_bar(1, beat: 2) { feed :t1, :fx, -12.db }',
+      'at_bar(2, beat: 4) { stop :t1, fade: 0; stop :all, fade: 0 }',
+      'at_bar(2, beat: 9/2r) { tempo 90, over: 1, curve: :smooth, on: :now }',
+    ], bars: 2)
+    expect(SessionFuzz.check(:buffer_size, song)).to be_nil
+  end
+
   it 'caps a tail at the end bar inside a tempo ramp at any buffer size (seed 794890)' do
     lines = [
       'at_bar(3, beat: 3) { master { |m| m.softclip(0, 0.9) } }',
