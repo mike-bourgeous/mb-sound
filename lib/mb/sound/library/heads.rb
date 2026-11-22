@@ -235,7 +235,9 @@ module MB
           words = case node
                   when Root then [*HEADS.keys, :all, :find]
                   when Query then node.words.reject { |w| Query::OWN.include?(w) } + %i[entries names find bench]
-                  else %i[call to_ruby about tags params head_path audition auditions bench]
+                  else
+                    # (generators chain into a morph: L.gen.beat.dnb.morph(:house))
+                    %i[call to_ruby about tags params head_path audition auditions bench] + (node.kind == :generator ? %i[morph] : [])
                   end
           # (a sub-namespace's names complete with their family:
           # "L.gen.ro" offers L.gen.beat.rock; a name that is also a tag

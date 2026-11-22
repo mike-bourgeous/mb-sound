@@ -198,6 +198,10 @@ RSpec.configure do |config|
     # example that left it).
     default = MB::Sound::Session.existing
     default.close if default && (default.running? || SessionGuard.leftovers(default))
+    # (and the default Session itself left paused, suspended, or with its
+    # output opened, when an around hook's context comes first: fixes-16)
+    raw = SessionGuard.default_session
+    raw.close if raw && !raw.equal?(default) && (raw.running? || SessionGuard.leftovers(raw))
     MB::Sound::Tuning.default.reset
     # The default transport starts every example at 0, 120 BPM, 4/4: a
     # Session made without its own transport moves it, and an example that

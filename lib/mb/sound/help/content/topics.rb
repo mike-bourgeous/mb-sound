@@ -998,7 +998,17 @@ module MB
         `track :drums, kit(:acoustic); bg :drums, L.gen.beat.rock;
         turn :"drums/energy", 2.bars.lfo.square.at(0.2..1)` (a busy bar, then
         a sparse one, counted from where the turn lands: add `on: :bar`
-        when the song is already playing).
+        when the song is already playing).  `.morph` blends one generator
+        into another, slot by slot: `bg :drums,
+        L.gen.beat.dnb.morph(L.gen.beat.house)` (or `.morph(:house)`, a
+        name in the same family) plays dnb at 0 and house at 1 of the
+        track knob `:"drums/morph"` (`morph: 0.3` is where it starts;
+        `turn :"drums/morph", 1, over: 8.bars`, an LFO, or a scene's
+        `drums: { morph: 1 }`).  Each drum step (a beat of a melodic line)
+        switches once on the way, notes both play stay, the anchors switch
+        halfway, and the sides keep their own seeds and share knobs of one
+        name.  Two of one kind only: a drum beat doesn't morph into a
+        pitched line.
       TEXT
       commands :tones, :chord, :weights, :harmony, :progression, :generate, :strikes, :dice, :melody, :motifs, :beats, :rhythm
       note :generative
@@ -1034,6 +1044,12 @@ module MB
         knob :energy, 0.5
         bg :try, tr909(beats(16, energy: knob(:energy)) { kick [1, 0, 0, 0] * 4, keep: [0, 8]; hat [0.8] * 16 }).at(-18.db)
         turn :energy, 2.bars.lfo.square.at(0.05..1)
+      end
+      example 'one beat morphing into another (dnb at 0, house at 1 of the knob drums/morph)' do
+        track :try_drums, :tr909, q: 1
+        level :try_drums, -18.db
+        bg :try_drums, L.gen.beat.dnb.morph(L.gen.beat.house)
+        turn :"try_drums/morph", 1, over: 8.bars
       end
       example 'sparse bells over a drone' do
         bells = strikes(scale(:minor_pentatonic, :a).weights.over(A4..A6), every: 1.n8, chance: 0.5, gap: 2)
@@ -1296,7 +1312,9 @@ module MB
         `demo` loads a whole set into the session, paused at bar 1: Night
         Bus (bin/songs/night_bus_flow.rb), tech house at 126 BPM with 12
         tracks, 12 scenes, 5 knobs, a master chain, and its song form;
-        `demo :tunnel_vision` loads the other set (the list is below).
+        `demo :tunnel_vision` and `demo :n109` load the others (the
+        list is below; in N109, `turn :variant, 0, over: 8.bars` moves the
+        whole song from Kez Volta's second version to his first).
         Nothing plays until you do something: `go :groove` launches a
         scene, `turn :cut, 3000, over: 2` opens the hook's filter, `play_form
         demo.form` plays the whole song (steer it with `loop!`, `onward`,
@@ -1964,7 +1982,7 @@ module MB
         drum machines, graph documents, clips) is an entry in one library.
         `find 'dark bass'` lists the best matches with why each matched;
         `L.fx.reverb.hall` reaches one by words, each narrowing the last
-        (`L.inst.reese` lists both Reeses, Tab shows what is left), and
+        (`L.inst.reese` lists the Reeses, Tab shows what is left), and
         `.(sig)` uses it: `sig.then(&L.fx.hall)`.  Heads: `L.inst`,
         `L.fx`, `L.kit`, `L.seq`, `L.gen` (clip generators), `L.flow`
         (section chains), `L.master`, `L.set`, `L.env`, `L.edit`, `L.mfx`
@@ -1983,7 +2001,11 @@ module MB
         inspector's notes row too); `L.gen.beat.techno(energy: 0.8)` keeps
         its number.  `L.gen.beat` is a family (the drum beats): its entries
         print with it, and under `L.gen` alone their names narrow like
-        tags (`L.gen.rock` is `L.gen.beat.rock`).
+        tags (`L.gen.rock` is `L.gen.beat.rock`).  A generator entry
+        morphs into another: `bg :drums,
+        L.gen.beat.dnb.morph(L.gen.beat.house)` (the knob :"drums/morph",
+        0 dnb, 1 house; `.morph(:house)` names one in the family;
+        `L.gen.morph(:dnb, :house)` is the same; help :generative).
         `L.flow.techno_chain(seed: 4)` is a genre template's section chain;
         `flow L.flow.techno_chain` plays it over the session's scenes, and
         the templates read theirs from here.  Saved graphs print them back

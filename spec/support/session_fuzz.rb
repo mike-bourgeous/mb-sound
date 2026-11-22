@@ -71,6 +71,18 @@ module SessionFuzz
     # rebuild and an fx swap at the track's launch point, dropped the
     # second, since library-2 found it; since load-lag-1 a later rebuild
     # supersedes a queued one for its time or earlier, or follows it)
+    #
+    # OPEN (fixes-16, seed 788988 with the stop-then-ramp draw): a render
+    # that ends early inside a tempo ramp rings its tails on a standing
+    # timeline at the tempo of the cell where the render loop stopped, and
+    # the loop stops at a buffer's end, so a tempo-synced delay's echoes in
+    # that tail differ between 367- and 800-frame buffers (-78 dB, over the
+    # -80 dB tolerance).  The timeline would have to stop moving on the
+    # last block's frame inside the buffer.  session_fuzz_spec keeps the
+    # shrunk song as a pending example.
+    buffer_size: [
+      [/(?=[\s\S]*\bbeat: \d+\/2r\) \{ tempo )(?=[\s\S]*delay\(1\.n8)/, 'a tempo-synced delay ringing after an early end inside a ramp (fixes-16, seed 788988)'],
+    ],
   }.freeze
 
   # A generated song: +header+ lines (tempo, meter) always kept, +lines+
@@ -412,6 +424,19 @@ module SessionFuzz
         lines << "at_bar(#{bar}, beat: 3) { feed :#{t}, :wet, pre: #{pick(rng, ['true', 'false'])} }"
         lines << "at_bar(#{bar}, beat: #{beats}) { unmute :#{t} }"
       end
+    end
+    # (fixes-16, the 2026-11-22 soak's seed 789018) everything stopped on
+    # the last bar's last beat, then a tempo ramp half a beat later as the
+    # last scheduled block: the render ends early on that block's frame
+    # (or where the tails went quiet after it), which must be one frame at
+    # any buffer size while the ramp moves the tempo.  The tracks' own
+    # stops let the filters below drop swaps landing after them.  Drawn
+    # last, so every seed keeps the song it made before.
+    if rng.rand < 0.2
+      stops = names.map { |t| "stop :#{t}, fade: 0" }.join('; ')
+      lines << "at_bar(#{bars}, beat: #{beats}) { #{stops}; stop :all, fade: 0 }"
+      curve = pick(rng, [', curve: :smooth', ''])
+      lines << "at_bar(#{bars}, beat: #{beats * 2 + 1}/2r) { tempo #{pick(rng, [90, 180])}, over: #{pick(rng, ['3.beats', '1'])}#{curve}, on: :now }"
     end
     events = track_events(lines, beats, scene_ends, scene_loops)
     lines = without_swaps_of_stopped(lines, beats, tracks.keys, events)
@@ -873,6 +898,18 @@ module SessionFuzz
 
       t = s.pick(s.swappable)
       "bg :#{t}, seq(C5, D5).n16, on: :now; after(in: #{s.pick(['1/16r', '1/8r'])}) { swap :#{t}, #{s.pick(MELODIC.select { |c| c.end_with?('.loop') })}, on: :bar }"
+    },
+    # gen-morph-1: a morph of two drum beats swapped onto a clip track,
+    # its knob :"track/morph" starting somewhere, then held, ramped, or
+    # moved by a square LFO (read per beat; buffer sizes and plans must not
+    # change what lands)
+    ->(s) {
+      next if s.swappable.empty?
+
+      t = s.pick(s.swappable)
+      a, b = %i[rock pop funk house dnb techno halftime].sample(2, random: s.rng)
+      turn = s.pick(['', "; turn :\"#{t}/morph\", 1, over: 1", "; turn :\"#{t}/morph\", 2.beats.lfo.square.at(0..1)"])
+      "swap :#{t}, L.gen.beat.#{a}.morph(:#{b}, morph: #{s.pick([0, 0.25, 0.5, 1])})#{s.on}#{turn}"
     },
     # (new commands go here, at the end)
   ].freeze

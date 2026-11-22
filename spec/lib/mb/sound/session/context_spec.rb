@@ -41,6 +41,7 @@ RSpec.describe(MB::Sound::Session::Context, :aggregate_failures) do
     mb_sound_bound_document_params: 'Arrangement::LiteralBinding: bound graph document params',
     mb_wavetable_shape: 'wavetable shape cache of this thread',
     mb_sound_synth_lane: 'Synth.with_lane: the lane a voice block builds',
+    mb_sound_reach_clips: 'Sampler::Reach.covering: clips a carrying rebuild\'s drum kits cover too',
     mb_sound_script_declarations: 'ScriptRunner.declarations_of: the script being scanned',
     mb_sound_recipe: 'GraphNode::Recipe recording state',
     mb_sound_quiet_seconds: 'DelayMethods.quiet_seconds: no deprecation warning',

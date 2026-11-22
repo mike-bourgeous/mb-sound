@@ -126,7 +126,7 @@ RSpec.describe('Clip and Kit transform parity', :aggregate_failures) do
       'readers, playback plumbing, and lineage' => %i[
         align control control_chase control_edges control_horizon controls controls? edge_horizon edges event_at event_before event_index events
         events_for launch_aligned? length lineage looping? param_nodes performed? plays? rederive seed source steer_lead steer_units steered? stream
-        value value_at values variations with_controls without_controls fit_controls split_controls controls_clip rhythm
+        value value_at values values_known? variations with_controls without_controls fit_controls split_controls controls_clip rhythm
       ],
       'signal nodes of one note stream (a kit plays through a drum machine: tr808(kit), kit.to_clip.gate)' => %i[
         amp_env amp_envelope env envelope filt_env filter_env filter_envelope fm_env fm_envelope freq frequency gate hz notes number
@@ -137,6 +137,7 @@ RSpec.describe('Clip and Kit transform parity', :aggregate_failures) do
       'pitch moves: a kit row is a drum voice, so moving its note moves it to another voice' => %i[transpose ghost_chords],
       'combining and resizing clips (kits combine with Kit#fill, rows by name)' => %i[& | * repeat truncate bake roll],
       'note lengths: drum voices ignore them (Kit#legato is there for gated kits)' => %i[d dd dotted double_dotted t triplet note_length staccato],
+      'generator morphs: a morph blends two looping generator clips (L.gen.beat.rock.morph(:funk)); a kit\'s grid rows are fixed' => %i[morph],
     }
   end
 

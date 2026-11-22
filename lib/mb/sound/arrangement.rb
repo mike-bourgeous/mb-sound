@@ -655,7 +655,7 @@ module MB
         # with the track's knobs for its params, :"drums/energy", made if
         # missing and left as they are if not: Library::Generators.track_clip)
         values = values.to_h { |k, v|
-          gen = (v.is_a?(Library::Entry) && v.kind == :generator) || (v.is_a?(Sequence::Clip) && Library::Generators.origin(v))
+          gen = (v.is_a?(Library::Entry) && v.kind == :generator) || Library::Generators.generator_clip?(v)
           [k, gen && k.is_a?(Symbol) && @session.names.kind(k) != :knob ? Library::Generators.track_clip(v, k, @session, reuse: true) : v]
         }
 
@@ -1674,7 +1674,11 @@ module MB
           @session.resume(tr.name, start_time: time, fade: 0)
         elsif tr.patch?
           raise ArgumentError, "Track #{tr.name.inspect} has a patch; give it a clip to play" if clip.nil?
-          graph = build_patch(tr, clip, carry)
+          # (a carrying rebuild's clip sources take over the playing ones,
+          # swaps included: its drum kits cover those clips' keys too;
+          # Sampler::Reach)
+          playing = carry ? @session.timeline_nodes_of(tr.name).grep(MIDI::ClipSource).flat_map { |n| [n.ring_clip, n.pending_clip, n.clip].compact } : []
+          graph = Sampler::Reach.covering(playing) { build_patch(tr, clip, carry) }
           @mutex.synchronize { (@built ||= {})[tr.name] = graph }
           set_ahead(tr, graph)
           time = early(tr, musical) # (an attack lead is measured on the new graph)

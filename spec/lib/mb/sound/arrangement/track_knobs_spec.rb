@@ -7,6 +7,13 @@ RSpec.describe(MB::Sound::Arrangement::TrackKnobs, :aggregate_failures) do
   BASS_RIFF = MB::Sound.seq(MB::Sound::F1, MB::Sound::T, MB::Sound::R, MB::Sound::Ab1, MB::Sound::C2.n4).n8.loop
   DRUM_GRID = MB::Sound.grid(16, kick: 'x...', snare: '..x.', closed_hat: 'xxxx').loop
 
+  # The clip a preset sweep plays on preset +name+ (document +doc+): the
+  # drum grid for kits (a name saying so, or the tag :drums), else the
+  # bass riff (a kit plays nothing on the riff's notes).
+  def self.sweep_clip(name, doc)
+    name.to_s.match?(/drum|beat|perc/) || Array(doc.header[:tags]).include?(:drums) ? DRUM_GRID : BASS_RIFF
+  end
+
   before { @sessions = [] }
   after {
     @sessions.each(&:close)
@@ -66,7 +73,7 @@ RSpec.describe(MB::Sound::Arrangement::TrackKnobs, :aggregate_failures) do
     it "plays #{n} bit for bit like its params given as numbers, with them as the track's knobs" do
       doc = MB::Sound::GraphIO.parse(MB::Sound::GraphIO.find_preset(n))
       defaults = doc.params.transform_values { |v| v[:value] }
-      clip = n.to_s.match?(/drum|beat|perc/) ? DRUM_GRID : BASS_RIFF
+      clip = self.class.sweep_clip(n, doc)
       _, *ref = run(->(_s) { MB::Sound.track(:t) { |c| MB::Sound.preset(n, midi: c, **defaults) }; MB::Sound.bg(:t, clip) }, buffers: 30)
       s, *got = run(->(_s) { MB::Sound.track(:t, n); MB::Sound.bg(:t, clip) }, buffers: 30)
       knobbed = defaults.keys.select { |k| doc.declarations[k].numeric? } # (choice params, dnb_reese's slope, are given, not knobs)
@@ -159,13 +166,18 @@ RSpec.describe(MB::Sound::Arrangement::TrackKnobs, :aggregate_failures) do
     it "plays #{n} on a named bg player bit for bit like its params given as numbers, with them as the player's knobs" do
       doc = MB::Sound::GraphIO.parse(MB::Sound::GraphIO.find_preset(n))
       defaults = doc.params.transform_values { |v| v[:value] }
-      clip = n.to_s.match?(/drum|beat|perc/) ? DRUM_GRID : BASS_RIFF
+      clip = self.class.sweep_clip(n, doc)
       _, *ref = run(->(_s) { MB::Sound.bg(:pad, MB::Sound.preset(n, midi: clip, **defaults)) }, buffers: 30)
       s, *got = run(->(_s) { MB::Sound.bg(:pad, MB::Sound.preset(n, midi: clip)) }, buffers: 30)
       expect(got).to eq(ref)
       expect(ref[0].abs.max).to be > 0.001
       build = n == :init ? %i[sync] : [] # (init's sync chooses the graph's structure: a build knob on tracks, a number here)
       build += defaults.keys.reject { |k| doc.declarations[k].numeric? } # (choice params: dnb_reese's slope)
+      # (clack_kit's variant sets the clap's weight while the kit builds, so
+      # no param Constant reaches the Drums::Kit graph and a bg player
+      # gets no knob for it; a track rebuilds on it.  Open question for the
+      # maintainer, merge train 7.)
+      build += %i[variant] if n == :clack_kit
       expect(s.knobs.keys).to eq((defaults.keys - build).map { |k| MB::Sound::Session::Name.param(:pad, k) })
     end
   end

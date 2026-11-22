@@ -44,13 +44,19 @@ module MB
         # decision point, or nil (see Steer).
         attr_reader :steer
 
+        # How a morph cuts this generator's events into slots (a Slots;
+        # Morph).
+        attr_reader :slots
+
         # +length+ is the cycle length in whole notes; +reach+ the latest
         # end of any event from its cycle's start (2 cycles by default:
         # notes up to a cycle long), which tells clips how far back to look
         # for note-offs.  +steer+ (a Steer, or nil) makes the generator
         # steered: the block is also called with the values decided for the
-        # cycle as keywords (`{ |cycle, dice, density:| }`).
-        def initialize(length, seed:, name: nil, reach: nil, steer: nil, &block)
+        # cycle as keywords (`{ |cycle, dice, density:| }`).  +slots+ (a
+        # Slots) says how a morph cuts its events (one beat by default; drum
+        # beats by drum and step: MB::Sound#beats).
+        def initialize(length, seed:, name: nil, reach: nil, steer: nil, slots: nil, &block)
           raise ArgumentError, 'A generator needs a block: { |cycle, dice| events }' unless block
           @length = length
           @reach = reach ? reach.to_r : length * 2
@@ -59,6 +65,7 @@ module MB
           @name = name || "generate(seed: #{@seed})"
           @block = block
           @steer = steer
+          @slots = slots || Slots::BEAT
           @cache = {}
           @mutex = Mutex.new
           @stats = { cycles: 0, notes: 0, seconds: 0.0, worst: 0.0, worst_cycle: nil }
@@ -122,12 +129,22 @@ module MB
           compute(cycle, values) unless cached?(cycle, values)
         end
 
+        # The Events of +cycle+ computed with +values+ (a steered
+        # generator's decided values, a frozen Hash in its Steer's param
+        # order; nil for others), pure: nothing is decided, steered, or
+        # asked of Ahead (a Morph reads its sides so; cached like #events).
+        def events_with(cycle, values = nil)
+          return @mutex.synchronize { @cache[cycle] } || compute(cycle) unless @steer
+          raise ArgumentError, "#{@name} is steered: its events need the values decided for the cycle" unless values
+          @mutex.synchronize { @cache[[cycle, values]] } || compute(cycle, values)
+        end
+
         # Computes and caches +cycle+ (used by #events and Ahead), with the
         # decided +values+ for a steered generator.
         def compute(cycle, values = nil)
           t0 = Process.clock_gettime(Process::CLOCK_THREAD_CPUTIME_ID)
           raw = values ? @block.call(cycle, Dice.new(@seed, cycle), **values) : @block.call(cycle, Dice.new(@seed, cycle))
-          list = Generator.normalize(raw, @name).sort_by(&:start).freeze
+          list = order(Generator.normalize(raw, @name)).freeze
           list.each { |e| check_reach(e, cycle) }
           dt = Process.clock_gettime(Process::CLOCK_THREAD_CPUTIME_ID) - t0
           @mutex.synchronize {
@@ -196,6 +213,12 @@ module MB
         end
 
         private
+
+        # A cycle's events in playing order: sorted by start (a Morph keeps
+        # its sides' orders, see Morph#order).
+        def order(list)
+          list.sort_by(&:start)
+        end
 
         def steered_events(cycle, clip_length, offset)
           values = @steer.decide(cycle, clip_length, offset)
