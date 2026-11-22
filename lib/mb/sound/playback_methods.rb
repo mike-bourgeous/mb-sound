@@ -8,6 +8,15 @@ module MB
     # Command-line interface methods for playing sounds.  MB::Sound extends
     # itself with this module.
     module PlaybackMethods
+      # The fade of a stop, outro, or fadeout given as +fade:+ (bars) or
+      # +over:+ (the same span as a length: the word level, turn, and feed
+      # use), refusing both.
+      def self.fade_over(command, fade, over)
+        return fade if over.nil?
+        raise ArgumentError, "#{command}: give the fade once, fade: (bars) or over: (a length; over: 8.bars)" unless fade.nil?
+        over
+      end
+
       # Plays +sound+ in the foreground: it starts right away in the
       # background Session (mixed with anything playing there, through the
       # master chain, the master gain, and the monitor trim) and the prompt
@@ -242,7 +251,9 @@ module MB
       # recently started one; with names or numbers, those players; with
       # :all, every player (see also #outro and #panic).  Players fade out
       # over four bars by default; pass +:fade+ for a different number of
-      # bars, or 0 to stop right away.  When nothing is left playing, the
+      # bars, or 0 to stop right away; +over:+ is the same span as a
+      # length, the word other commands use for a span (`over: 8.bars`, as
+      # `level :pad, 0, over: 2.bars`).  When nothing is left playing, the
       # timeline pauses where it is (see SequenceMethods#seek and #rewind).
       #
       # Stops land right away (or at a scheduled block's time) unless given
@@ -254,11 +265,12 @@ module MB
       # playing until its tail is silent, e.g. `stop :bass, ring: true`.
       #
       # Returns the stop's journal entry (see #bg; e.g. `stop :bass lands
-      # 9:1 (queued)`), an Array of entries for several players, or an
-      # empty Array if nothing was playing.  Inside a scheduled block,
-      # returns the names.
-      def stop(*names, fade: nil, ring: false, at: nil, on: nil, in: nil)
+      # 9:1 (queued), fading over 4 bars to 13:1`), an Array of entries for
+      # several players, or an empty Array if nothing was playing.  Inside
+      # a scheduled block, returns the names.
+      def stop(*names, fade: nil, over: nil, ring: false, at: nil, on: nil, in: nil)
         point = LaunchPoint.of(binding) or return nil
+        fade = PlaybackMethods.fade_over(:stop, fade, over)
         names = names.map { |n| player_name(n) }
         session_command(names, label: "stop #{names.map(&:inspect).join(', ')}".strip, kind: :stop, all: true) { |session, time|
           time = session.send(:launch_time, point, [], default: nil) if point.given?
@@ -289,29 +301,45 @@ module MB
       end
 
       # Ends everything playing in the background, fading out over four bars
-      # by default (+:fade+ sets the number of bars), starting now or at a
-      # launch point (`outro on: 4`, `outro at: bar(33)`).  A flow playing
+      # by default (+:fade+ sets the number of bars, +over:+ the same as a
+      # length: `outro over: 8.bars`), starting now or at a launch point
+      # (`outro on: 4`, `outro at: bar(33)`; +in:+ is when the fade starts,
+      # not its length).  A flow playing
       # ends at the same point (no section begins after it; as `stop
       # :all`).  #fadeout without names does the same.  Returns the journal
       # entries, as #stop.  See #stop, and #panic to stop everything right
       # away.
-      def outro(fade: nil, at: nil, on: nil, in: nil)
+      def outro(fade: nil, over: nil, at: nil, on: nil, in: nil)
         point = LaunchPoint.of(binding) or return nil
-        stop(:all, fade: fade, at: point)
+        stop(:all, fade: PlaybackMethods.fade_over(:outro, fade, over), at: point)
       end
 
       # Fades out and stops the named tracks or players (+names+, as #stop
-      # takes them; unknown names get a did-you-mean) over four bars by
-      # default (+:fade+ sets the number of bars), now or at a launch point;
-      # with no names, ends everything, exactly as #outro.  Returns the
-      # journal entries, as #stop.  (gen-ux-1, the maintainer, 2026-11-17:
-      # "I'd like fadeout to accept a track name".)
+      # takes them; unknown names get a did-you-mean), or with no names
+      # everything, exactly as #outro.  (gen-ux-1, the maintainer,
+      # 2026-11-17: "I'd like fadeout to accept a track name".)
+      #
+      # - +fade:+ the fade's length in bars (4 by default; 0 stops at once),
+      #   or +over:+ the same as a length (`over: 8.bars`, `over: 6.seconds`:
+      #   the word `level`, `turn`, and `feed` use for a span).
+      # - +on:+, +in:+, +at:+ when the fade starts (a launch point: `on:
+      #   :bar`, `in: 8.bars` from now, `at: bar(33)`); now by default.
+      #   +in:+ is not the fade's length.
+      #
+      # Returns the journal entries, as #stop; each says how long the fade
+      # is and where it ends: `stop :pad lands 9:1 (queued), fading over 8
+      # bars to 17:1`.  (The maintainer's take, 2026-11-21: `fadeout over:
+      # 8.bars` was an unknown keyword, and "fadeout help does not describe
+      # arguments and does not show fade length".)
       #
       #     fadeout :pad                 # the pad fades out over 4 bars
+      #     fadeout :pad, over: 8.bars   # over 8 bars
       #     fadeout :pad, :bell, fade: 8, on: :bar
+      #     fadeout in: 8.bars           # everything, starting 8 bars from now
       #     fadeout                      # everything (outro)
-      def fadeout(*names, fade: nil, at: nil, on: nil, in: nil)
+      def fadeout(*names, fade: nil, over: nil, at: nil, on: nil, in: nil)
         point = LaunchPoint.of(binding) or return nil
+        fade = PlaybackMethods.fade_over(:fadeout, fade, over)
         return outro(fade: fade, at: point) if names.empty?
         stop(*names, fade: fade, at: point)
       end
@@ -524,9 +552,43 @@ module MB
       #     master(:quiet) { |mix| mix.reverb(:hall, wet: -16.db) }
       #     master          # shows the current effects
       #     master nil      # removes them on the next bar
+      #
+      # An effect rack plays as the chain (Session::MasterRack; the
+      # maintainer, 2026-11-22: "Rack, and master takes racks"): a Rack,
+      # its name, or a library effect's name (L.fx; a mastering preset's
+      # name plays the preset).  `master.save_rack :glue` saves the chain
+      # shown as rack document :glue (`.master(:club)` at its end for a
+      # preset; knobs the chain reads become rack knobs at their current
+      # values) and defines rack :glue, for `master :glue` or `fx :drums,
+      # :glue`; `master.save_rack! :glue` replaces it.
+      #
+      #     master.save_rack :glue
+      #     master :glue                              # the saved chain again
+      #     master rack(:glue)                        # the same
+      #     master arack { |sig| sig.hp1(30).softclip }
       def master(effects = :show, at: nil, on: nil, in: nil, fade: nil, **options, &block)
         point = LaunchPoint.of(binding) or return nil
         session = Session.current
+        if effects.equal?(:show) && block.nil? && options.empty?
+          return Session::MasterRack::View.new(session.master_info, session: session, block: session.master_block, preset: session.master_preset)
+        end
+
+        rack = effects.equal?(:show) ? nil : Session::MasterRack.effect(effects, session) # (errors before anything is queued)
+        if rack
+          raise ArgumentError, "master #{Session::MasterRack.label(rack)} takes no block (the rack is the chain; master { |mix| ... } alone sets a block)" if block
+          unless options.empty?
+            raise ArgumentError, "master #{Session::MasterRack.label(rack)} takes no options (#{options.keys.map { "#{_1}:" }.join(', ')} go with a mastering preset, master :club)"
+          end
+          label = "master #{Session::MasterRack.label(rack)}"
+          return session_command(nil, label: label, kind: :master) { |s, time|
+            s.master(rack, at: point, fade: fade, start_time: point.given? ? nil : time)
+          }
+        end
+        if effects.is_a?(Symbol) && session.racks[effects] && MB::Sound.live?
+          # (a rack named like a mastering preset: the preset plays)
+          $stdout.puts "\e[2mmaster #{effects.inspect} plays the mastering preset; master rack(#{effects.inspect}) plays the rack of that name\e[0m"
+        end
+
         preset = effects.is_a?(Mastering::Preset) || (effects.is_a?(Symbol) && effects != :show) || effects.is_a?(String) ? effects : nil
         if preset
           preset = Mastering.from_preset(preset, **options) # (errors before anything is queued)
@@ -789,6 +851,12 @@ module MB
       # +:at+, and +:fade+ work the same way).  Returns the change's journal entry (see #bg),
       # or nil if there was nothing to resume.
       #
+      # With no arguments on a paused transport (see TransportMethods#pause) or
+      # a suspended Session, it plays on from there, as `start` (or `play`,
+      # or pause again) does, and returns start's Status; `resume :pad`
+      # still brings back a stopped player (the maintainer, 2026-11-21:
+      # `pause`, then `resume` said "No background player to resume").
+      #
       # Only players with Symbol names are kept after stopping; see
       # #stopped and #forget.  A player a stop is still fading out comes
       # back from where its fade is (the stop is cancelled; its clips play
@@ -799,6 +867,8 @@ module MB
       #     stop :pad      # fades out over four bars
       #     resume :pad    # fades the same graph back in on the next bar
       def resume(name = nil, at: nil, on: nil, in: nil, fade: nil)
+        bare = name.nil? && at.nil? && on.nil? && binding.local_variable_get(:in).nil? && fade.nil?
+        return start if bare && TransportMethods.paused?(Session.current)
         point = LaunchPoint.of(binding) or return nil
         name = player_name(name)
         session_command(name, label: "resume #{name.inspect}", kind: :resume) { |session, time|

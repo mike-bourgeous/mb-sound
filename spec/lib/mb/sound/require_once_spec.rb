@@ -62,4 +62,33 @@ RSpec.describe(MB::Sound::RequireOnce) do
   it 'is installed by the console' do
     expect(File.read(File.expand_path('../../../../bin/sound.rb', __dir__))).to include('MB::Sound::RequireOnce.install')
   end
+
+  # followups-1: a script playing live holds a realtime Session too (its
+  # prints and lazy loads); a render to a file doesn't install it, nor
+  # does MB_SOUND_REQUIRE_ONCE=0.  Real processes: the spec process opts
+  # out (ScriptRunner.require_once, spec_helper).
+  describe 'in scripts' do
+    def run_song(*args, env: {})
+      script = tmp_path('ro_song.rb')
+      File.write(script, <<~RUBY)
+        require 'bundler/setup'
+        require 'mb-sound'
+        include MB::Sound::ScriptingMethods
+        at_exit { $stdout.print "installed=\#{MB::Sound::RequireOnce.installed?}" }
+        song_script { MB::Sound.bpm 240; MB::Sound.bg(:ro, 220.hz.sine.at(-30.db), fade: 0) }
+      RUBY
+      out, err, st = Open3.capture3({ 'OUTPUT_TYPE' => 'null', 'MB_SOUND_REQUIRE_ONCE' => nil }.merge(env),
+                                    RbConfig.ruby, script, '-q', '--bars', '0.25', *args,
+                                    chdir: File.expand_path('../../../..', __dir__))
+      raise "script failed: #{err}" unless st.success?
+
+      out[/installed=\w+/]
+    end
+
+    it 'installs it for live playback, not for a render or with MB_SOUND_REQUIRE_ONCE=0' do
+      expect(run_song).to eq('installed=true')
+      expect(run_song('-o', tmp_path('ro.flac'))).to eq('installed=false')
+      expect(run_song(env: { 'MB_SOUND_REQUIRE_ONCE' => '0' })).to eq('installed=false')
+    end
+  end
 end

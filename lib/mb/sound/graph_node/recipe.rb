@@ -406,6 +406,21 @@ module MB
             end
           end
 
+          # Notes each channel of +bundle+, a stand-in input made for
+          # printing (a rack's stereo input; see Rack#build_on_stand_ins),
+          # as bundle[i], so channels taken from it (`l, r = sig`,
+          # `sig.left`) print as sig[0] and sig[1] with the bundle named as
+          # an input.  The bundle itself stays unrecorded.
+          def note_input_channels(bundle)
+            return unless @enabled
+
+            bundle.instance_variable_get(:@outputs).each_with_index do |o, idx|
+              next if record_of(o) || o.frozen? || o.is_a?(Numeric)
+              call = Call.new(bundle, :[], [idx], {}, nil, nil, nil, nil, next_seq, nil, nil)
+              o.instance_variable_set(:@graph_recipe, Record.new(o, call))
+            end
+          end
+
           # Notes each row clip of recorded Kit +kit+ (its +rows+ Hash) as
           # kit[:row], so clips taken with kit.rows print that way.
           def note_rows(kit, rows)
@@ -645,6 +660,9 @@ module MB
                 official = ([first] + aliases).to_h { |n| [n, official_name(target, n)] }
                 mod.define_method(first) do |*args, **kwargs, &block|
                   callee = __callee__
+                  # (MIDI transforms taking arguments in either order record
+                  # them canonically: `echo(3, 1.n32)` prints echo(1.n32, 3))
+                  args = MB::Sound::MIDI::Stream.ordered_args(callee, args) if MB::Sound::MIDI::Stream::ARGUMENT_ORDER.key?(callee)
                   Recipe.call(self, official[callee] || callee, args, kwargs, block, written: callee) { |b, a = args, kw = kwargs| super(*a, **kw, &b) }
                 rescue ArgumentError => e
                   raise ErrorFormat.argument_help(e, self, callee) || e

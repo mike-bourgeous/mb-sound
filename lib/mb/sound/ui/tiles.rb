@@ -599,8 +599,28 @@ module MB
         # Equal shares for the focused pane's siblings.
         def equalize(name = nil) = (name = pane_arg(name) if name; tile { |t| t.equalize(name || t.focus) })
 
-        # Swaps panes +a+ and +b+ (default: the focused one).
-        def swap(a, b = nil) = (a = pane_arg(a); b = pane_arg(b) if b; tile { |t| t.swap(a, b || t.focus) })
+        # Swaps panes +a+ and +b+ (default: the focused one), or, given a
+        # direction (:left, :right, :up, :down; no pane has those names),
+        # the focused pane with its neighbor that way, the focus following
+        # it (NAV Alt-arrows; Tiler#swap_dir), flashing what moved
+        # ("tracks <-> knobs").  The maintainer, 2026-11-21: "Add the pane
+        # swap action".
+        def swap(a, b = nil)
+          return swap_dir(a) if b.nil? && MB::Term::Viewports::Tiler::DIRS.key?(a)
+          a = pane_arg(a)
+          b = pane_arg(b) if b
+          tile { |t| t.swap(a, b || t.focus) }
+        end
+
+        # Swaps the focused pane with its neighbor in direction +dir+ (see
+        # #swap), flashing what moved, or that nothing is that way.
+        def swap_dir(dir)
+          moved = nil
+          name = nil
+          tile(hint: false) { |t| name = t.focus; moved = t.swap_dir(dir) }
+          moved ? flash("#{name} <-> #{moved}") : flash("no pane #{dir == :up || dir == :down ? (dir == :up ? 'above' : 'below') : "to the #{dir} of"} #{name}", :dim)
+          self
+        end
 
         # Pane name +name+ given to a command, an alias resolved
         # (UI::PANE_ALIASES: :pager is :page), raising with a did-you-mean
@@ -1351,6 +1371,7 @@ module MB
           when :split then split(a.args[0] || :cols)
           when :close then close
           when :equalize then equalize
+          when :swap_dir then swap_dir(a.args[0])
           when :undo then undo
           when :redo then self.redo
           when :tab then tab(a.args[0] || 1)
@@ -1374,9 +1395,10 @@ module MB
                 # track before the music, 1.8 s for a demo's 8; the painter
                 # draws this while `start` runs; ui-phase1-1, the plan's
                 # Phase 1 item 2.  A flow's first section says what it
-                # builds, in the words `start` prints: form-start-1)
-                if line == 'start'
-                  flash(TransportMethods.start_note(s) || 'starting... (warming the tracks first)', :key)
+                # builds, in the words `start` prints: form-start-1; a resume
+                # says "resuming", a pause nothing: followups-1)
+                if (note = TransportMethods.toggle_flash(s, line))
+                  flash(note, :key)
                   @full = true
                 end
                 st = UI.run_line(line, s)

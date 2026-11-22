@@ -268,6 +268,40 @@ RSpec.describe(MB::Sound::Session::TransportPause, :aggregate_failures) do
       consume(0.05)
       expect(rt.frames_rendered).to be > held
     end
+
+    # (the maintainer, 2026-11-21: `pause`, then `resume` said "No
+    # background player to resume")
+    it 'plays a paused transport on with a bare resume, and resume :name still brings back a stopped player' do
+      rt.add(220.hz.sine.at(0.1), name: :drone, at: :now, fade: 0)
+      rt.add(330.hz.sine.at(0.1), name: :pad, at: :now, fade: 0)
+      consume(0.1)
+      within { MB::Sound.stop(:pad, fade: 0) }
+      consume(0.1)
+      expect(rt.stopped.keys).to eq([:pad])
+
+      expect(within { MB::Sound.pause }.state).to eq(:paused)
+      consume(0.1)
+      pos = rt.transport.position
+      st = nil
+      expect { st = within { MB::Sound.resume } }.not_to output(/No background player/).to_stderr
+      expect(st).to be_a(MB::Sound::TransportMethods::Status)
+      expect(st.state).to eq(:resumed)
+      consume(0.1)
+      expect(rt.transport_paused?).to eq(false)
+      expect(rt.transport.position).to be > pos
+      expect(rt.stopped.keys).to eq([:pad]) # (the transport played on; the stopped player stays stopped)
+
+      # (a bare resume on a playing transport keeps its meaning: the most
+      # recently stopped player)
+      expect(within { MB::Sound.resume }).not_to be_a(MB::Sound::TransportMethods::Status)
+      consume(2.5)
+      expect(rt.stopped).to be_empty
+
+      # (suspended counts as paused too)
+      expect(within { MB::Sound.suspend }.state).to eq(:suspended)
+      expect(within { MB::Sound.resume }.state).to eq(:resumed)
+      expect(rt.paused?).to eq(false)
+    end
   end
 
   it 'shows a paused transport in the transport pane as a pause sign, not a stop' do

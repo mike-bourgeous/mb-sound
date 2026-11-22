@@ -64,6 +64,11 @@ module ParamGuard
   def document?(param)
     value = ->(v) { (v.is_a?(Numeric) && v.real?) || MB::Sound::Param::UNIT_TYPES.include?(MB::Sound::Param.type_of(v)) }
     return false unless value.(param.default)
+    # (a parameter typed by hand for ArgTypes, e.g. arp's rate taking a
+    # division, a Duration, or a Rational, has types a `param` line can't
+    # write; such signatures bind arguments and are never saved)
+    plain = MB::Sound::Param.new(**param.to_h.except(:types))
+    return false unless plain.types == param.types
     case param.range
     when nil then true
     when Range then [param.range.begin, param.range.end].all?(&value)

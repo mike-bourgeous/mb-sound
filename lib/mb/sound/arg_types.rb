@@ -127,13 +127,27 @@ module MB
         attr_reader :name, :receiver, :params
 
         # +name+ is the method, +receiver+ the receiver in words ("a
-        # clip"), +params+ an Array of Params in declared order.
-        def initialize(name, receiver:, params:)
+        # clip"), +params+ an Array of Params in declared order.  With
+        # +lists+ true, an Array whose elements are all of one type binds
+        # as that type (echo's Array of gaps is its delay, wherever it is
+        # written).
+        def initialize(name, receiver:, params:, lists: false)
           @name = name
           @receiver = receiver
           @params = params.freeze
           @by_keyword = params.to_h { |p| [p.keyword, p] }.freeze
+          @lists = lists
           freeze
+        end
+
+        # The type #bind reads for +v+ (ArgTypes.classify, with +lists:+
+        # for Arrays).
+        def classify(v)
+          if @lists && v.is_a?(Array) && !v.empty?
+            types = v.map { |x| ArgTypes.classify(x) }.uniq
+            return types.first if types.length == 1
+          end
+          ArgTypes.classify(v)
         end
 
         # The parameter named or keyed +k+.
@@ -159,7 +173,7 @@ module MB
 
           untyped = []
           args.each do |v|
-            type = ArgTypes.classify(v)
+            type = classify(v)
             if type.nil? || ArgTypes::UNTYPED.key?(type)
               untyped << v
               next
@@ -183,7 +197,7 @@ module MB
 
           # Untyped values: the open parameters taking them, in order
           untyped.each do |v|
-            type = ArgTypes.classify(v)
+            type = classify(v)
             p = @params.find { |x| !out.key?(x.name) && (type.nil? || x.takes?(type)) }
             unless p
               raise ArgumentTypeError.new("#{@name} has no place for #{ArgTypes.describe_value(v)}; it takes:\n#{table_text}", keyword_hints(v))
@@ -227,7 +241,7 @@ module MB
         private
 
         def keyword_hints(v)
-          type = ArgTypes.classify(v)
+          type = classify(v)
           return [] unless type.nil? || ArgTypes::UNTYPED.key?(type)
           @params.reject(&:primary).map { |p| "#{p.keyword}: #{ArgTypes.value_text(v)}" }
         end

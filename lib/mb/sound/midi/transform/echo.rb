@@ -27,6 +27,55 @@ module MB
           # Echoes quieter than this (normalized velocity) are dropped.
           FLOOR = 1 / 127r
 
+          # Stream#echo's two positional arguments by type (ArgTypes; the
+          # maintainer's take, 2026-11-21: `echo(3, 1.n32, pitch: 10)`
+          # raised, `echo(1.n32, 3, pitch: 10)` worked: "dwim argument
+          # order"): a typed length (a Duration, a Length, a Rational, or an
+          # Array of one of them) is the delay wherever it is written, so
+          # the plain number beside it is the count.  Two plain numbers keep
+          # their order (delay in seconds, then count), and two lengths
+          # raise.  Every front end (Stream, Notes, Clip, unattached chains)
+          # passes the arguments on in this order, so takes, documents, and
+          # `to_ruby` print one canonical `echo(delay, count)`.
+          SIGNATURE = ArgTypes.register([:notes, :echo], ArgTypes::Signature.new(:echo, receiver: 'notes', lists: true, params: [
+            ArgTypes::Param.new(name: :delay, primary: true, types: {
+              duration: 'the gap between repeats (1.n16; an Array of gaps is cycled)',
+              seconds: 'the gap in seconds',
+              samples: 'the gap in samples',
+              ratio: 'the gap in seconds (1/8r)',
+              number: 'the gap in seconds, when it comes first (0.25)',
+            }),
+            ArgTypes::Param.new(name: :count, default: 3, types: { number: 'the number of repeats (an Integer)' }),
+          ]))
+
+          # +args+ (echo's positional arguments) as [delay, count] when two
+          # are given, by type (see SIGNATURE); else +args+.
+          def self.order(args)
+            return args unless args.length == 2
+            a, b = args
+            types = args.map { |v| SIGNATURE.classify(v) }
+            if types.none? { |t| t.nil? || t == :number } && types.all? { |t| SIGNATURE.param(:delay).takes?(t) }
+              raise ArgumentError, "echo(#{text(a)}, #{text(b)}): two delays; the count is an Integer, and an Array of gaps is cycled: " \
+                "echo([#{text(a)}, #{text(b)}], 3)"
+            end
+            if types == [:number, :number] && a.is_a?(Integer) && !b.is_a?(Integer)
+              raise ArgumentError, "echo(#{text(a)}, #{text(b)}): two plain numbers go in order, the delay (seconds) then the count (an Integer): " \
+                "#{a} repeats #{text(b)} s apart is echo(#{text(b)}, #{a}); or give the delay a unit: echo(#{a}, #{text(b)}.seconds)"
+            end
+            # (nothing typed: the order as written, Echo's own checks saying
+            # what is wrong; an Array is a :node to ArgTypes, Array#sample)
+            return args if types.all? { |t| t.nil? || ArgTypes::UNTYPED.key?(t) }
+            vals = SIGNATURE.bind(args)
+            [vals[:delay], vals[:count]]
+          end
+
+          # +v+ as Ruby for messages.
+          def self.text(v)
+            v.is_a?(Array) ? "[#{v.map { |x| text(x) }.join(', ')}]" : MB::Sound::RubyValue.text(v)
+          rescue StandardError
+            v.inspect
+          end
+
           # The delay between repeats (seconds, a Length, or a Duration), or
           # an Array of them (gaps, cycled).
           attr_reader :delay

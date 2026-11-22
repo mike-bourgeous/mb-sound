@@ -106,6 +106,11 @@ module MB
                 raise ArgumentError, "Scale degrees are whole numbers; use an Interval (e.g. #{step}.st or 50.cents) for other pitch steps (got #{step})"
               end
             else
+              # (a signal: the maintainer's take, 2026-11-21, echo(1.n64, 3, pitch: 3.bar.lfo.at(4)))
+              if step.respond_to?(:sample)
+                raise ArgumentError, "A pitch step is a number of scale degrees, an Interval, or an Array of them, fixed as each note is played, " \
+                  "so a signal can't move it (got #{(step.to_ruby rescue step.inspect)}): give a number (pitch: 4) or an Array to cycle (pitch: [4, 3, 5])"
+              end
               raise ArgumentError, "A pitch step is a number of scale degrees, an Interval, or an Array of them (got #{step.inspect})"
             end
           end

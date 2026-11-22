@@ -134,12 +134,18 @@ module MB
         arrangement.last_form || arrangement.demo_document&.form
       end
 
+      # True when +session+'s transport is paused (#pause) or the Session
+      # is suspended (#suspend): #start, NAV Space, and a bare
+      # PlaybackMethods#resume play on from there.
+      def self.paused?(session)
+        session.transport_paused? || (session.realtime? && session.paused?)
+      end
+
       # True when #pause would start rather than pause or resume: nothing
       # is playing in +session+ and a flow is loaded, or it is paused (or
       # suspended).
       def self.would_start?(session)
-        return true if session.transport_paused?
-        return true if session.realtime? && session.paused?
+        return true if paused?(session)
         pb = session.arrangement.playback
         return false if pb && !pb.ended?
         session.idle? && !loaded_flow(session.arrangement).nil?
@@ -149,9 +155,23 @@ module MB
       # (Arrangement#start_note), or nil when it would resume, play on, or
       # do nothing (for NAV Space's flash).
       def self.start_note(session)
-        return nil if session.transport_paused? || (session.realtime? && session.paused?) || !would_start?(session)
+        return nil if paused?(session) || !would_start?(session)
         f = loaded_flow(session.arrangement) or return nil
         session.arrangement.start_note(f)
+      end
+
+      # NAV Space's instant flash for +line+ (from #toggle_line), drawn
+      # while the line still runs (ui-phase1-1): a resume says so, a start
+      # of the loaded flow what it builds (#start_note's words) or that it
+      # warms the tracks first, a pause nothing (the Status after the line
+      # says what happened).  Reads only flags the render thread sets and
+      # the Arrangement's own lock, never the render lock (the screen's
+      # input thread asks; followups-1).
+      def self.toggle_flash(session, line)
+        return nil unless line == 'start'
+        return 'resuming ...' if paused?(session)
+        f = loaded_flow(session.arrangement) or return nil
+        session.arrangement.start_note(f) || 'starting... (warming the tracks first)'
       end
 
       # The console line NAV Space runs in +session+ (recorded in the take):

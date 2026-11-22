@@ -793,6 +793,37 @@ module SessionFuzz
         end
       end
     },
+    ->(s) {
+      # (ux-friction-2, the maintainer's take of 2026-11-21: a sampler kit
+      # with an effect insert) a patch block playing a sampler instrument
+      # (the shipped break's slices as a kit, given as the track or in a
+      # patch block), a drum clip on it, and a compressor insert
+      # swapped in at its launch point, sometimes taken out again later
+      name = :smp # (its own name: a graph track of a bg name would refuse the fx)
+      # (a sampler instrument given as the track is a patch track:
+      # InstrumentPatch.voice?; the block form plays the same)
+      kit = s.rng.rand < 0.5 ? "track :#{name}, breakbeat(:jungle).slices(8).instrument" : "track(:#{name}) { |c| breakbeat(:jungle).slices(8).instrument.sampler(c, voices: 4) * 0.4 }"
+      play = "bg :#{name}, seq(36, 38, 39, 41).n8.loop#{s.on}"
+      insert = "fx :#{name}, ->(sig) { sig.compress(threshold: #{s.pick(['-30.db', '-18.db'])}) }"
+      s.rng.rand < 0.5 ? "#{kit}; #{play}; #{insert}" : "#{kit}; #{play}; after(in: 2.beats) { #{insert} }; after(in: 1.bar) { fx :#{name}, :off }"
+    },
+    ->(s) {
+      # (master-rack-1) effect racks on the master: a named rack with a
+      # rack knob, an anonymous one, or the master chain kept as a rack (its
+      # rack document text loaded back, as master.save_rack writes it, and
+      # defined), landing at a launch point; or a rack as a track's insert
+      case s.rng.rand(4)
+      when 0 then "arack(:mfx) { |sig| sig.hp1(40).softclip(0, 0.9) * knob(:mix, #{s.pick([0.5, 0.8])}) }; master :mfx#{s.on}"
+      when 1 then "master arack { |sig| sig.lp4(#{s.pick([900, 3000])}).softclip }#{s.on}"
+      when 2
+        chain = s.pick(['{ |m| m.hp1(30).softclip(0, 0.9) }', '{ |l, r| [l, r.delay(0.004)] }', '{ |m| m.width(1.2).softclip }'])
+        "master #{chain}; Session.current.racks.define(Session::MasterRack.rack(Session.current, :mcap)); master :mcap#{s.on}"
+      else
+        next unless s.instruments
+
+        "arack(:tfx) { |sig| sig.lp4(1200) * knob(:mix, 0.7) }; fx :#{s.pick(s.instruments)}, :tfx#{s.on}"
+      end
+    },
     # (new commands go here, at the end)
   ].freeze
 

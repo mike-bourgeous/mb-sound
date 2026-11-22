@@ -138,12 +138,16 @@ RSpec.describe('MB::Sound::FastUI', :aggregate_failures) do
       expect(r.dots.max).to eq(0)
       expect(fast.polyline(r.dots, Numo::SFloat[0, 5], Numo::DFloat[0, 0], 1, 0, 0)).to be_nil
 
-      # The public method subsamples those the Ruby way
+      # The public method hands those to the Ruby way, which subsamples
+      # them (Raster.line_points' limit; raster_spec checks that at a small
+      # limit: drawing this one there built ~250 MB of 4M-element arrays,
+      # twice; followups-1)
       a = plot::Raster.new(10, 10)
-      b = plot::Raster.new(10, 10)
+      seen = []
+      allow(plot::Geometry).to receive(:line_points) { |xs, ys| seen << [xs.to_a, ys.to_a]; [Numo::Int32[0, 9], Numo::Int32[0, 9]] }
       a.polyline(Numo::DFloat[0, 5e6, 3], Numo::DFloat[0, 0, 9], 1)
-      b.polyline_ruby(Numo::DFloat[0, 5e6, 3], Numo::DFloat[0, 0, 9], 1)
-      expect(a.dots).to eq(b.dots)
+      expect(seen.uniq).to eq([[[0, 5e6, 3], [0, 0, 9]]])
+      expect([a.dots[0, 0], a.dots[9, 9]]).to all(be > 0)
     end
 
     it 'raises for dots that are not a 2D UInt16' do
