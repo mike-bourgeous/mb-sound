@@ -10,8 +10,10 @@ module MB
         #     bg :drums, L.gen.beat.rock
         #     turn :"drums/energy", 2.bars.lfo.square.at(0.2..1)
 
-        # The new beats' knobs: energy (0 nothing, 0.5 as written, 1 full;
-        # only adds hits) and swing (0.5 straight .. 0.75; home at the
+        # The new beats' knobs: energy (density, the techno beat's law: near
+        # 0 the anchors, a beat's skeleton; 0.5 as written; 1 full, with the
+        # kit's extra drums (crashes, toms, percussion) coming in at the
+        # top; only adds hits) and swing (0.5 straight .. 0.75; home at the
         # beat's own), each read once a bar (on a track, :"drums/energy"
         # and :"drums/swing").  The kits play roles (Drums::Roles): the
         # acoustic kits' rack tom for a high tom, a 909's open hat for a
@@ -22,17 +24,20 @@ module MB
         BEAT_PARAMS = ->(seed, swing) { -> { { seed: seed, energy: (0.0..1.0).at(0.5), swing: (0.5..0.75).at(swing) } } }
 
         beat :rock, kit: :acoustic, tags: %i[drums backbeat straight],
-          about: 'A straight-eighths rock backbeat, 90-140 BPM: kick on 1 and 3 with pickups, snare on 2 and 4 with ghost notes, eighth hats; ' \
-                 'energy adds pickups, sixteenth hats, a half-open hat before the 4, crashes and a fill every 8 bars ' \
+          about: 'A straight-eighths rock backbeat, 90-140 BPM: low energy is the kick on 1, snare on 2 and 4, quarter hats; ' \
+                 'as written the kick on 3 with pickups, ghost notes, eighth hats; high energy crashes and floor toms hammering, sixteenths, fills ' \
                  '(track :drums, kit(:acoustic); bg :drums, L.gen.beat.rock)',
           params: BEAT_PARAMS.(11, 0.5) do |seed:, energy:, swing:|
           beats(16, hold: 2, over: 4, energy: energy, swing: swing, seed: seed) do
-            kick [1, 0, 0, 0.1, 0, 0, 0.25, 0, 1, 0, 0.45, 0, 0, 0.1, 0.15, 0], keep: [0, 8], drift: 0.08
+            kick [1, 0, 0, 0.1, 0, 0, 0.25, 0, 1, 0, 0.45, 0, 0, 0.1, 0.15, 0], keep: [0], drift: 0.08
             snare [0, 0, 0, 0, 1, 0, 0, 0] * 2, keep: [4, 12]
             row :ghost, [0, 0.08, 0, 0.12, 0, 0, 0.15, 0.08, 0, 0.12, 0, 0.15, 0, 0.08, 0, 0.2], note: 38, level: 0.25, drift: 0.1
             hat [1, 0.2, 0.95, 0.2] * 4, keep: [0, 4, 8, 12], level: 0.7, drift: 0.05
             half_open_hat [0] * 14 + [0.3, 0], level: 0.6
-            crash [0.08] + [0] * 15, level: 0.7
+            # (the top of the range: crashes and a floor tom hammering; enter: thresholds later)
+            crash [0.3, 0, 0, 0, 0.12, 0, 0, 0, 0.12, 0, 0, 0, 0.12, 0, 0, 0], level: 0.75
+            low_floor_tom [0.2, 0, 0.1, 0] * 4, level: 0.6, drift: 0.05
+            high_tom [0] * 12 + [0, 0, 0.12, 0.12], level: 0.6
             fill every: 8, last: 1.beat, energy: true, snare: 0.55, low_floor_tom: 0.3
           end
         end
@@ -50,6 +55,7 @@ module MB
             half_open_hat [0, 0, 0.65, 0] * 4, level: 0.55
             tambourine [0.3, 0, 0.3, 0] * 4, level: 0.45, drift: 0.1
             shaker [0, 0.2] * 8, level: 0.35, drift: 0.1
+            crash [0.25] + [0] * 15, level: 0.7
             fill every: 8, last: 1.beat, energy: true, snare: 0.5
           end
         end
@@ -65,6 +71,8 @@ module MB
             row :ghost, [0, 0, 0, 0.1, 0, 0, 0.12, 0, 0, 0, 0, 0.1, 0, 0.12, 0, 0.1], note: 38, level: 0.25, drift: 0.15
             hat [1, 0.08, 0.9, 0.08] * 4, keep: [0, 4, 8, 12], level: 0.65, drift: 0.05
             ride [0.12, 0, 0.12, 0] * 4, level: 0.45
+            crash [0.3] + [0] * 15, level: 0.75
+            low_floor_tom [0, 0, 0, 0, 0, 0, 0.15, 0, 0, 0, 0, 0, 0, 0, 0.2, 0.2], level: 0.6
             fill every: 8, last: 1.beat, energy: true, snare: 0.5, low_tom: 0.25
           end
         end
@@ -79,7 +87,7 @@ module MB
             snare [0, 0, 0, 0, 1, 0, 0, 0] * 2, keep: [4, 12]
             row :ghost, [0, 0.15, 0, 0.1, 0, 0, 0.2, 0.12, 0, 0.15, 0, 0.1, 0, 0, 0.2, 0.1], note: 38, level: 0.22, drift: 0.15
             hat [1, 0.55, 0.95, 0.55] * 4, keep: [0, 4, 8, 12], level: 0.6, drift: 0.08
-            half_open_hat [0] * 14 + [0.55, 0], level: 0.55
+            half_open_hat [0, 0, 0.12, 0, 0, 0, 0.12, 0, 0, 0, 0.12, 0, 0, 0, 0.55, 0], level: 0.55
             fill every: 8, last: 1.beat, energy: true, snare: 0.45, mid_tom: 0.2
           end
         end
@@ -95,6 +103,8 @@ module MB
             open_hat [0, 0, 0.85, 0] * 4, level: 0.6, drift: 0.05
             hat [0.3, 0.25, 0, 0.25] * 4, level: 0.5, drift: 0.15
             ride [0.12, 0, 0.12, 0] * 4, level: 0.4
+            rimshot [0, 0, 0, 0.15, 0, 0, 0.1, 0] * 2, level: 0.5, drift: 0.1
+            crash [0.15] + [0] * 15, level: 0.6
             fill every: 8, last: 1.beat, energy: true, snare: 0.4
           end
         end
@@ -110,6 +120,7 @@ module MB
             row :ghost, [0, 0, 0.1, 0.12, 0, 0, 0, 0.18, 0, 0.12, 0, 0, 0, 0.1, 0, 0.18], note: 38, level: 0.25, drift: 0.15
             hat [1, 0.2, 0.9, 0.2] * 4, keep: [0, 4, 8, 12], level: 0.6, drift: 0.08
             ride [0.1, 0, 0.25, 0] * 4, level: 0.4
+            crash [0.25] + [0] * 15, level: 0.7
             fill every: 8, last: 1.beat, energy: true, snare: 0.5
           end
         end

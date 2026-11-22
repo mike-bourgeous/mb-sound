@@ -93,16 +93,21 @@ RSpec.describe MB::Sound::Library::Generators, 'drum beats', :aggregate_failures
     end
   end
 
-  it 'fills in the last bar of each 8-bar phrase, at its end, more at higher energy' do
+  it 'fills in the last bar of each 8-bar phrase, in its second half, more at higher energy' do
     beats.reject { |e| e.name == :techno }.each do |e|
-      fill_keys = [roles.note(:low_floor_tom), roles.note(:low_tom), roles.note(:mid_tom)]
+      drums = [roles.note(:snare), roles.note(:low_floor_tom), roles.note(:low_tom), roles.note(:mid_tom)]
+      # snare and tom hits in a bar's second half (steps 8..15), and before it
+      late = ->(c, bar) { hits(c, bar).count { |st, k| st >= 8 && drums.include?(k) } }
+      early = ->(c, bar) { hits(c, bar).count { |st, k| st < 8 && drums.include?(k) } }
       lo = e.call(seed: 5, energy: 0.5)
       hi = e.call(seed: 5, energy: 1.0)
-      7.times { |c| expect(hits(hi, c).map(&:last) & fill_keys).to eq([]), "#{e.name} bar #{c + 1}" }
-      fill = (0...4).sum { |p| hits(hi, 8 * p + 7).count { |s, k| s >= 8 && (fill_keys.include?(k) || k == roles.note(:snare)) } }
-      calm = (0...4).sum { |p| hits(lo, 8 * p + 7).count { |s, k| s >= 8 && (fill_keys.include?(k) || k == roles.note(:snare)) } }
+      phrases = 0...4
+      fill = phrases.sum { |p| late.(hi, 8 * p + 7) } / 4.0
+      groove = phrases.sum { |p| (0...7).sum { |b| late.(hi, 8 * p + b) } } / 28.0
+      expect(fill).to be >= groove + 1.5, "#{e.name}: #{fill} fill hits against #{groove.round(2)} in other bars' second halves"
+      expect(phrases.sum { |p| early.(hi, 8 * p + 7) } / 4.0).to be <= phrases.sum { |p| (0...7).sum { |b| early.(hi, 8 * p + b) } } / 28.0 + 1.0, e.name.to_s
+      calm = phrases.sum { |p| late.(lo, 8 * p + 7) } / 4.0
       expect(fill).to be > calm, e.name.to_s
-      hits(hi, 7).select { |_, k| fill_keys.include?(k) }.each { |s, _| expect(s).to be >= 8, "#{e.name}: a fill hit at step #{s}" }
     end
   end
 
