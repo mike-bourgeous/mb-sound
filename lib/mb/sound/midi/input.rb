@@ -145,9 +145,9 @@ module MB
             input
           end
 
-          # The APIs to search for a port, in order: the default API, then
-          # (without an explicit +api+ or MIDI_API) the others, JACK only
-          # when a JACK server answers.
+          private
+
+          # The default API, then (without an explicit choice) the others.
           def search_apis(api)
             chosen = self.api(api)
             return [chosen] if api || (ENV['MIDI_API'] && !ENV['MIDI_API'].empty?)

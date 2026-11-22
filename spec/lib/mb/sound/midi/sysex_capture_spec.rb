@@ -212,22 +212,44 @@ RSpec.describe(MB::Sound::MIDI::SysExCapture, :aggregate_failures) do
   end
 
   describe '.sources' do
+    around(:each) do |ex|
+      saved = %w[MIDI_API MIDI_DEVICE].to_h { |k| [k, ENV.delete(k)] }
+      ex.run
+    ensure
+      saved.each { |k, v| v ? ENV[k] = v : ENV.delete(k) }
+    end
+
     before(:each) do
-      allow(MB::Sound::MIDI::Input).to receive(:search_apis).and_return([:alsa])
+      allow(MB::Sound::DeviceOutput).to receive(:jack_running?).and_return(false)
+      allow(MB::Sound::MIDI::Input).to receive(:apis).and_return([:alsa])
       allow(MB::Sound::MIDI::Input).to receive(:port_names).with(:alsa, :input)
         .and_return(['Midi Through:Port-0 14:0', 'USB MIDI:Port 1 24:0', 'USB MIDI:Port 2 24:1', "#{MB::Sound::DeviceOutput.client_name}:midi_out 130:0"])
     end
 
-    it 'lists every source but our own ports, or those matching part of a name, a Regexp, or an index' do
-      expect(described_class.sources.map(&:last)).to eq(['Midi Through:Port-0 14:0', 'USB MIDI:Port 1 24:0', 'USB MIDI:Port 2 24:1'])
-      expect(described_class.sources('usb')).to eq([[:alsa, 1, 'USB MIDI:Port 1 24:0'], [:alsa, 2, 'USB MIDI:Port 2 24:1']])
-      expect(described_class.sources(/Port 2/)).to eq([[:alsa, 2, 'USB MIDI:Port 2 24:1']])
-      expect(described_class.sources(0)).to eq([[:alsa, 0, 'Midi Through:Port-0 14:0']])
+    def rows(ports) = ports.map { |p| [p.api, p.index, p.name] }
+
+    it 'finds sources through MIDI::Ports: every one but our own, part of a name (every candidate), a Regexp, or an index' do
+      expect(described_class.sources.map(&:name)).to eq(['Midi Through:Port-0 14:0', 'USB MIDI:Port 1 24:0', 'USB MIDI:Port 2 24:1'])
+      expect(rows(described_class.sources('usb'))).to eq([[:alsa, 1, 'USB MIDI:Port 1 24:0'], [:alsa, 2, 'USB MIDI:Port 2 24:1']])
+      expect(rows(described_class.sources('port 2'))).to eq([[:alsa, 2, 'USB MIDI:Port 2 24:1']])
+      expect(rows(described_class.sources(/Port 2/))).to eq([[:alsa, 2, 'USB MIDI:Port 2 24:1']])
+      expect(rows(described_class.sources(0))).to eq([[:alsa, 0, 'Midi Through:Port-0 14:0']])
     end
 
     it 'raises with the sources when nothing matches' do
-      expect { described_class.sources('Launchkey') }.to raise_error(ArgumentError, /No MIDI source matches "Launchkey".*1: USB MIDI:Port 1/m)
+      expect { described_class.sources('Launchkey') }.to raise_error(MB::Sound::MIDI::Ports::NotFound, /No MIDI source matches "Launchkey".*USB MIDI:Port 1/m)
+      expect { described_class.sources(/Launchkey/) }.to raise_error(ArgumentError, /No MIDI source matches.*1: USB MIDI:Port 1/m)
+      expect { described_class.sources(7) }.to raise_error(ArgumentError, /No MIDI source matches 7/)
       expect { described_class.sources(1.5) }.to raise_error(ArgumentError, /part of a name/)
+    end
+
+    it 'opens RtMidi sources by index' do
+      fake = FakeSysExInput.new
+      allow(MB::Sound::MIDI::Input).to receive(:new).and_return(fake)
+      @capture = described_class.start('usb', thread: false, save: false, out: ->(_) {})
+      expect(@capture.sources).to eq(['USB MIDI:Port 1 24:0', 'USB MIDI:Port 2 24:1'])
+      expect(MB::Sound::MIDI::Input).to have_received(:new).with(connect: 1, api: :alsa, queue_size: 8192, max_message: 1 << 20, from_env: false)
+      expect(MB::Sound::MIDI::Input).to have_received(:new).with(connect: 2, api: :alsa, queue_size: 8192, max_message: 1 << 20, from_env: false)
     end
   end
 

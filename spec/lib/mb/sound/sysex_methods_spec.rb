@@ -22,7 +22,7 @@ RSpec.describe(MB::Sound::SysExMethods, :aggregate_failures) do
 
   before(:each) do
     stub_const('ENV', ENV.to_h.merge('MB_SOUND_CHECKOUT_TMP' => inbox))
-    allow(MB::Sound::MIDI::SysExCapture).to receive(:sources).and_return([[:alsa, 1, 'USB MIDI:Port 2 24:1']])
+    allow(MB::Sound::MIDI::SysExCapture).to receive(:sources).and_return([MB::Sound::MIDI::Ports::Port.new(api: :alsa, name: 'USB MIDI:Port 2 24:1', client: 'USB MIDI', port: 'Port 2 24:1', direction: :in, connections: [], physical: false, own: false, index: 1)])
     allow(MB::Sound::MIDI::Input).to receive(:new).and_return(input)
   end
 

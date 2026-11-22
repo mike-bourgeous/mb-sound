@@ -63,51 +63,49 @@ module MB
         Listener = Struct.new(:name, :input, :assembler, :dropped)
 
         class << self
-          # The MIDI sources to listen on for +from+, as [[api, index, name],
-          # ...]: nil for every source of the first API that has any (our
-          # own ports left out), an Integer for that source of the default
-          # API, a String for every source whose name contains it (any
-          # case), a Regexp for every source it matches; the first API (see
-          # Input.search_apis) with a match wins.  Raises ArgumentError
-          # with the sources when nothing matches.
-          #
-          # TODO: merge with the by-name device lookup the MIDI output work
-          # adds, once both are in.
+          # The MIDI sources to listen on for +from+ (MIDI::Ports, direction
+          # :in), as MIDI::Ports::Port values: nil for every source (Ports.list;
+          # every compiled API if the default one has none), part of a name
+          # for every source it matches (Ports.find; an Ambiguous match
+          # means all of its candidates, so 'USB' covers every port of an
+          # interface), a Regexp for every source it matches, an Integer
+          # for that entry of Ports.list.  Ports of this process are left
+          # out.  Raises ArgumentError (Ports::NotFound) with the sources
+          # when nothing matches.
           def sources(from = nil, api: nil)
             unless from.nil? || from.is_a?(Integer) || from.is_a?(String) || from.is_a?(Regexp) || from.is_a?(Symbol)
               raise ArgumentError, "Listen on MIDI sources by part of a name (a String), a Regexp, or an index (got #{from.class})"
             end
 
-            from = from.to_s if from.is_a?(Symbol)
-            lists = {}
-            Input.search_apis(api).each_with_index do |a, i|
-              names = begin
-                Input.port_names(a, :input)
-              rescue FastMIDI::Error, FastAudio::Error
-                raise if i == 0 && api
-                []
-              end
-              lists[a] = names
-              found = names.each_with_index.select { |n, idx|
-                next false if own_port?(n)
+            found = case from
+                    when String, Symbol
+                      begin
+                        [Ports.find(from.to_s, :in, api: api)]
+                      rescue Ports::Ambiguous => e
+                        e.candidates
+                      end
+                    else
+                      list = Ports.list(:in, api: api).reject { |p| own_port?(p) }
+                      list = Ports.list(:in, api: :all).reject { |p| own_port?(p) } if list.empty? && api.nil?
+                      case from
+                      when nil then list
+                      when Integer then from >= 0 && from < list.length ? [list[from]] : []
+                      else list.select { |p| from.match?(p.name) }
+                      end
+                    end
+            found = found.reject { |p| own_port?(p) }
+            return found unless found.empty?
 
-                case from
-                when nil then true
-                when Integer then i == 0 && idx == from
-                when Regexp then from.match?(n)
-                else n.downcase.include?(from.downcase)
-                end
-              }
-              return found.map { |n, idx| [a, idx, n] } unless found.empty?
-            end
-
+            names = Ports.list(:in, api: api).reject { |p| own_port?(p) }.map(&:name)
             what = from.nil? ? 'No MIDI sources found' : "No MIDI source matches #{from.inspect}"
-            raise ArgumentError, "#{what}.  Sources:\n#{Input.port_list(lists)}"
+            raise Ports::NotFound.new("#{what}.  Sources:\n#{names.empty? ? '  (none)' : names.each_with_index.map { |n, i| "  #{i}: #{n}" }.join("\n")}", names)
           end
 
-          # True if +name+ is a port of this process (our own MIDI outputs).
-          def own_port?(name)
-            [DeviceOutput.client_name, Jack.client_name].compact.any? { |c| name.start_with?("#{c}:") }
+          # True if +port+ (a MIDI::Ports::Port) belongs to this process (our
+          # own MIDI outputs): Ports marks JACK ones, and RtMidi ones carry
+          # our client name.
+          def own_port?(port)
+            port.own || [DeviceOutput.client_name, Jack.client_name].compact.any? { |c| port.name.start_with?("#{c}:") }
           end
 
           # Opens inputs on the sources for +from+ (see .sources) and starts
@@ -116,8 +114,10 @@ module MB
             found = sources(from, api: api)
             inputs = []
             begin
-              found.each do |a, idx, name|
-                inputs << [name, Input.new(connect: idx, api: a, queue_size: 8192, max_message: MAX_MESSAGE, from_env: false)]
+              found.each do |port|
+                # RtMidi opens by index; JACK by the full name
+                inputs << [port.name, Input.new(connect: port.index || port.name, api: port.api, queue_size: 8192,
+                                                max_message: MAX_MESSAGE, from_env: false)]
               end
             rescue StandardError
               inputs.each { |_, inp| inp.close }
