@@ -506,12 +506,33 @@ module MB
             "bake the #{op} into a clip: `riff.bake(#{op}(...))` instead of `riff.#{op}(...)` (a loop's notes wrap to its start)" \
             "#{wire_hint(name)}"
           )
+        elsif (tr = name.is_a?(Symbol) && Session.current.arrangement.tracks[name]) && tr.patch?
+          # (ux-friction-4, the maintainer's take of 2026-11-21: `swap
+          # :drums, midi`, then `wire :drums, midi`, to play the kit from
+          # his keyboard: the working lines come first, his stream named
+          # as he wrote it)
+          n = name.inspect
+          given = live_stream_text(stream)
+          ArgumentError.new(
+            "#{command} #{n}: that is live MIDI, not a clip, so it can't be #{n}'s clip. To play #{n} from your keyboard while its clip plays on: " \
+            "arm #{n} (or wire #{n}, #{given}); to keep what you play as #{n}'s clip: arm #{n}, then capture #{n} (or rec 4)"
+          )
         else
           ArgumentError.new(
             "#{command} #{name.inspect}: that is live MIDI (no clip), so it can't play on #{where}; record it into a clip first (`arm #{name.inspect}` then `rec` or `capture`), " \
             "or give #{name.inspect} a patch that reads it#{wire_hint(name)}"
           )
         end
+      end
+
+      # Live MIDI stream +stream+ as the console writes it for `wire`:
+      # Ruby when it knows how it was made (a MIDI file), `midi` for the
+      # live input as it is, else "stream".
+      def live_stream_text(stream)
+        return 'stream' unless stream.is_a?(MIDI::Stream)
+        text = Arrangement::Wire.ruby(stream.lineage) rescue nil
+        return text if text
+        stream.source.is_a?(MIDI::Transform) ? 'stream' : 'midi'
       end
 
       # An ArgumentError for console +command+ (bg, swap) given track
@@ -583,6 +604,75 @@ module MB
                 else "; tracks #{tracks.map(&:inspect).join(', ')} play it: #{command} #{tracks[0].inspect}, clip"
                 end
         ArgumentError.new("#{command} takes a track's or player's name first (a Symbol), not a sound (got a #{what})#{plays}")
+      end
+
+      # An ArgumentError for console +command+ (bg, swap) given track
+      # +name+ and a sampler instrument where a clip goes (a SoundFont kit
+      # or font, an SFZ; Arrangement::InstrumentPatch.voice?), naming
+      # `track` with the instrument written out, else nil (ux-friction-4,
+      # the maintainer's take of 2026-11-21: `bg :drums, sf2(...)` on a
+      # playing kit track replaced the track's beat with the font's demo
+      # phrase, without a word; `track :drums, sf2(...)` was meant, as
+      # instrument entries already said: #entry_for_track).
+      def voice_for_track_error(command, name, sound)
+        return nil unless name.is_a?(Symbol) && Session.current.arrangement.tracks[name]
+        return nil unless sound.is_a?(Sampler::Instrument) || sound.is_a?(Sampler::SF2::Font)
+
+        text = voice_text(sound)
+        what = sound.respond_to?(:drum_map) && sound.drum_map ? 'a drum kit (an instrument)' : 'an instrument'
+        ArgumentError.new(
+          "#{command} #{name.inspect}, #{text}: that is #{what}, not a clip, and #{name.inspect} is a track: " \
+          "track #{name.inspect}, #{text} gives the track that instrument (its clip plays on it from the next launch point); " \
+          "#{command} #{name.inspect}, clip plays a clip on it; play #{text} auditions it"
+        )
+      end
+
+      # Prints once per track and Session, in the console, that the
+      # pitched generator clip +clip+ (an L.gen entry that writes notes,
+      # not drum parts) given to console +command+ for track +name+ plays
+      # drums by note number on the track's kit (ux-friction-4, the
+      # maintainer's take: `swap :drums, L.gen.acid_rhythm(seed: 13)` on
+      # a SoundFont kit played toms and a clap).  It plays as given; the
+      # line only says why it sounds so.  Returns the line, or nil.
+      def pitched_on_kit_notice(command, name, clip)
+        return nil unless MB::Sound.live? && name.is_a?(Symbol) && Session.context&.session.nil?
+        session = Session.current
+        tr = session.arrangement.tracks[name] or return nil
+        entry = (Library::Generators.origin(clip)&.entry rescue nil)
+        return nil unless entry&.family == :generator && kit_track?(tr)
+        seen = (@pitched_on_kit ||= ObjectSpace::WeakKeyMap.new)[session] ||= {}
+        return nil if seen[name]
+        seen[name] = true
+        keys = Sampler::Reach.keys_of(clip)
+        drums = keys&.first(6)&.map { |k| Drums::Roles::NAMES[k] || "key #{k}" }&.uniq
+        which = drums && !drums.empty? ? " (here #{drums.join(', ')})" : ''
+        line = "#{command} #{name.inspect}: #{entry.head_path} writes pitches; on #{name.inspect}'s kit each note is a drum#{which}; " \
+               'L.gen.beat lists drum beats'
+        $stdout.puts "\e[2m#{line}\e[0m"
+        line
+      rescue StandardError
+        nil
+      end
+
+      # True if track +tr+ plays a drum kit: a kit entry (L.kit), an entry
+      # tagged :drums, or a sampler instrument with a drum map.
+      def kit_track?(tr)
+        entry = Arrangement::InstrumentPatch.entry_of(tr.patch)
+        return true if entry && (entry.kind == :kit || entry.tags.include?(:drums))
+        voice = Arrangement::InstrumentPatch.voice_of(tr.patch)
+        voice = voice.instrument if voice.is_a?(Sampler::SF2::Font)
+        voice.respond_to?(:drum_map) && !voice.drum_map.nil?
+      end
+
+      # Sampler instrument +inst+ as the Ruby that makes it
+      # (`sf2("Black_Pearl", preset: [0, 0])`, as set documents print it),
+      # else "the instrument".
+      def voice_text(inst)
+        inst = inst.instrument if inst.is_a?(Sampler::SF2::Font)
+        vars, expr = GraphNode::Recipe::RubyWriter.new(inst).parts
+        vars.empty? && expr.length == 1 && !expr[0].include?("\u0003") ? expr[0] : 'the instrument'
+      rescue StandardError
+        'the instrument'
       end
 
       # Library Entry +entry+ given to +command+ (`bg`) for the existing
