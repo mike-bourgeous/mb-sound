@@ -28,6 +28,10 @@ default:
   file: 20
   example: 8
 files:
+  spec/lib/mb/sound/demo_methods_spec.rb:
+    file: 40
+    example: 16
+    reason: every shipped demo (3) loaded and started as the console does it (fixes-17's guard for warm-up errors and the go-while-playing deadlock) on a realtime Session paced to its scheduler, the warm-up with its rehearsal, 2 bars, then a go to each scene with 1.25 bars each (12 scenes for the N109 demo); the demo examples took 4.7-7.8 s at load 5-9 and up to 10.9 s, the file 28.3 s, under spec:quick at PARALLEL=2 and load about 30 (7950X container, 2026-11-22)
   spec/lib/mb/sound/library/generators_endless_melodic_slow_spec.rb:
     file: 300
     example: 45
