@@ -120,7 +120,7 @@ RSpec.describe('MB::Sound#beats (evolving rhythms)', :aggregate_failures) do
     expect(line.(2)).not_to eq(line.(0))
   end
 
-  it 'reads a knob energy at each cycle\'s decision point' do
+  it 'reads a knob energy for each beat\'s start' do
     s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 1, sleep: false), transport: MB::Sound::Sequence::Transport.new(bpm: 120),
       channels: 1, buffer_size: 800, realtime: false, raise_errors: true, master_gain: 1)
     MB::Sound::Session.with_context(session: s) {
@@ -128,10 +128,13 @@ RSpec.describe('MB::Sound#beats (evolving rhythms)', :aggregate_failures) do
       g = groove(energy: MB::Sound.knob(:energy), hold: 1)
       expect(g).to be_steered
       MB::Sound.bg(:d, g.number * 0.01 + g.trigger, on: :now)
-      MB::Sound.turn :energy, 1.0, smooth: 0, at: MB::Sound.bar(2)
+      MB::Sound.turn :energy, 1.0, smooth: 0, at: MB::Sound.bar(2, beat: 2)
       Array.new(4 * 120) { s.process_buffer }
-      # Cycle 1 decided at 0.75 (before the turn), cycle 2 at 1.75 (after)
-      expect(hits(g, 1).map(&:first).uniq).to eq([36])
+      # The turn lands on bar 2's second beat: its first beat plays the
+      # kick alone, the rest of it fills (beats-timing-1: before, the
+      # whole of cycle 1 was decided at 0.75, a beat before it)
+      expect(hits(g, 1).select { |_, st| st < 4 }.map(&:first).uniq).to eq([36])
+      expect(hits(g, 1).count { |_, st| st >= 4 }).to be > 12
       expect(hits(g, 2).length).to be > 12
     }
   ensure

@@ -706,7 +706,10 @@ module MB
         # time +to+ (no earlier than +from+), removed from the queue.
         def early_flams(from, to, wn_from, wnps, look_to, fills)
           if @flam_to < look_to
-            @clip.edges(@flam_to, look_to, early: false, fills: fills).each do |time, type, event, _cycle|
+            # (a steered clip's units read here are decided for their own
+            # timeline positions, like the main read's)
+            ahead = @clip.steered? ? steering { @clip.edges(@flam_to, look_to, early: false, fills: fills) } : @clip.edges(@flam_to, look_to, early: false, fills: fills)
+            ahead.each do |time, type, event, _cycle|
               next unless type == :on && event.flam
 
               seconds = event.flam.is_a?(Numeric) && event.flam > 0 ? event.flam.to_f : @flam_lead

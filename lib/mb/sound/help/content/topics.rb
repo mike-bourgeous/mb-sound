@@ -954,11 +954,16 @@ module MB
         fills phrase ends (`energy: true` grows the fill with the
         energy); `rhythm(field, [1, 0, 0.5, 0] * 4)` is one
         melodic row.  Steer them live: options like `density:`, `mutate:`,
-        `energy:`, `chance:` take knobs (`knob(:busy)`, `cc(1)`,
-        `knob(:reg).choose(A2..A4, A3..A5)` for `range:`), read once per
-        cycle a `lead:` (one beat) before it starts, so a `turn` steers the
-        next cycle and takes replay it; `generate(1.bar, busy: knob(:busy))
-        { |cycle, dice, busy:| }` hands them to your block.  They follow
+        `energy:`, `chance:` take knobs (`knob(:busy)`, `cc(1)`, tempo LFOs,
+        `knob(:reg).choose(A2..A4, A3..A5)` for `range:`), read for the
+        start of what they steer.  `beats` reads every beat (`decide:
+        :step`, `:bar`, `:cycle`, or a length), so a turn lands on the next
+        beat and `turn :energy, 2.bars.lfo.square.at(0.1..1)` plays a busy
+        bar, then a sparse one.  The melodic generators read once a cycle,
+        a `lead:` (one beat) before it starts: a turn steers the next cycle,
+        an LFO or a ramp gives its value at the cycle's start.  Takes replay
+        it all; `generate(1.bar, busy: knob(:busy)) { |cycle, dice, busy:|
+        }` hands them to your block.  They follow
         the session key live: `motifs(scale(:phrygian), 8)` (a scale
         without a root) plays phrygian on whatever root `key` sets, cycle by
         cycle; no source at all (`motifs(8)`, `melody(8, vary: true)`,
@@ -999,6 +1004,11 @@ module MB
         end
         bg :try, tr909(groove).at(-18.db)
         turn :energy, 0.9, over: 4
+      end
+      example 'a beat that alternates busy and sparse bars (a square LFO on its energy)' do
+        knob :energy, 0.5
+        bg :try, tr909(beats(16, energy: knob(:energy)) { kick [1, 0, 0, 0] * 4, keep: [0, 8]; hat [0.8] * 16 }).at(-18.db)
+        turn :energy, 2.bars.lfo.square.at(0.05..1)
       end
       example 'sparse bells over a drone' do
         bells = strikes(scale(:minor_pentatonic, :a).weights.over(A4..A6), every: 1.n8, chance: 0.5, gap: 2)
