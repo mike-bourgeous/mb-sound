@@ -307,11 +307,13 @@ module MB
           humanize: humanize, fill: fill, seed: seed)
         reach = MB::M.max(b.length * 2, step * (steps + rows.map(&:length).max.ceil))
         params = { energy: energy, swing: swing }.select { |_, v| !v.respond_to?(:call) && MIDI::Param.param?(v) }
+        # (how a morph cuts the beat: by drum and step; Generative::Morph)
+        slots = Generative::Slots.of_beats(rows, step, hold)
         unless params.empty?
           return Sequence::Clip.generate(b.length, values: b.values, seed: seed, name: "beats(seed: #{seed})", align: align, reach: reach,
-            lead: lead, decide: decide, params: params) { |cycle, dice, **v| b.events(cycle, dice, **v) }
+            lead: lead, decide: decide, params: params, slots: slots) { |cycle, dice, **v| b.events(cycle, dice, **v) }
         end
-        Sequence::Clip.generate(b.length, values: b.values, seed: seed, name: "beats(seed: #{seed})", align: align, reach: reach) { |cycle, dice|
+        Sequence::Clip.generate(b.length, values: b.values, seed: seed, name: "beats(seed: #{seed})", align: align, reach: reach, slots: slots) { |cycle, dice|
           b.events(cycle, dice)
         }
       end
