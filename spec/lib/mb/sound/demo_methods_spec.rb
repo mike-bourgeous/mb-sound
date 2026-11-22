@@ -133,7 +133,9 @@ RSpec.describe(MB::Sound::DemoMethods) do
   # realtime Session): every demo loaded and started as the console does
   # it (live mode, a realtime Session on a virtual clock, the warm-up and
   # its rehearsal), then launched scene by scene, warns of nothing.  The
-  # slow tier plays the first 8 bars, the everyday run 2.
+  # slow tier plays the first 8 bars and lands each scene as the console
+  # does (quantized, 1.25 bars each); the everyday run plays 2 bars and
+  # goes to each scene now for a quarter bar.
   describe 'every demo, started as the console starts it' do
     before { allow(MB::Sound::JIT).to receive(:compiling?).and_return(true) } # (the rehearsal runs only with YJIT)
 
@@ -168,7 +170,8 @@ RSpec.describe(MB::Sound::DemoMethods) do
         out = MB::Sound::NullOutput.new(channels: 2, sleep: :virtual, buffer_size: 800)
         @live = MB::Sound::Session.new(output: out, realtime: true, channels: 2, buffer_size: 800, transport: MB::Sound::Sequence::Transport.new(bpm: 120))
         MB::Sound.live = true
-        bars = [2, *slow_tier([8], keep: 0)].max
+        slow = !slow_tier([true], keep: 0).empty?
+        bars = slow ? 8 : 2
         status = nil
         expect {
           expect {
@@ -177,9 +180,13 @@ RSpec.describe(MB::Sound::DemoMethods) do
               status = MB::Sound.start
               bar = @live.transport.bar_length * 240r / @live.transport.bpm
               paced(@live, (bars * bar).to_f)
+              # (everyday: each scene now and a quarter bar of it, still a
+              # seek crossing each section launch; the slow tier: the
+              # console's quantized landing and 1.25 bars, about four times
+              # the audio: night_bus's 12 scenes, fixes-18)
               @live.arrangement.scenes.each_key do |scene|
-                MB::Sound.go(scene)
-                paced(@live, (1.25r * bar).to_f)
+                slow ? MB::Sound.go(scene) : MB::Sound.go(scene, on: :now)
+                paced(@live, ((slow ? 1.25r : 1/4r) * bar).to_f)
               end
             end
           }.not_to output.to_stderr
