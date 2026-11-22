@@ -65,7 +65,7 @@ RSpec.describe(MB::Sound::UI::Picker, :aggregate_failures) do
     expect(described_class.action(entry(:hall), track: :bass, patch: true)).to have_attributes(kind: :run, code: 'fx :bass, L.fx.hall')
     expect(described_class.action(entry(:walk_a), track: :bass)).to have_attributes(kind: :run, code: 'bg :bass, L.seq.walk_a.()')
     # (a generator bare: the track's knobs steer it; gen-knobs-1)
-    expect(described_class.action(MB::Sound::L.gen.techno_beat, track: :drums)).to have_attributes(kind: :run, code: 'bg :drums, L.gen.techno_beat')
+    expect(described_class.action(MB::Sound::L.gen.beat.techno, track: :drums)).to have_attributes(kind: :run, code: 'bg :drums, L.gen.beat.techno')
     expect(described_class.action(entry(:club), track: :bass)).to have_attributes(kind: :paste, code: 'master :club')
   end
 

@@ -40,21 +40,24 @@ module MB
         #       Array.new(8) { |i| [i * 1/8r, 1/16r, dice.pick(notes, i), 0.7] }
         #     }
         #
-        # +params+ (G3) are options the block reads as keywords, decided
-        # once per cycle at its decision point, +lead+ (a length, one beat
-        # by default) before the cycle: knobs, `cc`, tempo LFOs, choices,
-        # or plain values (see Steer).
+        # +params+ (G3) are options the block reads as keywords: knobs,
+        # `cc`, tempo LFOs, choices, or plain values (see Steer), read for
+        # the start of each cycle (or each +decide+ unit: :beat, :bar, a
+        # length; the block then makes the whole cycle with each unit's
+        # values and the unit plays the notes starting in it) at its
+        # decision point, +lead+ (a length, one beat by default; 0 for none)
+        # before it.
         #
         #     knob :busy, 0.3
         #     Clip.generate(1.bar, busy: knob(:busy)) { |cycle, dice, busy:|
         #       Array.new(16) { |i| [i * 1/16r, 1/16r, A3, 0.7] if dice.rand(:on, i) < busy }.compact
         #     }
-        def generate(length, values: nil, seed: nil, name: nil, align: :timeline, reach: nil, loop: true, events: nil, lead: nil, params: {}, &block)
+        def generate(length, values: nil, seed: nil, name: nil, align: :timeline, reach: nil, loop: true, events: nil, lead: nil, decide: :cycle, params: {}, &block)
           length = Generative.length_of(length, :length, divisions: false)
           seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
           reach = reach && Generative.length_of(reach, :reach, divisions: false)
           label = name&.to_s || "generate(seed: #{seed})"
-          steer = Steer.build(params, length: length, what: label, lead: lead)
+          steer = Steer.build(params, length: length, what: label, lead: lead, decide: decide)
           if steer.nil? && !params.empty?
             # Nothing moves: the block gets the plain values every cycle
             fixed = params.transform_keys(&:to_sym).freeze

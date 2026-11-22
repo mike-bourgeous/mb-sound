@@ -19,6 +19,26 @@ module SF2Writer
 
   module_function
 
+  # A drum kit font at +path+ (drum-gen-1): one preset +name+ in +bank+
+  # with a one-key region per key of +keys+, each a short sample of its own
+  # level (a constant key / 128, so a render says which key played).  With
+  # +velocity_layers+ 2, each key has a soft (0..63) and a hard (64..127)
+  # sample, the soft one at half the level.
+  def drum_kit(path, keys:, name: 'Spec Kit', bank: 0, program: 0, velocity_layers: 1)
+    samples = []
+    zones = []
+    keys.each do |k|
+      velocity_layers.times do |layer|
+        lo, hi = velocity_layers == 1 ? [0, 127] : [layer * 64, layer * 64 + 63]
+        level = k / 128.0 * (velocity_layers == 1 || layer == 1 ? 1 : 0.5)
+        zones << { key_range: [k, k], vel_range: [lo, hi], sample_id: samples.length }
+        samples << { name: "k#{k}v#{layer}", data: [level] * 2400, rate: 48000, pitch: 60 }
+      end
+    end
+    write(path, samples: samples, instruments: [{ name: name, zones: zones }],
+                presets: [{ name: name, program: program, bank: bank, zones: [{ instrument: 0 }] }], info: { 'INAM' => name })
+  end
+
   def write(path, samples:, instruments:, presets:, sm24: false, terminals: true, info: { 'INAM' => 'Spec Font' })
     File.binwrite(path, build(samples: samples, instruments: instruments, presets: presets, sm24: sm24, terminals: terminals, info: info))
     path

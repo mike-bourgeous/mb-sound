@@ -539,7 +539,7 @@ RSpec.describe('session fuzzing') do
   # limiter on and the offline reference doesn't; a song louder than -1
   # dBFS, its tr909 kit peaking at 1.01)
   it 'holds form_start for a song louder than the live safety limiter (seed 788010)', render_budget: { seconds: 30, reason: 'one random song, one relation' } do
-    song = SessionFuzz.generate(Random.new(788010))
+    song = SessionFuzz.generate(Random.new(788010), commands: 35) # (the 35 commands of fix-knob-reload; each new command changes every seed's song)
     expect(SessionFuzz.check(:form_start, song)).to be_nil
   end
 
@@ -569,7 +569,7 @@ RSpec.describe('session fuzzing') do
   # dropped where the track may have stopped by the time they land)
   it 'drops swaps of tracks that may have stopped (seeds 776002, 776003, 776046)', render_budget: { seconds: 90, reason: 'three random songs' } do
     [776002, 776003, 776046].each do |seed|
-      song = SessionFuzz.generate(Random.new(seed))
+      song = SessionFuzz.generate(Random.new(seed), commands: 35)
       # (track swaps: the bg graph swaps of gen-ux-1 round 2's command
       # start or replace their graph, so they may stay)
       expect(song.code).not_to match(/swap :t\d/), "seed #{seed}"

@@ -224,9 +224,12 @@ module MB
           dir = slash ? str[0..slash] : ''
           base = slash ? str[(slash + 1)..] : str
           fsdir = dir.empty? ? '.' : File.expand_path(dir)
-          return nil unless File.directory?(fsdir)
+          # (a font command's word without a slash: also the names of the
+          # fonts on the SoundFont search path, Sampler::FontPath; drum-gen-1)
+          fonts = !slash && FONT_COMMANDS.include?(m[1].to_sym) ? font_names(str) : []
+          return (fonts.empty? ? nil : fonts) unless File.directory?(fsdir)
 
-          found = path_entries(fsdir, dir, base)
+          found = fonts + path_entries(fsdir, dir, base)
           # (one directory: its entries, so Reline completes to "dir/"
           # without closing the quote, as it does after a lone candidate)
           if found.length == 1 && found[0].end_with?('/')
@@ -236,6 +239,18 @@ module MB
           found.empty? ? nil : found
         rescue SystemCallError
           nil
+        end
+
+        # Commands whose bare word may be a SoundFont's name.
+        FONT_COMMANDS = %i[sf2 soundfont].freeze
+
+        # Names of installed SoundFonts (Sampler::FontPath.names) starting
+        # with +word+, ignoring case.
+        def self.font_names(word)
+          w = word.downcase
+          Sampler::FontPath.names.select { |n| n.downcase.start_with?(w) }.first(PATH_LIMIT)
+        rescue StandardError
+          []
         end
 
         # Entries of file system directory +fsdir+ (written +dir+) starting

@@ -79,7 +79,7 @@ module MB
           words = q.split(/[\s.]+/).reject(&:empty?)
           typed = query.to_s =~ /[\s.]\z/ || words.empty? ? '' : words.pop
           text = [root, *words].join('.') + ".#{typed}"
-          found = Library::Finder.new(index).candidates(text, limit: limit)
+          found = Library::Finder.new(index).candidates(text, limit: limit, fold: false)
           return found.filter_map(&:entry) if found
           # (an exact name: Finder leaves it to Pry; a word that doesn't
           # narrow: find's ranking over the head)

@@ -222,6 +222,9 @@ RSpec.configure do |config|
     # The same for the ringing-sum hint bg prints once per process
     # (GraphNode::RingHint); its specs turn it on.
     MB::Sound::GraphNode::RingHint.enabled = false
+    # (no installed SoundFont plays in specs: synthetic fonts only, in the
+    # folders a spec gives Sampler::FontPath.only; drum-gen-1)
+    MB::Sound::Sampler::FontPath.only = []
   end
 
   # rspec-expectations config goes here. You can use an alternate
