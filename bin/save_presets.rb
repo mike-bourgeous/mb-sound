@@ -152,7 +152,7 @@ module MB::Sound
   # conv-reverb-1, 2026-11-06) to synthesized impulses: exponential noise
   # tails with these octave T60s (spec/support/synthetic_sounds.rb's
   # impulse_response, plus a few early reflections for the room and hall;
-  # the generator is /app/workbench/data/bench/sets/conv-reverb-1/make_impulses.rb).
+  # the generator is `make_impulses.rb` in the private Bench set conv-reverb-1).
   # The values are the fit's, stored (a fit renders the reverb about 70
   # times); saved as effect documents with a mix param through
   # ReverbMatch.graph, as ReverbMatch#save writes them.
