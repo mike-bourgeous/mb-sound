@@ -61,6 +61,11 @@ module MB
           @channels[0].length
         end
 
+        # True if #table(c, mips) is built.
+        def table?(c, mips = :default)
+          @mutex.synchronize { @tables.key?([c % @channels.length, mips]) }
+        end
+
         # The sample-mode Wavetable (no loop; the sampler loops) for channel
         # +c+ with level spacing +mips+, built on first use and kept.
         def table(c, mips = :default)

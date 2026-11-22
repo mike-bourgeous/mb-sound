@@ -60,7 +60,12 @@ module MB
             nodes = queued.starts.grep(MIDI::ClipSource)
             raise ArgumentError, "Player #{name.inspect} doesn't play any clips" if nodes.empty?
           end
-          count = planned_swaps(name, nodes, clips, warn: true).length
+          planned = planned_swaps(name, nodes, clips, warn: true)
+          count = planned.length
+          # (what the clip sources' readers need for the new clips is made
+          # here, on the calling thread, not where the swap lands: a drum
+          # kit's tables for keys its old clip didn't play; Sampler::Reach)
+          planned.each { |n, c| n.prepare_clip(c) }
 
           if !stopped && clips_over_by?(name, time)
             # (the voices reading an ended one-shot clip have ended, so the

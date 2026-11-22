@@ -214,6 +214,12 @@ module MB
       # The same-note retrigger mode (see the class description).
       attr_reader :retrigger
 
+      # The clip sources (MIDI::ClipSource) the synth's notes come from
+      # (none for live MIDI or a file).
+      def clip_sources
+        [@allocator, *@allocator.graph].grep(MIDI::ClipSource).uniq
+      end
+
       # The overlapping same-key note mode (:count or :restrike; see the
       # class description and MIDI::Allocator).
       def same_key

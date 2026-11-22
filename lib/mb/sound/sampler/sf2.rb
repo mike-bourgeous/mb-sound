@@ -167,19 +167,43 @@ module MB
           end
         end
 
+        # Fonts kept after nothing uses them, the most recently opened first
+        # (see .open): switching back to the last kit or two is free.
+        RECENT_FONTS = 2
+
+        @mutex = Mutex.new
+        @cache = {}
+        @recent = []
+        # (each Instrument a Font hands out keeps its Font, so its parsed
+        # headers, samples, and playback tables, alive: see .keep)
+        @owners = ObjectSpace::WeakKeyMap.new
+        @opened = 0
+
         class << self
-          # The Font for +path+ (cached while it's in use; a changed file is
-          # read again): a path, or a font's name on the search path
-          # (GraphIO::FileGuard.soundfont, Sampler::FontPath); the Font keeps
-          # +path+ as given, so it prints and saves as the name.
+          # Fonts read from their files so far in this process (specs:
+          # a font in use is read once).
+          attr_reader :opened
+
+          # The Font for +path+ (a changed file is read again): a path, or a
+          # font's name on the search path (GraphIO::FileGuard.soundfont,
+          # Sampler::FontPath); the Font keeps +path+ as given, so it prints
+          # and saves as the name.
+          #
+          # A Font stays cached while anything uses an instrument it made
+          # (a track's patch, a playing graph, a variable; see .keep) and
+          # while it is one of the RECENT_FONTS opened last; after that a
+          # garbage collection may drop it.  bg-latency-1 (2026-11-22): the
+          # cache held Fonts only weakly, and building a kit's playback
+          # tables runs hundreds of collections, so the next build of the
+          # same kit (a track's patch built for its check, then again for
+          # its launch) read and built everything again: 3-4 s each time
+          # for an acoustic kit.
           def open(path)
             real = defined?(GraphIO::FileGuard) ? GraphIO::FileGuard.soundfont(path) : path.to_s
             path = path.to_s
             st = File.stat(real.to_s)
             key = [File.expand_path(real.to_s), st.mtime.to_r, st.size]
-            @mutex ||= Mutex.new
             @mutex.synchronize {
-              @cache ||= {}
               ref = @cache[key]
               font = begin
                 ref&.weakref_alive? ? ref.__getobj__ : nil
@@ -188,10 +212,28 @@ module MB
               end
               unless font
                 font = Font.new(real.to_s, name: path)
+                @opened += 1
+                @cache.delete_if { |_, r| !(r.weakref_alive? rescue false) }
                 @cache[key] = WeakRef.new(font)
               end
+              @recent.delete(font)
+              @recent.unshift(font)
+              @recent.pop while @recent.length > RECENT_FONTS
               font
             }
+          end
+
+          # Keeps +font+ alive as long as +object+ (an Instrument it made)
+          # is (see .open).  Returns +object+.
+          def keep(object, font)
+            @mutex.synchronize { @owners[object] = font }
+            object
+          end
+
+          # Forgets the recently opened Fonts (specs; fonts still in use
+          # stay cached).
+          def forget_recent
+            @mutex.synchronize { @recent.clear }
           end
 
           # An Instrument for +preset+ of the font at +path+ (see Font#[]).
@@ -351,7 +393,9 @@ module MB
             }.tap { |i|
               @mutex.synchronize { @instrument_cache[key] ||= i }
             }
-            inst.with_lineage(lineage)
+            # (the copy handed out keeps this Font cached while it lives; the
+            # cached one doesn't, or the Font would keep itself)
+            SF2.keep(inst.with_lineage(lineage), self)
           end
 
           # +inst+ (preset +p+'s instrument) with its keys moved by its kit's

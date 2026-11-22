@@ -1674,7 +1674,11 @@ module MB
           @session.resume(tr.name, start_time: time, fade: 0)
         elsif tr.patch?
           raise ArgumentError, "Track #{tr.name.inspect} has a patch; give it a clip to play" if clip.nil?
-          graph = build_patch(tr, clip, carry)
+          # (a carrying rebuild's clip sources take over the playing ones,
+          # swaps included: its drum kits cover those clips' keys too;
+          # Sampler::Reach)
+          playing = carry ? @session.timeline_nodes_of(tr.name).grep(MIDI::ClipSource).flat_map { |n| [n.ring_clip, n.pending_clip, n.clip].compact } : []
+          graph = Sampler::Reach.covering(playing) { build_patch(tr, clip, carry) }
           @mutex.synchronize { (@built ||= {})[tr.name] = graph }
           set_ahead(tr, graph)
           time = early(tr, musical) # (an attack lead is measured on the new graph)
