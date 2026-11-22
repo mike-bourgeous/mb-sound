@@ -17,8 +17,8 @@ module MB
       # leaves on, plus +offset+ (the synth's own response, a monitoring
       # path; negative for early), through the port's timed queue
       # (FastAudio::JackMIDIOutput#write_after): JACK's thread places each
-      # message once its frame's audio is queued, from where the output's
-      # queue actually goes, so it is sample exact at any start, through
+      # message from where the output's queue actually goes (in the cycle
+      # that plays its frame), so it is sample exact at any start, through
       # underruns, and when the output queue changes depth.  Other paths
       # (RtMidi) send when the render thread makes the note (not aligned;
       # see design/notes/midi.md).

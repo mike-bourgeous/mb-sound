@@ -151,8 +151,8 @@ module MB
         # after the audio of the frame +ahead+ frames past +playback+'s
         # write position (a FastAudio::Playback on JACK, e.g.
         # DeviceOutput#jack_playback; frames at its device rate) leaves:
-        # JACK's thread places it once that audio is queued, so it stays with
-        # its audio at any start and through underruns (see
+        # JACK's thread places it from where that frame actually goes, so it
+        # stays with its audio at any start and through underruns (see
         # FastAudio::JackMIDIOutput#write_after).  Without allocating; from
         # the thread that writes +playback+.  JACK outputs only.  Returns
         # false if the queue was full, nil if +playback+ isn't on JACK.
