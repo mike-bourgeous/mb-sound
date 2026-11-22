@@ -160,6 +160,7 @@ A generator is a looping Clip whose events per cycle are a pure function of (see
 Moving parameters (`MIDI::Param`) are read once per decision; `MIDI::Lock` maps keys into scales; `midi_clip`/`midi_kit` import MIDI files as exact clips.
 Live MIDI uses JACK ports when a server answers, else RtMidi; specs use synthetic MIDI files only.
 MIDI out: `track :kronos, midi_out('KRONOS', channel: 1)` plays a synth or program (on JACK each note on its audio's frame); `MIDI::Ports` finds ports by name (`midi_ports`, `:midi_ports` pane).
+Channels and programs count from 1 for people (`MIDI::Channel`); `Event#channel` and the wire stay 0-based.
 
 ### [Structure analysis (music information retrieval)](structure.md)
 

@@ -295,7 +295,10 @@ module MB
           # The Preset for +selector+: nil (the first by bank and program),
           # an Integer program in bank 0 (GM: 0 is the piano), [bank,
           # program], a Preset, or a name (a String or Symbol: exact, ignoring
-          # case, else the one name that contains it).
+          # case, else the one name that contains it).  Bank and program
+          # numbers are the file's own, counted from 0 as SoundFont editors
+          # show them (not converted like MIDI programs elsewhere, which
+          # count from 1; MIDI::Program).
           def preset(selector = nil)
             list = preset_headers
             raise ArgumentError, "#{@path}: the font has no presets" if list.empty?
@@ -310,7 +313,10 @@ module MB
                     when String, Symbol then preset_named(list, selector.to_s)
                     else raise ArgumentError, "Choose a preset by program, [bank, program], or name (got #{selector.inspect})"
                     end
-            raise ArgumentError, "#{@path}: no preset #{selector.inspect}#{suggestions(list, selector)}" unless found
+            unless found
+              zero = selector.is_a?(Integer) || selector.is_a?(Array) ? ' (preset numbers are the file\'s own, counted from 0 as SoundFont editors show them: GM program 1, the piano, is preset 0)' : ''
+              raise ArgumentError, "#{@path}: no preset #{selector.inspect}#{suggestions(list, selector)}#{zero}"
+            end
             found
           end
 

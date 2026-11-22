@@ -52,7 +52,7 @@ module MB
       class Import
         # One track of a file (see #tracks): its index, name (NUL bytes and
         # surrounding spaces removed; midilib reads "Unnamed" for none),
-        # channels (0-based), note count, lowest and highest note, the
+        # channels (1 to 16, as synths count them), note count, lowest and highest note, the
         # controller lanes it has with their event counts ({ cc1: 3296,
         # bend: 65 }), whether it looks like drums, and how many notes it
         # sounds at once at most.
@@ -61,7 +61,7 @@ module MB
 
           def to_s
             range = notes > 0 ? " #{MB::Sound::Note.new(low)}..#{MB::Sound::Note.new(high)}" : ''
-            ch = channels.empty? ? 'no channel' : "ch #{channels.map { |c| c + 1 }.join(',')}"
+            ch = channels.empty? ? 'no channel' : "ch #{channels.join(',')}"
             ctl = controls.empty? ? '' : " #{controls.map { |k, n| "#{k} x#{n}" }.join(' ')}"
             kind = drums ? ' drums' : (notes > 0 ? (polyphony > 1 ? " poly #{polyphony}" : ' mono') : '')
             kind += " #{slides} slide#{'s' unless slides == 1}" if slides > 0
@@ -179,7 +179,7 @@ module MB
               notes = pair_notes(evs, sustain: false)
               lanes = evs.filter_map { |_, e| lane_key(e, sustain: false) }.tally.transform_keys { |type, n| n ? :"#{type == :poly_pressure ? 'poly' : type}#{n}" : type }
               name = Import.clean_name(t.name)
-              chans = evs.map { |_, e| e.channel }.uniq.sort
+              chans = evs.map { |_, e| MIDI::Channel.show(e.channel) }.uniq.sort
               nums = notes.map { |n| n[2] }
               Track.new(
                 index: i, name: name, channels: chans, notes: notes.length, low: nums.min, high: nums.max,
@@ -253,9 +253,10 @@ module MB
         # A Sequence::Clip of a track (see the class description and
         # MidiMethods#midi_clip).
         def clip(track: nil, channel: nil, bars: nil, from: 0, loop: true, slides: :auto, cc: :steps, timing: :score, sustain: true, transport: nil)
-          check_options(channel, bars, from, slides, cc, timing)
+          check_options(bars, from, slides, cc, timing)
+          wire_channel = MIDI::Channel.of_optional(channel)
           idx = track_index(track)
-          evs = select_channel(@channel_events[idx], channel, idx)
+          evs = select_channel(@channel_events[idx], wire_channel, idx)
           notes = pair_notes(evs, sustain: sustain)
           start, stop = window(notes, evs, from, bars)
           notes = cut(notes, start, stop)
@@ -292,7 +293,7 @@ module MB
         # +loop:+, +timing:+).  Notes no drum name covers are left out
         # with a warning.
         def kit(track: nil, bars: nil, from: 0, loop: true, timing: :score, transport: nil)
-          check_options(nil, bars, from, :auto, false, timing)
+          check_options(bars, from, :auto, false, timing)
           indexes = drum_tracks(track)
           evs = indexes.flat_map { |i| @channel_events[i] }.sort_by.with_index { |(t, _), j| [t, j] }
           notes = pair_notes(evs, sustain: false)
@@ -337,8 +338,7 @@ module MB
 
         private
 
-        def check_options(channel, bars, from, slides, cc, timing)
-          raise ArgumentError, "channel: is a 0-based MIDI channel 0..15 (got #{channel.inspect})" unless channel.nil? || (channel.is_a?(Integer) && channel.between?(0, 15))
+        def check_options(bars, from, slides, cc, timing)
           raise ArgumentError, "bars: is a positive whole number of bars (got #{bars.inspect})" unless bars.nil? || (bars.is_a?(Integer) && bars > 0)
           raise ArgumentError, "from: is a bar offset from 0 (got #{from.inspect})" unless from.is_a?(Integer) && from >= 0
           unless [:auto, true, false].include?(slides) || (slides.is_a?(Numeric) && slides.real? && slides > 0 && slides <= 1)
@@ -367,13 +367,14 @@ module MB
           end
         end
 
-        # +evs+ of channel +channel+, or all of them (notes from every
-        # channel, controllers from the channel with the most events).
+        # +evs+ of 0-based (wire) channel +channel+, or all of them (notes
+        # from every channel, controllers from the channel with the most
+        # events).
         def select_channel(evs, channel, idx)
           return evs.select { |_, e| e.channel == channel } if channel
           with_notes = evs.filter_map { |_, e| e.channel if e.note_on? }.uniq.sort
           if with_notes.length > 1
-            raise ArgumentError, "Track #{idx} #{tracks[idx].name.inspect} of #{File.basename(@path.to_s)} has notes on channels #{with_notes.join(', ')} (0-based): pick one with channel:"
+            raise ArgumentError, "Track #{idx} #{tracks[idx].name.inspect} of #{File.basename(@path.to_s)} has notes on channels #{with_notes.map { |c| MIDI::Channel.show(c) }.join(', ')}: pick one with channel: (channels count from 1)"
           end
           chans = evs.map { |_, e| e.channel }.tally
           return evs if chans.length <= 1

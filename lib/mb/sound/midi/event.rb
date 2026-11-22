@@ -12,8 +12,12 @@ module MB
       #   velocity 0 becomes a :note_off (with the conventional release
       #   velocity of 64).  Channel mode messages (CC 120-127) stay :cc; see
       #   #all_sound_off?, #reset_controllers?, and #all_notes_off?.
-      # - +channel+: 0 to 15 (0-based: MIDI channel 10 is 9), or nil for
-      #   system messages.
+      # - +channel+: 0 to 15, the wire's 0-based number (MIDI channel 10,
+      #   drums, is 9), or nil for system messages.  Events are the
+      #   wire-level layer: their fields, constructors (Event.note_on(...,
+      #   channel:)), and #with_channel stay 0-based, while every
+      #   user-facing argument and display counts channels from 1
+      #   (MIDI::Channel; #to_s shows ch1 for channel 0).
       # - +note+ (alias #index): the note number for notes and poly
       #   pressure, the controller number for CCs, else nil.  Usually an
       #   Integer, but clip sources and #transpose may give other Numerics or
@@ -288,7 +292,8 @@ module MB
           new(type: :bend, channel: channel, value: value.to_f, raw: raw, bytes: [0xe0 | channel, raw & 0x7f, raw >> 7], time: time)
         end
 
-        # A program change (+program+ 0..127).
+        # A program change (+program+ 0..127, the wire's number: program 1
+        # on a synth's display is 0 here; MIDI::Program).
         def self.program(program, channel: 0, time: 0r)
           parse([0xc0 | channel, program], time: time)
         end
@@ -451,9 +456,12 @@ module MB
                  when :cc, :poly_pressure then "#{note}=#{MB::M.sigfigs(value, 3)}"
                  when :bend then "#{MB::M.sigfigs(value, 4)}#{" (#{MB::M.sigfigs(bend_semitones, 4)} st)" if bend_range}"
                  when :sysex then "#{bytes.bytesize} bytes"
+                 when :program then Program.show(value).to_s
                  else value.inspect
                  end
-          "#{type}#{"/ch#{channel}" if channel} #{desc} @#{t}s"
+          # (shown counted from 1, as synths show channels and programs;
+          # the fields stay the wire's 0-based numbers)
+          "#{type}#{"/ch#{Channel.show(channel)}" if channel} #{desc} @#{t}s"
         end
       end
     end

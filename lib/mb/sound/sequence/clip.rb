@@ -1095,7 +1095,8 @@ module MB
         end
 
         # Returns a MIDI::Stream playing this clip: a new MIDI::ClipSource
-        # (each clip event becomes a note-on and a note-off on +:channel+)
+        # (each clip event becomes a note-on and a note-off on +:channel+,
+        # 1 to 16 as on synths, 1 by default; MIDI::Channel)
         # at the tempo of +:transport+ (the session's by default).  A clip is
         # just a MIDI source, so anything that reads streams plays clips:
         # Notes (#notes and the output methods below), MB::Sound::Synth
@@ -1104,8 +1105,8 @@ module MB
         # Each call makes a new source, since a source follows the timeline
         # of the graph that plays it (see Sequence::TimelineNode): a clip can
         # play in several players at once, each in its own place.
-        def stream(channel: 0, transport: nil)
-          MIDI::Stream.new(MIDI::ClipSource.new(self, channel: channel, transport: transport))
+        def stream(channel: nil, transport: nil)
+          MIDI::Stream.new(MIDI::ClipSource.new(self, channel: MIDI::Channel.of(channel, default: 0), transport: transport))
         end
 
         # Returns a MB::Sound::Notes on a new #stream of this clip: the mono

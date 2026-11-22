@@ -50,7 +50,8 @@ module MB
         # The controller of a spill-over's choke (see #ring_out).
         ALL_SOUND_OFF = 120
 
-        # The MIDI channel (0-based) given to the clip's events.
+        # The MIDI channel given to the clip's events: 0-based, as on the
+        # wire (Event#channel); Clip#stream takes it 1-based.
         attr_reader :channel
 
         # Read spans the clip's edges can't land in take a quiet path:

@@ -26,7 +26,7 @@ module MB
       #
       # Example:
       #     stream = MB::Sound::MIDI::Stream.new(MB::Sound::MIDI::FileSource.new('song.mid'))
-      #     bass = stream.channel(1).transpose(-1.oct).reader
+      #     bass = stream.channel(2).transpose(-1.oct).reader
       #     bass.next(800r / 48000)   # events for the first 800-sample buffer
       class Stream
         include GraphNode::Nameable
@@ -285,9 +285,9 @@ module MB
           @log.length
         end
 
-        # Returns a stream with only events on +channels+ (an Integer from 0
-        # to 15, or an Array or Range of them).  Channels are 0-based (MIDI
-        # channel 10, drums, is 9).  System and
+        # Returns a stream with only events on +channels+ (an Integer from 1
+        # to 16, or an Array or Range of them).  Channels count from 1, as
+        # on synths (drums are channel 10; MIDI::Channel).  System and
         # sysex events pass through.
         def channel(channels)
           Stream.new(Transform::Channel.new(self, channels))

@@ -48,7 +48,7 @@ RSpec.describe(MB::Sound::MIDI::Output, :aggregate_failures) do
 
       out.write([0x90, 62, 80])
       out << "\x80\x3e\x00".b
-      out << MB::Sound::D4.to_midi(velocity: 90, channel: 1)
+      out << MB::Sound::D4.to_midi(velocity: 90, channel: 2)
       expect(wait_for(input, 3)).to eq([[0x90, 62, 80], [0x80, 62, 0], [0x91, 62, 90]])
       expect { out << MB::Sound::MIDI::Event.new(type: :choke, note: 60) }.to raise_error(ArgumentError, /bytes/)
     end

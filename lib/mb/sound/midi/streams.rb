@@ -1,6 +1,7 @@
 # The pull-based MIDI event layer: Events from Sources, read once for many
 # readers by Streams, with stream transforms.  Loaded after Sequence,
 # since ClipSource follows the sequence timeline.
+require_relative 'channel'
 require_relative 'event'
 require_relative 'control_spec'
 require_relative 'control_map'
