@@ -1,8 +1,8 @@
 # Launching L.gen entries the way the console does, counting note-ons per
 # bar (beat-halftime-1): `include GeneratorLaunch` in an example group, then
 # `launch('bg :x, L.gen.beat.rock', bpm: 960, bars: 40)`, or
-# `GeneratorLaunch.sweep(self, entries)` for the family sweep (every entry
-# still playing well past its cycles, fills, and the 8-bar audition).
+# `expect_keeps_playing(entry)` for the family sweep (every entry still
+# playing well past its cycles, fills, and the 8-bar audition).
 module GeneratorLaunch
   def self.included(group)
     group.before {
@@ -56,33 +56,29 @@ module GeneratorLaunch
     [9, 33, per.length - w + 1].select { |b| b >= 9 && b + w - 1 <= per.length }.uniq.to_h { |b| [b, per[b - 1, w].sum] }
   end
 
-  # Adds the family sweep's examples for +entries+ to example +group+:
-  # each entry, on a track and with no track, at a fast tempo (the
-  # property is in bars: 40 at 960 BPM), plain; the slow tier adds a
-  # steered run, 85 and 170 BPM, bar 65, and the beats on their kit's
-  # track.  Drum beats also play every bar, bars 33-40 about as busy as
-  # bars 1-8.
-  def self.sweep(group, entries)
-    entries.each do |entry|
-      group.it "keeps #{entry.head_path} playing on a track and with no track" do
-        # [BPM, steered, bars]
-        configs = [[960, false, 40], *slow_tier([[960, true, 65], [85, false, 65], [170, true, 65]], keep: 0)]
-        configs.each do |bpm, steer, bars|
-          spellings = { track: "track :x, #{entry.head_path}; bg :x", no_track: "bg :x, #{entry.head_path}" }
-          spellings[:kit] = "track :x, #{entry.settings[:instrument].inspect}; bg :x, #{entry.head_path}" if entry.family == :beat && SPEC_SLOW
-          spellings.each do |label, code|
-            next if steer && label == :no_track
-            per, players, = launch(code, bpm: bpm, bars: bars, steer: steer)
-            what = "#{entry.head_path} #{label} at #{bpm} BPM#{' steered' if steer}: #{per.inspect}"
-            expect(players).to eq([:x]), what
-            late_windows(entry, per).each { |b, n| expect(n).to be > 0, "#{what}: silent from bar #{b}" }
-            next unless entry.family == :beat
+  # The family sweep's checks for +entry+ (call from an example in the
+  # spec file, so file times count there): on a track and with no track,
+  # at a fast tempo (the property is in bars: 40 at 960 BPM), plain; the
+  # slow tier adds a steered run, 85 and 170 BPM, bar 65, and the beats on
+  # their kit's track.  Drum beats also play every bar, bars 33-40 about
+  # as busy as bars 1-8.
+  def expect_keeps_playing(entry)
+    # [BPM, steered, bars]
+    configs = [[960, false, 40], *slow_tier([[960, true, 65], [85, false, 65], [170, true, 65]], keep: 0)]
+    configs.each do |bpm, steer, bars|
+      spellings = { track: "track :x, #{entry.head_path}; bg :x", no_track: "bg :x, #{entry.head_path}" }
+      spellings[:kit] = "track :x, #{entry.settings[:instrument].inspect}; bg :x, #{entry.head_path}" if entry.family == :beat && SPEC_SLOW
+      spellings.each do |label, code|
+        next if steer && label == :no_track
+        per, players, = launch(code, bpm: bpm, bars: bars, steer: steer)
+        what = "#{entry.head_path} #{label} at #{bpm} BPM#{' steered' if steer}: #{per.inspect}"
+        expect(players).to eq([:x]), what
+        late_windows(entry, per).each { |b, n| expect(n).to be > 0, "#{what}: silent from bar #{b}" }
+        next unless entry.family == :beat
 
-            expect(per.min).to be > 0, what
-            ratio = per[32, 8].sum.to_f / per[0, 8].sum
-            expect(ratio).to be_between(0.6, 1.6), "#{what}: bars 33-40 against 1-8"
-          end
-        end
+        expect(per.min).to be > 0, what
+        ratio = per[32, 8].sum.to_f / per[0, 8].sum
+        expect(ratio).to be_between(0.6, 1.6), "#{what}: bars 33-40 against 1-8"
       end
     end
   end

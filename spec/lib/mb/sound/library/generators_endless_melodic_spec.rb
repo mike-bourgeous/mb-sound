@@ -8,5 +8,7 @@ RSpec.describe MB::Sound::Library::Generators, 'melodic generators keep playing'
                render_budget: { seconds: 1500, reason: 'each melodic entry for 40 bars (65 in the slow tier), two launch spellings; fast tempos keep it ~10 s of audio each' } do
   include GeneratorLaunch
 
-  GeneratorLaunch.sweep(self, MB::Sound::L.gen.entries.reject { |e| e.family == :beat })
+  MB::Sound::L.gen.entries.reject { |e| e.family == :beat }.each do |entry|
+    it("keeps #{entry.head_path} playing on a track and with no track") { expect_keeps_playing(entry) }
+  end
 end
