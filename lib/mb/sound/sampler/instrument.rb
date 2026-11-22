@@ -446,11 +446,14 @@ module MB
           inst = self
           tail = source.is_a?(Sequence::Clip) ? { tail: 0 } : {}
           reach = options.key?(:reach) ? options.delete(:reach) : Reach.for(self, source)
-          Reach.notice(self, reach)
-          syn = MB::Sound.synth(source, voices: voices, **tail) { |v|
-            s = inst.play(v, **options, reach: reach)
-            block ? block.call(v, s) : s
+          build = -> {
+            MB::Sound.synth(source, voices: voices, **tail) { |v|
+              s = inst.play(v, **options, reach: reach)
+              block ? block.call(v, s) : s
+            }
           }
+          # (tables to build: say so, and hand the GVL to the render thread)
+          syn = Reach.notice(self, reach) ? Reach.yielding(&build) : build.call
           syn.clip_sources.each { |c| c.prepare_with(reach) } if reach
           syn
         end

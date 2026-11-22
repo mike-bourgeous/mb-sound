@@ -107,6 +107,26 @@ RSpec.describe 'Loading SoundFont kits', :aggregate_failures do
       expect(reached).to eq(full)
     end
 
+    it 'a second bg of another clip on a playing kit track swaps the clip: no new patch build, no font read' do
+      MB::Sound.rewind
+      s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, buffer_size: 512, sleep: false), realtime: false)
+      builds = 0
+      MB::Sound::Session.with_context(session: s) {
+        MB::Sound.track(:drums) { |c| builds += 1; MB::Sound.sf2(kit_path, preset: [128, 0]).sampler(c, voices: 4) }
+        MB::Sound.bg(:drums, beat)
+      }
+      20.times { s.process_buffer }
+      before = builds
+      opened = sf2.opened
+      MB::Sound::Session.with_context(session: s) { MB::Sound.bg(:drums, more) }
+      200.times { s.process_buffer }
+      expect(builds).to eq(before)
+      expect(sf2.opened).to eq(opened)
+      expect(built(kit).length).to eq(8) # (the swap covered the snare and ride)
+    ensure
+      s&.close
+    end
+
     it 'leaves kits played from a stream, and other instruments, building every table' do
       expect(MB::Sound::Sampler::Reach.for(kit, beat)).not_to be_nil
       expect(MB::Sound::Sampler::Reach.for(kit, beat.stream)).to be_nil

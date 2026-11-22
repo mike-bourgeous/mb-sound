@@ -108,12 +108,14 @@ module MB
           entries = @mutex.synchronize { @tables.to_a }
           entries.map { |(inst, *), _| inst }.uniq.each { |inst| Reach.notice(inst, nil, new_keys) }
           @mutex.synchronize { @keys = (@keys | new_keys).sort.freeze }
-          entries.each do |(_instrument, c, rate, _mips, _interp), (specs, _rows, slots)|
-            slots.each do |index, regions, m, interp|
-              next unless specs[index].equal?(Reach.placeholder_spec(rate, interp)) && regions.any? { |r| covers?(r) }
-              specs[index] = Instrument.table_spec(regions[0].sample, c, m, rate, interp)
+          Reach.yielding {
+            entries.each do |(_instrument, c, rate, _mips, _interp), (specs, _rows, slots)|
+              slots.each do |index, regions, m, interp|
+                next unless specs[index].equal?(Reach.placeholder_spec(rate, interp)) && regions.any? { |r| covers?(r) }
+                specs[index] = Instrument.table_spec(regions[0].sample, c, m, rate, interp)
+              end
             end
-          end
+          }
           true
         end
 
@@ -133,6 +135,22 @@ module MB
           $stdout.puts "\e[2m#{msg}\e[0m"
           $stdout.flush
           msg
+        end
+
+        # Runs the block (a build of playback tables: seconds of Ruby and
+        # FFTs holding the GVL) with the calling thread handing the GVL to
+        # a live Session's render thread whenever that waits for it
+        # (UI::Yielding, as the warm-up and painter threads do), unless it
+        # yields already.  Elsewhere (renders, specs, no fast_ui) it just
+        # runs the block.
+        def self.yielding
+          render = Session.existing&.render_thread
+          y = render&.alive? && render != Thread.current && defined?(MB::Sound::UI::Yielding) && MB::Sound::UI::Yielding.available? &&
+              !FastUI::GVLYield.yielders.include?(Thread.current)
+          y &&= MB::Sound::UI::Yielding.join(Thread.current, render: render)
+          yield
+        ensure
+          MB::Sound::UI::Yielding.leave(Thread.current) if y
         end
 
         # The placeholder's kernel spec at +rate+ for +interpolation+.
