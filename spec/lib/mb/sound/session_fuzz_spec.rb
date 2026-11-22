@@ -559,6 +559,17 @@ RSpec.describe('session fuzzing') do
     expect(SessionFuzz.check(:form_start, song)).to be_nil
   end
 
+  # (fix-master-rack-fuzz: the Linux long fuzz's seeds 788991, 789083, and
+  # 789085 drew master-rack-1's kept-chain step, which saved the master
+  # chain as a rack in the scheduled block that set it, before that chain
+  # landed: "master is bypass: nothing to save" in every song drawing it.
+  # The step now gives the chain it sets to MasterRack.rack.)
+  it 'runs a song whose step keeps the master chain it sets as a rack (seed 789083)', render_budget: { seconds: 30, reason: 'one random song, one relation' } do
+    song = SessionFuzz.generate(Random.new(789083), commands: 38) # (the 38 commands of fix-master-rack-fuzz)
+    expect(song.code).to include('master { |m| m.hp1(30).softclip(0, 0.9) }; Session.current.racks.define(Session::MasterRack.rack(Session.current, :mcap, block: proc')
+    expect(SessionFuzz.check(:runs, song)).to be_nil
+  end
+
   it 'swaps a kit only where every scene plays it a grid with those rows (seed 773034)', render_budget: { seconds: 60, reason: 'one random song' } do
     song = SessionFuzz.generate(Random.new(773034), commands: 26)
     expect(song.code).to include('t3: beats(16')

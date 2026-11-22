@@ -812,12 +812,17 @@ module SessionFuzz
       # rack knob, an anonymous one, or the master chain kept as a rack (its
       # rack document text loaded back, as master.save_rack writes it, and
       # defined), landing at a launch point; or a rack as a track's insert
+      # (the kept chain is the one the step sets, given to MasterRack.rack:
+      # the step's `master` lands after its scheduled block ends, so the
+      # Session's chain is still the old one, bypass in most songs, which
+      # raised "master is bypass: nothing to save"; the Linux long fuzz's
+      # seeds 788991, 789083, 789085, fix-master-rack-fuzz)
       case s.rng.rand(4)
       when 0 then "arack(:mfx) { |sig| sig.hp1(40).softclip(0, 0.9) * knob(:mix, #{s.pick([0.5, 0.8])}) }; master :mfx#{s.on}"
       when 1 then "master arack { |sig| sig.lp4(#{s.pick([900, 3000])}).softclip }#{s.on}"
       when 2
         chain = s.pick(['{ |m| m.hp1(30).softclip(0, 0.9) }', '{ |l, r| [l, r.delay(0.004)] }', '{ |m| m.width(1.2).softclip }'])
-        "master #{chain}; Session.current.racks.define(Session::MasterRack.rack(Session.current, :mcap)); master :mcap#{s.on}"
+        "master #{chain}; Session.current.racks.define(Session::MasterRack.rack(Session.current, :mcap, block: proc #{chain}, preset: nil)); master :mcap#{s.on}"
       else
         next unless s.instruments
 
