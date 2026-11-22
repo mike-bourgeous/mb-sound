@@ -160,6 +160,7 @@ module MB
           @lock = Mutex.new
           @messages = []
           @paths = []
+          @lines = []
           @state = :listening
           @error = nil
           @started = @clock.call
@@ -189,8 +190,8 @@ module MB
         # capture when +count+ or the timeout is reached.  Returns true while
         # still listening.
         def poll
-          @lock.synchronize do
-            return false unless @state == :listening
+          listening = @lock.synchronize do
+            next false unless @state == :listening
 
             read_inputs
             now = @clock.call
@@ -201,8 +202,11 @@ module MB
             end
             @state == :listening
           end
+          flush_lines
+          listening
         rescue StandardError => e
           @lock.synchronize { finish(:error, e) if @state == :listening }
+          flush_lines
           false
         end
 
@@ -210,6 +214,7 @@ module MB
         # as incomplete).  Does nothing once ended.  Returns self.
         def stop
           @lock.synchronize { finish(:stop) if @state == :listening }
+          flush_lines
           @thread&.join(2) unless Thread.current == @thread
           self
         end
@@ -258,6 +263,20 @@ module MB
 
         def receiving? = @listeners.any? { |l| l.assembler.receiving? }
 
+        # (under @lock) Queues a line to print once the lock is released
+        # (#flush_lines), so printing (a screen's lock) never waits inside it.
+        def say(line) = @lines << line
+
+        # Prints the queued lines.
+        def flush_lines
+          lines = @lock.synchronize do
+            l = @lines
+            @lines = []
+            l
+          end
+          lines.each { |l| @out.call(l) }
+        end
+
         # (under @lock)
         def read_inputs
           @listeners.each do |l|
@@ -270,7 +289,7 @@ module MB
 
             d = l.input.dropped.to_i
             if d > l.dropped
-              @out.call("sysex: #{d - l.dropped} message#{'s' if d - l.dropped > 1} from #{l.name} were lost (too long or the queue was full)")
+              say("sysex: #{d - l.dropped} message#{'s' if d - l.dropped > 1} from #{l.name} were lost (too long or the queue was full)")
               l.dropped = d
             end
           end
@@ -282,7 +301,7 @@ module MB
           @messages << msg
           path = @save ? save(msg) : nil
           @paths << path if path
-          @out.call("sysex: #{msg}#{"\n  saved #{path}" if path}")
+          say("sysex: #{msg}#{"\n  saved #{path}" if path}")
         end
 
         def save(msg)
@@ -309,11 +328,11 @@ module MB
           ExitClose.unregister(self)
           n = @messages.length
           if event == :error
-            @out.call("sysex: capture failed: #{error.class}: #{error.message}")
+            say("sysex: capture failed: #{error.class}: #{error.message}")
           elsif n == 0
-            @out.call("sysex: #{ENDINGS[to]} after #{clock(elapsed)}, nothing received")
+            say("sysex: #{ENDINGS[to]} after #{clock(elapsed)}, nothing received")
           elsif event != :count
-            @out.call("sysex: #{ENDINGS[to]} after #{clock(elapsed)}, #{n} message#{'s' unless n == 1}")
+            say("sysex: #{ENDINGS[to]} after #{clock(elapsed)}, #{n} message#{'s' unless n == 1}")
           end
         end
 

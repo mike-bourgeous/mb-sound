@@ -157,6 +157,19 @@ RSpec.describe(MB::Sound::MIDI::SysExCapture, :aggregate_failures) do
     expect(described_class.default_dir).to eq(File.join(dir, 'sysex'))
   end
 
+  it 'prints outside its lock, so a printer (a screen) may ask for the status' do
+    statuses = []
+    cap = nil
+    cap = described_class.new([['Port A', a]], save: false, thread: false, clock: -> { now[0] },
+                              out: ->(l) { statuses << [l, cap.status] })
+    a.feed(korg)
+    expect(cap.poll).to eq(true)
+    cap.stop
+    expect(statuses.map(&:first)).to eq(['sysex: Korg, 7 bytes from Port A', 'sysex: stopped after 0:00, 1 message'])
+    expect(statuses.first.last).to start_with('sysex: listening on Port A')
+    expect(cap.state).to eq(:stopped)
+  end
+
   it 'keeps messages in memory only with save: false' do
     cap = capture(save: false)
     a.feed(korg)
