@@ -96,7 +96,15 @@ module MB
         # cycle and may lie up to one clip length outside it: a negative
         # start plays at the end of the previous cycle (e.g. a downbeat
         # humanized early), a start past the length in the next one.
-        Variation = Data.define(:name, :block)
+        #
+        # +early+ (whole notes, 0 by default) is how far before their
+        # cycle's notes the block may move them (#humanize's amount), which a
+        # steered generator's decision point counts (see #steer_lead).
+        Variation = Data.define(:name, :block, :early) do
+          def initialize(name:, block:, early: 0r)
+            super
+          end
+        end
 
         # Creates a clip from a list of Events.  The +:length+ defaults to the
         # end of the last event.  +:align+ only matters for looping clips
@@ -147,12 +155,19 @@ module MB
           # And how many later cycles can start early (variations may move
           # events up to a cycle before their own, see Variation).
           @lookahead = @variations.empty? ? 0 : 1
-          # Steered generators (Generative::Steer) decide each cycle at a
-          # decision point +lead+ before it: their cycles aren't read
-          # earlier (#edges), and caches are per Session epoch
-          @steer_lead = @variations.filter_map { |v|
-            v.block.lead if v.block.is_a?(Generative::Producer) && v.block.steered?
-          }.max
+          # Steered generators (Generative::Steer) decide each unit (a cycle,
+          # or a piece of it: +decide:+) at a decision point +lead+ before
+          # it, plus how early variations may move notes (#humanize): their
+          # units aren't read earlier (#edges), and caches are per Session
+          # epoch
+          steered = @variations.select { |v| v.block.is_a?(Generative::Producer) && v.block.steered? }
+          @steer_lead = steered.map { |v| v.block.lead }.max
+          @steer_lead += @variations.sum(0r) { |v| v.early.to_r } if @steer_lead
+          unit = steered.map { |v| v.block.unit }.min
+          # Units per cycle (1 unless a steered generator decides per beat
+          # or other piece), and where each starts in the cycle
+          @units = unit && @length > 0 && unit < @length ? (@length / unit).ceil : 1
+          @unit_starts = @units > 1 ? Array.new(@units) { |k| k * unit }.freeze : nil
         end
 
         # True if a generator of this clip reads moving options at decision
@@ -174,9 +189,16 @@ module MB
         end
 
         # The decision lead of a steered clip in whole notes (the longest of
-        # its generators'), or nil.
+        # its generators', plus how early its variations may move notes),
+        # or nil.
         def steer_lead
           @steer_lead
+        end
+
+        # The steered units per loop cycle (1 unless a steered generator
+        # decides per beat or other piece of the cycle; Generative::Steer).
+        def steer_units
+          @units
         end
 
         # Changes applied anew in every loop cycle (Variations), e.g. from
@@ -191,6 +213,8 @@ module MB
         # Variation applied (just #events without variations).
         def events_for(cycle)
           return @events if @variations.empty?
+          # (a steered cycle decided per unit: each unit's events, in order)
+          return Array.new(@units) { |k| unit_events(cycle, k).events }.flatten(1).freeze if @units > 1
 
           key = @steer_lead ? Generative::Steer.key(cycle) : cycle
           cached = @cycle_cache[key]
@@ -200,6 +224,33 @@ module MB
           list = @variations.reduce(@events) { |evs, v| v.block.call(evs, cycle, self) }
           @cycle_cache[key] = list.sort_by(&:start).freeze
         end
+
+        # The events of unit +k+ of loop +cycle+ for a clip whose steered
+        # generator decides per unit (#steer_units > 1): the cycle's events
+        # (as #events_for makes them) computed with the unit's decided
+        # values, those starting in the unit (the first unit takes early
+        # notes, the last late ones), with +base+, the index of the first in
+        # that whole list (for #plays?).  Cached per Session epoch.
+        def unit_events(cycle, k)
+          key = Generative::Steer.key(cycle * @units + k)
+          cached = @cycle_cache[key]
+          return cached if cached
+
+          @cycle_cache.shift if @cycle_cache.length >= 8 * @units
+          offset = @unit_starts[k]
+          list = @variations.reduce(@events) { |evs, v|
+            v.block.is_a?(Generative::Producer) ? v.block.call(evs, cycle, self, offset) : v.block.call(evs, cycle, self)
+          }.sort_by(&:start)
+          lo = k == 0 ? 0 : (list.bsearch_index { |e| e.start >= offset } || list.length)
+          hi = k == @units - 1 ? list.length : (list.bsearch_index { |e| e.start >= @unit_starts[k + 1] } || list.length)
+          @cycle_cache[key] = UnitEvents.new(events: list[lo...hi].freeze, base: lo)
+        end
+
+        private :unit_events
+
+        # A unit's events and the index of the first in its cycle's list
+        # (see #unit_events).
+        UnitEvents = Data.define(:events, :base)
 
         # The values (note numbers) this clip may play: the +:values+ it was
         # made with (a generator clip's, see .generate), else the values of
@@ -735,47 +786,32 @@ module MB
           out = nil
           cycle = first
           while cycle <= last
-            # A steered cycle is decided only once the read reaches its
-            # decision point (nothing of it starts before that)
-            if @steer_lead && to <= cycle * @length - @steer_lead
+            if @units > 1
+              # Steered per unit (a beat, ...): each unit is decided once
+              # the read reaches its decision point
+              k = 0
+              while k < @units
+                d = cycle * @length + @unit_starts[k] - @steer_lead
+                if to > d
+                  table = edge_table(cycle, k)
+                  out = table_edges(out, table, cycle, from, to, early, fills, from <= d) if table.hi >= from && table.lo < to
+                end
+                k += 1
+              end
               cycle += 1
               next
             end
-            table = edge_table(cycle)
-            if table.hi >= from && table.lo < to
-              offset = table.offset
-              events = table.events
-              ons = table.ons
-              offs = table.offs
-              idx = 0
-              n = events.length
-              while idx < n
-                e = events[idx]
-                i = idx
-                idx += 1
-                next unless plays?(e, cycle, i)
-
-                on = ons[i]
-                off = offs[i]
-                if on < offset
-                  # An early note of this cycle
-                  if cycle == 0
-                    next if off <= 0
-                    on = 0r
-                  elsif early && offset >= from && on < from && off > from
-                    on = from
-                  end
-                end
-                on_in = on >= from && on < to
-                off_in = off >= from && off < to
-                next unless on_in || off_in
-                # Fill marks are decided at the note-on, so both edges agree
-                next if e.fill_mark && !e.plays_in_fill?(fills ? fills.call(on) : FillMap::NONE)
-                out ||= []
-                out << [on, :on, e, cycle] if on_in
-                out << [off, :off, e, cycle] if off_in
+            # A steered cycle is decided only once the read reaches its
+            # decision point (nothing of it starts before that)
+            if @steer_lead
+              d = cycle * @length - @steer_lead
+              if to <= d
+                cycle += 1
+                next
               end
             end
+            table = edge_table(cycle)
+            out = table_edges(out, table, cycle, from, to, early, fills, @steer_lead && from <= d) if table.hi >= from && table.lo < to
             cycle += 1
           end
 
@@ -786,6 +822,51 @@ module MB
 
         # What #edges returns when nothing lands in a span (frozen).
         NO_EDGES = [].freeze
+
+        # Adds the edges of +table+ (loop +cycle+, or a unit of it) in
+        # [+from+, +to+) to +out+ (created when the first lands), returning
+        # it (see #edges).  +deciding+ is true on the read holding a steered
+        # unit's decision point: notes of it starting before the read (only
+        # a variation moving notes earlier than its lead allows) play at
+        # +from+ instead of being lost.
+        def table_edges(out, table, cycle, from, to, early, fills, deciding)
+          offset = table.offset
+          events = table.events
+          ons = table.ons
+          offs = table.offs
+          base = table.base
+          idx = 0
+          n = events.length
+          while idx < n
+            e = events[idx]
+            i = idx
+            idx += 1
+            next unless plays?(e, cycle, base + i)
+
+            on = ons[i]
+            off = offs[i]
+            if on < offset
+              # An early note of this cycle
+              if cycle == 0
+                next if off <= 0
+                on = 0r
+              elsif early && offset >= from && on < from && off > from
+                on = from
+              end
+            end
+            on = from if deciding && on < from && off > from && on >= offset - @length
+            on_in = on >= from && on < to
+            off_in = off >= from && off < to
+            next unless on_in || off_in
+            # Fill marks are decided at the note-on, so both edges agree
+            next if e.fill_mark && !e.plays_in_fill?(fills ? fills.call(on) : FillMap::NONE)
+            out ||= []
+            out << [on, :on, e, cycle] if on_in
+            out << [off, :off, e, cycle] if off_in
+          end
+          out
+        end
+        private :table_edges
 
         # How far #edges can be sure nothing lands after clip position
         # +pos+ (whole notes), for MIDI::ClipSource's quiet reads: returns
@@ -817,26 +898,31 @@ module MB
           end
 
           while first <= last
-            if @steer_lead && pos < (d = first * @length - @steer_lead)
-              # Undecided: its decision point is where #edges reads it next
-              best = d if best.nil? || d < best
-              first += 1
-              next
-            end
-            table = @edge_tables[@steer_lead ? Generative::Steer.key(first) : first] or return nil
-            if table.hi >= pos
-              ons = table.ons
-              offs = table.offs
-              i = 0
-              n = ons.length
-              while i < n
-                on = ons[i]
-                on = 0r if first == 0 && on < 0 # (cycle 0's early notes play at 0)
-                best = on if on >= pos && (best.nil? || on < best)
-                off = offs[i]
-                best = off if off >= pos && (best.nil? || off < best)
-                i += 1
+            k = 0
+            while k < @units
+              if @steer_lead && pos < (d = first * @length + (@units > 1 ? @unit_starts[k] : 0) - @steer_lead)
+                # Undecided: its decision point is where #edges reads it next
+                best = d if best.nil? || d < best
+                k += 1
+                next
               end
+              key = @units > 1 ? Generative::Steer.key(first * @units + k) : (@steer_lead ? Generative::Steer.key(first) : first)
+              table = @edge_tables[key] or return nil
+              if table.hi >= pos
+                ons = table.ons
+                offs = table.offs
+                i = 0
+                n = ons.length
+                while i < n
+                  on = ons[i]
+                  on = 0r if first == 0 && on < 0 # (cycle 0's early notes play at 0)
+                  best = on if on >= pos && (best.nil? || on < best)
+                  off = offs[i]
+                  best = off if off >= pos && (best.nil? || off < best)
+                  i += 1
+                end
+              end
+              k += 1
             end
             first += 1
           end
@@ -849,7 +935,9 @@ module MB
         # its +events+ (#events_for), each one's absolute +ons+ and +offs+
         # (Rational whole notes), and the earliest on (+lo+) and latest off
         # (+hi+) for skipping cycles that can't hold an edge.
-        EdgeTable = Data.define(:cycle, :offset, :events, :ons, :offs, :lo, :hi)
+        # +base+ is the index of the first event in its cycle's list (0
+        # unless the table holds a steered unit, #unit_events).
+        EdgeTable = Data.define(:cycle, :offset, :events, :ons, :offs, :lo, :hi, :base)
 
                 # Returns the event that most recently started at or before +position+
         # whole notes (wrapping around for looping clips), or nil if none has.
@@ -860,7 +948,7 @@ module MB
 
           phase = @loop ? position % @length : position
           cycle = @loop ? (position / @length).floor : 0
-          events = @loop ? events_for(cycle) : @events
+          events = @loop ? events_through(cycle, phase) : @events
           # Before a cycle's first note: the last note of the cycle before
           # (which differs for clips with variations)
           events.reverse_each.find { |e| e.start <= phase } || (@loop ? events_for(cycle - 1).last : nil)
@@ -901,7 +989,7 @@ module MB
         def event_place(position)
           cycle = @loop ? (position / @length).floor : 0
           e = event_at(position) or return [nil, nil, cycle]
-          events = @loop ? events_for(cycle) : @events
+          events = @loop ? events_through(cycle, position % @length) : @events
           idx = events.index { |x| x.equal?(e) }
           if idx.nil?
             # A loop's last event sounding before its first one starts
@@ -912,6 +1000,18 @@ module MB
           [events, idx, cycle]
         end
         private :event_place
+
+        # The events of loop +cycle+ up to the unit holding +phase+ (whole
+        # notes into the cycle) for a clip steered per unit (#steer_units),
+        # so a chase at a launch decides only the units it has reached;
+        # else #events_for(cycle).
+        def events_through(cycle, phase)
+          return events_for(cycle) if @units == 1
+          k = MB::M.min((phase / @unit_starts[1]).floor, @units - 1)
+          return unit_events(cycle, 0).events if k <= 0
+          Array.new(k + 1) { |i| unit_events(cycle, i).events }.flatten(1).freeze
+        end
+        private :events_through
 
         # Returns true if the event at +index+ plays in the given loop
         # +cycle+.  Events with a probability are decided by a random number
@@ -1315,21 +1415,32 @@ module MB
           cycle
         end
 
-        # The EdgeTable of loop +cycle+ (see #edges), cached for the last
-        # few cycles.
-        def edge_table(cycle)
-          key = @steer_lead ? Generative::Steer.key(cycle) : cycle
+        # The EdgeTable of loop +cycle+ (see #edges), or of its unit +unit+
+        # for a clip steered per unit, cached for the last few cycles.
+        def edge_table(cycle, unit = nil)
+          key = if unit
+                  Generative::Steer.key(cycle * @units + unit)
+                else
+                  @steer_lead ? Generative::Steer.key(cycle) : cycle
+                end
           table = @edge_tables[key]
           return table if table
 
           offset = cycle * @length
-          events = events_for(cycle)
+          if unit
+            u = unit_events(cycle, unit)
+            events = u.events
+            base = u.base
+          else
+            events = events_for(cycle)
+            base = 0
+          end
           ons = events.map { |e| offset + e.start }.freeze
           offs = events.each_with_index.map { |e, i| ons[i] + e.length }.freeze
           lo = ons.min || offset
           hi = offs.max || offset - 1
-          @edge_tables.shift if @edge_tables.length >= 16
-          @edge_tables[key] = EdgeTable.new(cycle: cycle, offset: offset, events: events, ons: ons, offs: offs, lo: lo, hi: hi)
+          @edge_tables.shift if @edge_tables.length >= 16 * @units
+          @edge_tables[key] = EdgeTable.new(cycle: cycle, offset: offset, events: events, ons: ons, offs: offs, lo: lo, hi: hi, base: base)
         end
 
         # The glide time for #tween: +time+ as given (a Duration becomes a

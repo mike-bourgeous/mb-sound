@@ -69,8 +69,13 @@ module MB
         # A steered generator decides +cycle+'s values first (Steer#decide;
         # +clip_length+ is the length of the clip's cycles, which sets
         # where its decision points are).
-        def events(cycle, clip_length = nil)
-          return steered_events(cycle, clip_length || @length) if @steer
+        #
+        # +offset+ (whole notes into the cycle) picks the unit whose values
+        # a steered generator decides (Steer, +decide:+): the result is the
+        # whole cycle computed with that unit's values, of which the clip
+        # plays the events starting in the unit.
+        def events(cycle, clip_length = nil, offset = 0r)
+          return steered_events(cycle, clip_length || @length, offset) if @steer
 
           list = @mutex.synchronize { @cache[cycle] }
           Ahead.request(self, cycle + 1)
@@ -85,6 +90,12 @@ module MB
         # The decision lead in whole notes (nil unless steered).
         def lead
           @steer&.lead
+        end
+
+        # The length of a steered generator's units in whole notes (see
+        # Steer, +decide:+; nil unless steered).
+        def unit
+          @steer&.unit
         end
 
         # The events +cycle+ would have if decided now (nothing decided):
@@ -102,11 +113,12 @@ module MB
         end
 
         # Computes the next cycle ahead of time (Ahead): a steered
-        # generator with the values its params have now (+data+ is
-        # [clip length, Steer.origin]), else as #compute.
+        # generator with the values its params have now for the unit to
+        # come (+data+ is [clip length, Steer.origin, offset into the
+        # cycle]), else as #compute.
         def compute_ahead(cycle, data = nil)
           return compute(cycle) unless @steer && data
-          values = @steer.peek(cycle, data[0], data[1])
+          values = @steer.peek(cycle, data[0], data[1], data[2] || 0r)
           compute(cycle, values) unless cached?(cycle, values)
         end
 
@@ -185,10 +197,17 @@ module MB
 
         private
 
-        def steered_events(cycle, clip_length)
-          values = @steer.decide(cycle, clip_length)
+        def steered_events(cycle, clip_length, offset)
+          values = @steer.decide(cycle, clip_length, offset)
           list = @mutex.synchronize { @cache[[cycle, values]] }
-          Ahead.request(self, cycle + 1, [clip_length, Steer.origin])
+          # (the next unit ahead: the next one of this cycle, or the next
+          # cycle's first)
+          u = @steer.unit_index(offset, clip_length) + 1
+          if u < @steer.units(clip_length)
+            Ahead.request(self, cycle, [clip_length, Steer.origin, u * @steer.unit])
+          else
+            Ahead.request(self, cycle + 1, [clip_length, Steer.origin, 0r])
+          end
           list || compute(cycle, values)
         end
 
