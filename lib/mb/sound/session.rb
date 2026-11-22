@@ -28,6 +28,7 @@ require_relative 'session/decisions'
 require_relative 'session/key_changes'
 require_relative 'session/tempo_changes'
 require_relative 'session/midi_in'
+require_relative 'session/per_session'
 require_relative 'session/audio_recording'
 require_relative 'session/stems'
 require_relative 'session/cue'
@@ -366,6 +367,7 @@ module MB
         @thread = nil
         @closed = false
         @file_readers = ObjectSpace::WeakMap.new # (process-backed inputs its graphs read; see #close_file_readers)
+        @side_data = {} # (see #side_data)
         @plan_deferral = nil # (see #plan_deferral)
         @plan_rebuilds = nil # (see #plan_rebuilds)
         @generation = @transport.generation
@@ -438,6 +440,10 @@ module MB
 
       # The Session's top-level names (see Names).
       attr_reader :names
+
+      # Data other subsystems keep for this Session, by their key (see
+      # PerSession: it lives and dies with the Session).
+      attr_reader :side_data
 
       # The metadata the set and its named pieces carry (a Meta::Store:
       # `meta :bass, source: { ... }`, MetaMethods).  Never read while

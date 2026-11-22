@@ -1,3 +1,5 @@
+require 'weakref'
+
 module MB
   module Sound
     module Library
@@ -251,13 +253,17 @@ module MB
           return hit[2] if hit && hit[0] == given && hit[1].all? { |k, kn| knobs[k].equal?(kn) } && hit[1].length == knobs.length
 
           clip = run(entry, BLOCKS[entry], [], given, knobs: knobs)
-          KNOBS[clip] = knobs.freeze
+          KNOBS[clip] = weak_knobs(knobs)
           GIVEN[clip] = value if value.is_a?(Sequence::Clip)
           cache[key] = [given, knobs, clip]
           clip
         end
 
-        # Clips .track_clip built => { param => knob } (keys weak).
+        # Clips .track_clip built => { param => [knob name, WeakRef to the
+        # knob] } (keys weak).  The knobs only by WeakRef: a knob holds its
+        # Session, whose arrangement holds the clip, and a WeakKeyMap's
+        # values are strong, so knobs in the values kept every such clip
+        # and its Session alive for good (fixes-18).
         KNOBS = ObjectSpace::WeakKeyMap.new
 
         # A copy of track clip +clip+ (.track_clip; or of a clip made from
@@ -275,7 +281,7 @@ module MB
           idx = lineage.index { |c| KNOBS.key?(c) } or return clip
           root = lineage[idx]
           built = ORIGINS[root] or return clip
-          knobs = KNOBS[root].transform_values { |k| session.knobs[k.name] }
+          knobs = KNOBS[root].transform_values { |name, _| session.knobs[name] }
           return clip if knobs.value?(nil)
           copy = run(built.entry, BLOCKS[built.entry], [], built.kwargs, knobs: knobs)
           lineage[0...idx].reverse.reduce(copy) { |c, step| step.rederive(c) }
@@ -292,16 +298,24 @@ module MB
           GIVEN[clip]
         end
 
-        # The track knobs steering +clip+ ({ param => GraphNode::Knob },
-        # from .track_clip; the inspector's row for the clip), or nil.
-        def knobs_of(clip)
-          KNOBS[clip]
+        # +knobs+ ({ param => Knob }) as KNOBS keeps them.
+        def weak_knobs(knobs)
+          knobs.transform_values { |k| [k.name, WeakRef.new(k)].freeze }.freeze
         end
 
-        # The clips .track_clip built per Session ({ Session => { [track,
-        # entry name, location] => [given, knobs, clip] } }, weak).
+        # The track knobs steering +clip+ ({ param => GraphNode::Knob },
+        # from .track_clip; the inspector's row for the clip; nil for a
+        # knob since collected), or nil.
+        def knobs_of(clip)
+          KNOBS[clip]&.transform_values { |_, ref| ref.weakref_alive? ? ref.__getobj__ : nil }
+        end
+
+        # The clips .track_clip built per Session ({ [track, entry name,
+        # location] => [given, knobs, clip] } for each Session; kept on the
+        # Session: the knobs hold their Session, which a WeakKeyMap keyed by
+        # the Session then kept alive for good, fixes-18).
         def track_clips
-          @track_clips ||= ObjectSpace::WeakKeyMap.new
+          @track_clips ||= Session::PerSession.new(:generator_track_clips)
         end
 
         # Runs the block with +values+' moving params (knobs, ccs) for

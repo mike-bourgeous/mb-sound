@@ -336,9 +336,11 @@ module MB
       end
 
       # The refine passes of each Session ({ Session => Refinement }: the
-      # last one).
+      # last one; kept on the Session, since a Refinement holds its Session,
+      # which a WeakKeyMap keyed by the Session then kept alive for good,
+      # fixes-18).
       def refinements
-        @refinements ||= ObjectSpace::WeakKeyMap.new
+        @refinements ||= Session::PerSession.new(:hand_tune_refinement)
       end
 
       # The RefineJob for track +track+ in +session+ (see
