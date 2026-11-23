@@ -47,4 +47,16 @@ RSpec.describe(MB::Sound::GraphNode::IvarPreset) do
     expect(preset.ivars_for(MB::Sound::GraphNode::Multiplier)).to include(:@arithmetic_views)
     expect(preset.ivars_for(MB::Sound::GraphNode::Constant)).not_to include(:@ports)
   end
+
+  # (replay-save-1: GraphNode::Dynamics, a Channels subclass, reached 8
+  # shape variations from lazily set recipe and naming variables)
+  it 'gives channel bundles and their subclasses the lazily set variables as nil' do
+    stereo = 220.hz.saw.pan(0.2)
+    dyn = 220.hz.saw.stereo.compress(threshold: -20.db)
+    [stereo, dyn].each do |b|
+      expect(b).to be_a(MB::Sound::GraphNode::Channels)
+      expect(b.instance_variables).to include(*preset.ivars_for(MB::Sound::GraphNode))
+    end
+    expect(dyn).to be_a(MB::Sound::GraphNode::Dynamics)
+  end
 end

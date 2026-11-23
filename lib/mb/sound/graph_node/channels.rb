@@ -65,6 +65,12 @@ module MB
           }
           raise ArgumentError, 'A channel bundle needs at least one channel' if nodes.empty?
 
+          # (the variables GraphNode's modules set lazily, as nil, so a
+          # bundle class keeps one layout whether it is recorded, named, or
+          # drawn first; GraphNode::IvarPreset, which covers node classes
+          # only: GraphNode::Dynamics reached 8 shape variations in a spec
+          # process, replay-save-1)
+          IvarPreset.ivars_for(GraphNode).each { |iv| instance_variable_set(iv, nil) unless instance_variable_defined?(iv) }
           @carried_meta = nil # (Meta::Carrier#with_meta: the bundle's own metadata)
           @outputs = nodes.freeze
 
