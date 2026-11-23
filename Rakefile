@@ -678,7 +678,7 @@ namespace :docs do
     require_relative 'spec/catalog'
     Catalog.write!
     puts "docs:index: design/catalog.md, #{Catalog.dsl_lines.length} DSL methods and #{Catalog.topics.length} help topics, " \
-      "#{(Catalog.text.bytesize / 1000.0).round(1)} KB of #{Catalog::BUDGET / 1000} KB"
+      "#{(Catalog.text.bytesize / 1000.0).round(1)} KB of #{(Catalog::BUDGET / 1000.0).round(1)} KB"
     problems = Catalog.problems
     puts "WARNING: catalog:\n  #{problems.join("\n  ")}" unless problems.empty?
   end
@@ -694,8 +694,8 @@ namespace :docs do
     warning = DocsIndex.size_warning
     puts "WARNING: #{warning}" if warning
     abort("docs:check:\n  #{problems.join("\n  ")}") unless problems.empty?
-    puts "docs:check: OK (CLAUDE.md #{(DocsIndex.claude_text.bytesize / 1000.0).round(1)} KB of #{DocsIndex::BUDGET / 1000} KB, " \
-      "design/catalog.md #{(Catalog.text.bytesize / 1000.0).round(1)} KB of #{Catalog::BUDGET / 1000} KB)"
+    puts "docs:check: OK (CLAUDE.md #{(DocsIndex.claude_text.bytesize / 1000.0).round(1)} KB of #{(DocsIndex::BUDGET / 1000.0).round(1)} KB, " \
+      "design/catalog.md #{(Catalog.text.bytesize / 1000.0).round(1)} KB of #{(Catalog::BUDGET / 1000.0).round(1)} KB)"
   end
 
   desc "CLAUDE.md's sections by size, then the files it imports"
