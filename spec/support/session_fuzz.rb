@@ -941,7 +941,12 @@ module SessionFuzz
       # times within a bar, each a scheduled block of its own (an undo
       # step), faster than its launch point lands them (each supersedes
       # the one queued before it), then undone and maybe redone: undo
-      # steps back one definition at a time, played or not
+      # steps back one definition at a time, played or not.  The blocks run
+      # 1/96 apart, off the beat and sixteenth grid other commands' blocks
+      # use (fix-undo-stop-slot, seed 790005: a racks command's `stop`
+      # block ran on the same beat as the first redefinition, so `undo;
+      # undo` undid the stop, rightly, and the song's later `resume`
+      # warned)
       next if s.swappable.empty?
 
       t = s.pick(s.swappable)
@@ -949,8 +954,8 @@ module SessionFuzz
         "track(:#{t}) { |clip| clip.synth(voices: 2) { |v| v.hz.#{s.pick(SHAPES)} * v.amp_env(0.002, 0.05, 0.6, 0.02) }" \
           ".filter(:lowpass, cutoff: #{s.pick([500.0, 1400.0, 3200.0])}, quality: 2) * 0.3 }"
       }
-      tail = "after(in: 1/64r) { #{s.pick(['undo', 'undo; undo', 'undo; undo; redo!', 'undo(on: :now)'])} }"
-      defs.reverse.reduce(tail) { |inner, d| "after(in: 1/64r) { #{d}; #{inner} }" }.delete_prefix('after(in: 1/64r) { ').delete_suffix(' }')
+      tail = "after(in: 1/96r) { #{s.pick(['undo', 'undo; undo', 'undo; undo; redo!', 'undo(on: :now)'])} }"
+      defs.reverse.reduce(tail) { |inner, d| "after(in: 1/96r) { #{d}; #{inner} }" }
     },
     ->(s) {
       # (note-within-1) notes moved into a register by octaves: a clip, a
