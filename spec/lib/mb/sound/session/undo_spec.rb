@@ -260,6 +260,26 @@ RSpec.describe(MB::Sound::Session::Undo) do
     end
   end
 
+  it 'undoes a redefinition of a track that does not play as one step, putting its patch back' do
+    # (fix-undo-stop-slot, SessionFuzz seed 790005: such a redefinition
+    # made no undo step, so undo reached past it to the command before,
+    # here the stop, and brought :x back)
+    first = proc { |clip| clip.hz.ramp * 0.1 }
+    within do
+      MB::Sound.track(:t, &first)
+      MB::Sound.bg(:x, 1.constant)
+    end
+    run(800)
+    within { MB::Sound.stop(:x, fade: 0) }
+    within { MB::Sound.track(:t) { |clip| clip.hz.saw * 0.1 } }
+    expect(session.undo_steps.last.label).to eq('track :t redefined')
+
+    within { MB::Sound.undo(at: :now) }
+    run(1600)
+    expect(session.arrangement.tracks[:t].patch.source_location).to eq(first.source_location)
+    expect(session.players).to be_empty # (the stop stays)
+  end
+
   it 'undoes a stop for now by queueing again the start it dropped, its graph kept in step meanwhile' do
     shared = 3.hz.lfo
     within do

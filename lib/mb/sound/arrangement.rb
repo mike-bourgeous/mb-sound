@@ -433,6 +433,11 @@ module MB
         else
           # (not playing after all: the knobs take their values now)
           landings.each { |k, v| k.set(v, frame: k.next_frame) unless v == k.value }
+          # A track defined again while it doesn't play is still one undo
+          # step (fix-undo-stop-slot, SessionFuzz seed 790005): undo puts
+          # its patch back instead of reaching past it to the command
+          # before (there, a stop, so a later `resume` warned)
+          @session.command("track #{name.inspect} redefined") { @session.note_undo_extra(self, before, undo_state) } if before && old
           take_over_player(tr) if old.nil? && @session.playing_after_queue?(name)
         end
         name
