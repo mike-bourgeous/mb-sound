@@ -740,10 +740,24 @@ module MB
       # write (tracks, scenes, the flow, and last the metadata they carry;
       # GraphIO::SetWriter).  Returns nil.
       #
+      # A name of the current Session (a Symbol, or a String naming
+      # something) prints what it names (replay-save-1, the maintainer,
+      # 2026-11-23: "print graph"): a track as the set document prints it
+      # (its clip and knob lines first), a player's graph, a bus, knob, or
+      # mute group's line, a rack's document.  `ruby players[:a]` prints
+      # player :a's graph too.  Other names raise with what they are, or
+      # the names nearby.
+      #
       # Example (bin/sound.rb):
       #     s = 220.hz.saw.filter(:lowpass, cutoff: 800).softclip
       #     ruby s
+      #     bg :a, s
+      #     ruby :a
       def ruby(graph, inputs: {}, seeds: false)
+        if graph.is_a?(Symbol) || graph.is_a?(String)
+          text = Named.text(graph, Session.existing, inputs: inputs, seeds: seeds)
+          return puts(text) if text
+        end
         if graph.is_a?(Arrangement) || graph.respond_to?(:to_arrangement)
           begin
             puts GraphIO.dump(graph)
@@ -755,6 +769,51 @@ module MB
           return
         end
         puts GraphNode::Recipe::RubyWriter.new(graph, inputs: inputs, seeds: seeds).to_s
+      end
+
+      # What #ruby prints for a Session name.
+      module Named
+        module_function
+
+        # The Ruby for what +name+ (a Symbol, a String, or a #players
+        # description) names in +session+, or nil for a String naming
+        # nothing (it prints as itself).  Raises ArgumentError for a
+        # Symbol naming nothing #ruby prints.
+        def text(name, session, inputs: {}, seeds: false)
+          sym = name.is_a?(Session::PlayerLine) ? name.player : name.to_sym
+          found = session && found_text(sym, session, inputs, seeds)
+          return found if found
+          return nil if name.is_a?(String) && !name.is_a?(Session::PlayerLine)
+
+          kind = session&.names&.kind(sym)
+          if kind
+            raise ArgumentError, "ruby #{sym.inspect}: #{sym.inspect} is a #{kind}, which ruby doesn't print by name yet; ruby set prints the whole set"
+          end
+          near = session ? session.arrangement.tracks.keys + session.players.keys + session.names.to_h.keys + session.racks.names : []
+          raise ArgumentError, "ruby #{sym.inspect}: no player, track, bus, knob, or rack is named #{sym.inspect}" \
+                               "#{GraphIO.suggest(sym.inspect, near.uniq.map(&:inspect))}; ruby x prints a graph x (ruby set: the whole set)"
+        end
+
+        # The Ruby for +sym+ in +session+, or nil.
+        def found_text(sym, session, inputs, seeds)
+          arr = session.arrangement
+          return set_piece(arr, sym) if arr.tracks.key?(sym)
+          if (nodes = session.player_graph(sym))
+            return GraphNode::Recipe::RubyWriter.new(nodes.length == 1 ? nodes[0] : nodes, inputs: inputs, seeds: seeds).to_s
+          end
+          piece = set_piece(arr, sym)
+          return piece if piece
+          rack = session.racks[sym]
+          rack ? GraphIO.dump(rack) : nil
+        end
+
+        # +name+'s lines in the set document (GraphIO::SetWriter#piece), or
+        # nil; what a save would refuse still prints, with why.
+        def set_piece(arr, name)
+          GraphIO::SetWriter.new(arr).piece(name)
+        rescue GraphIO::DumpError => e
+          [e.code, "# FIXME(graph-io): #{e.message}"].compact.join("\n")
+        end
       end
     end
     extend RecipeMethods

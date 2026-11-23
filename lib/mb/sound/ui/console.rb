@@ -135,7 +135,7 @@ module MB
         CONTEXTS = {
           scenes: %i[go scene],
           knobs: %i[turn move knob learn bind_cc snap recall xfade],
-          tracks: %i[stop mute unmute solo unsolo arm disarm rec record capture resume swap track bg ahead forget launch tweak],
+          tracks: %i[stop mute unmute solo unsolo arm disarm rec record capture resume swap track bg ahead forget launch tweak ruby],
           buses: %i[bus route feed],
           layouts: %i[ui layout],
           panes: %i[pane],
