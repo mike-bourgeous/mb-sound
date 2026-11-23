@@ -1890,7 +1890,9 @@ module MB
     Help.topic :record, 'Recording and takes', group: :keep do
       about <<~TEXT
         The take logs every line and where each change landed (`take.save`
-        replays it exactly; `take.save :tmp, 'a note'` keeps a note in it).  `rec`/`capture` record MIDI into armed tracks
+        replays it exactly; `take.save :tmp, 'a note'` keeps a note in it;
+        a replay never writes to your library: its `save` lines keep the
+        graph in memory for later `preset` lines).  `rec`/`capture` record MIDI into armed tracks
         (loops follow the timeline's phase; `align: :launch` starts from
         what you played first; `cc: true` keeps the mod wheel, other CCs,
         bend, and pressure in the clip, `cc: :split` in a clip of their own,

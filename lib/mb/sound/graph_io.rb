@@ -718,7 +718,12 @@ module MB
       # document.  Names resolve through the shelves in search order (see
       # Library.shelves).
       def preset(name, trust: nil, session: nil, seeds: :saved, racks: nil, **inputs_and_params)
-        if name.to_s.include?('/') || name.to_s.end_with?('.rb')
+        # (a take replay keeps what its skipped saves would have written,
+        # first in search order, as the save came last: Take::Replay::Saves)
+        kept = Take::Replay.saves_for(Session.existing)&.document(name)
+        if kept
+          path = kept
+        elsif name.to_s.include?('/') || name.to_s.end_with?('.rb')
           path = name.to_s
         else
           kind, found = Library.index.preset_target(name)
@@ -740,7 +745,8 @@ module MB
           end
           raise GraphIO::LoadError, "no preset #{name}#{Library::Heads.renamed_hint(nil, name)}#{GraphIO.suggest(name, names)} (looked in #{GraphIO.preset_dirs.join(', ')})"
         end
-        Library.index.note_path(path)
+        Library.index.note_path(path) unless kept
+        source = kept ? "#{name.inspect} (saved earlier in this replay)" : path
 
         doc = GraphIO.parse(path)
         if doc.kind == :set
@@ -755,7 +761,7 @@ module MB
           session = Session.existing if session.nil?
           target = session || Session.current
           rack = GraphIO.load(path, trust: trust, seeds: seeds, racks: racks)
-          rack = GraphIO.place_rack(target, rack, racks: racks, source: path) if rack.name
+          rack = GraphIO.place_rack(target, rack, racks: racks, source: source) if rack.name
           return rack if inputs_and_params.empty?
 
           return apply_preset_rack(rack, name, target, session, inputs_and_params)

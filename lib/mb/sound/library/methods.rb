@@ -63,6 +63,7 @@ module MB
       #     collect
       #     collect only: %i[dark_hall], builtin: true
       def collect(to: nil, builtin: false, only: nil)
+        return [] if Library::Saving.replay_skip?('collect') # (a replay never writes to the library: Take::Replay::Saves)
         dir = to ? File.expand_path(to.to_s) : collect_dir
         list = Library.index.uses.reject { |e|
           e.shelf.name == :session || (e.shelf.dir && File.expand_path(e.shelf.dir) == dir) ||
@@ -72,6 +73,7 @@ module MB
         others += builtins if builtin
         done = others.filter_map { |e| copy_entry(e, dir, replace: false, verb: 'Collected') }
         done += pin_entries(dir, builtins) unless builtin || builtins.empty?
+        Take.note_choice(:library, :collect, !done.empty?) # (the take marks the line: replays skip it)
         puts "Nothing to collect (#{Library.index.uses.empty? ? 'no presets used yet' : 'every preset used is on the project shelf'})" if done.empty?
         Library.reload!
         done
@@ -166,6 +168,8 @@ module MB
       end
 
       def promote_entry(name, to, family, replace:)
+        return nil if Library::Saving.replay_skip?("promote#{'!' if replace} #{name.inspect}") # (as in #collect)
+        Take.note_choice(:library, :promote, name.is_a?(Library::Entry) ? name.name : name) # (as in #collect)
         entry = name.is_a?(Library::Entry) ? name : promote_source(name.to_sym, family)
         dir = case to
               when :user then Library.user_dir
