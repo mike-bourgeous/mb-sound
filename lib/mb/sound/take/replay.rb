@@ -74,9 +74,9 @@ module MB
           end
         end
 
-        # The Saves of the replay playing in each Session (weak: a replay
-        # whose Session is gone leaves nothing behind).
-        SAVES = ObjectSpace::WeakKeyMap.new
+        # The Saves of the replay playing in each Session (held by the
+        # Session: a replay whose Session is gone leaves nothing behind).
+        SAVES = Session::PerSession.new(:take_replay_saves)
 
         # The last Replay created (for loading a saved take from code).
         class << self
