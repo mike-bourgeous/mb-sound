@@ -6,7 +6,7 @@ Every graph remembers the DSL calls that built it (`GraphNode::Recipe`, `lib/mb/
 
 ## Quick reference
 
-- Printing: `node.to_ruby(inputs: { midi: notes }, seeds: true)` (seeds off by default), console `ruby node`; lanes that differ in values print `per_voice(...)`, anything unrepresentable `nil # FIXME(graph-io): ...`; no flow control.  Round trips: 210/220 graph sweep factories and 31/34 bin synth/effect scripts bit-identical (`spec/bin/recipe_script_sweep_spec.rb` runs under `--tag smoke`).
+- Printing: `node.to_ruby(inputs: { midi: notes }, seeds: true)` (seeds off by default), console `ruby node`/`ruby :name`; lanes that differ in values print `per_voice(...)`, anything unrepresentable `nil # FIXME(graph-io): ...`; no flow control.  Round trips: 210/220 graph sweep factories and 31/34 bin synth/effect scripts bit-identical (`spec/bin/recipe_script_sweep_spec.rb` runs under `--tag smoke`).
 - Call keys: `Recipe.key_of`, `Recipe.substituting { }` (below, "Call keys and substitutions").
 - Document header and lines: `graph 11, name:, kind:, saved:, mb_sound:, from:, description:, meta:, options:` (the number is `GraphIO::FORMAT`: 16 midi-one-based-1 (channels from 1), 15 form-knobs-1 (track hashes); `GraphIO::FORMATS` names each version's change), `inputs :midi`, `param :drive, 1.0, range:, description:, cc:`, `knob :cut, 800.0, range:, curve:, cc:` (GraphNode::Knobs, saved at their current value; format 5 writes them typed, `knob :cut, (150.hz..8000.hz).at(2400.hz)`, params.md).  Runtime blocks: the safe subset, else `&named_proc(:x)`, else `trust: :code`; `then`/`with_seed` blocks build.
 - Number-only settings: `GraphIO::NumberOnly`; `GraphNode.build_setting`.
@@ -17,7 +17,7 @@ Graph import/export, phase 1 (branch `graph-io-1`, 2026-10-10), phase 2, graph d
 
 ## What it does
 
-Every graph remembers the DSL calls that built it ("recipes"), so it can print itself back as Ruby: `node.to_ruby` (alias `to_rb`; also bundles, Synths, Notes, clips), `node.to_ruby(inputs: { midi: notes }, seeds: true)` (seeds are left out by default for reading, maintainer 2026-10-10; phase 2 documents will always include them), console `ruby node` (also `ruby [l, r]`).  fm_bass prints as its own source (lane locals, operators, `13.db`, `100.ms`) and the printed code renders bit-identically.
+Every graph remembers the DSL calls that built it ("recipes"), so it can print itself back as Ruby: `node.to_ruby` (alias `to_rb`; also bundles, Synths, Notes, clips), `node.to_ruby(inputs: { midi: notes }, seeds: true)` (seeds are left out by default for reading, maintainer 2026-10-10; phase 2 documents will always include them), console `ruby node` (also `ruby [l, r]`; `ruby :name` prints what a Session name plays, replay-save-1: a player's graph (`Session#player_graph`: the current, queued, or stopped player's nodes, Tee branches unwrapped; `ruby players[:a]` too, the table's descriptions being `Session::PlayerLine`s), a track, bus, knob, or mute group as the set document prints it (`SetWriter#piece`: the track's clip line before it, the knob lines it reads first), a rack's document; other names raise naming their kind or near names, and a String naming nothing prints as itself).  fm_bass prints as its own source (lane locals, operators, `13.db`, `100.ms`) and the printed code renders bit-identically.
 
 ```ruby
 ruby 220.hz.saw.filter(:lowpass, cutoff: 800).delay(1.n16.dotted).softclip

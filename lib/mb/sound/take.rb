@@ -414,6 +414,10 @@ module MB
             out << "  # skipped (foreground): #{l.code.lines.first.to_s.strip}\n"
             next
           end
+          if (writes = library_writes(l)) && !writes.empty?
+            # (the line runs; its library writes don't: Replay::Saves)
+            out << "  # #{writes.join(', ')} skipped in replay (a replay does not write to your library): #{l.code.lines.first.to_s.strip}\n"
+          end
           out << "  r.line #{ruby_value(l.issued.pos)}, #{ruby_value(l.lands)}, <<~'RUBY'#{l.epoch.to_i > 0 ? ", epoch: #{l.epoch}" : ''}#{l.held ? ", held: #{l.held}" : ''}#{l.choices.to_a.empty? ? '' : ", choices: #{l.choices.inspect}"}\n"
           l.code.each_line { |c| out << "    #{c.chomp}\n" }
           out << "  RUBY\n"
@@ -544,6 +548,13 @@ module MB
       end
 
       private
+
+      # The library writes line +l+ made live (save, collect, promote:
+      # recorded as its choices by Library::Saving and LibraryMethods),
+      # which its replay skips.
+      def library_writes(l)
+        l.choices.to_a.filter_map { |kind, key, _| kind == :save ? 'save' : (kind == :library ? key.to_s : nil) }.uniq
+      end
 
       def foreground?(code)
         return false if code.to_s.match?(TRANSPORT_PLAY) # (`play` alone starts the transport: replays need it)

@@ -63,27 +63,72 @@ module MB
         end
 
         def to_s
-          # Patches and master blocks build in the set's Session (knob(:x)),
-          # one after another from one random state, so each draws its own
-          # seeds (omnibus10: every block from the same state drew the same
-          # seeds, so a loaded set's noises were one noise), and the save
-          # leaves the random state as it was.  The builds print the seeds
-          # they draw even inside MB::Sound.with_seed (bin/save_presets.rb
-          # saves sets in one; Recipe::SeedRecording would take them as
-          # derived): they are fresh builds for the document.
+          building { text }
+        end
+
+        # The lines this document prints for one +name+ of the set, as the
+        # console's `ruby :name` shows them (replay-save-1, the maintainer,
+        # 2026-11-23: "print graph"): a track's line (its clip's lines
+        # before it, its wire line after), a bus's, a knob's, or a mute
+        # group's, after the `knob` lines of the knobs they read.  Returns
+        # nil for a name the set doesn't print; raises DumpError (with the
+        # code it could print) like #to_s.
+        def piece(name)
+          building { piece_text(name.to_sym) }
+        end
+
+        private
+
+        # Runs the block (a build of the document's text) in the set's
+        # Session.  Patches and master blocks build there (knob(:x)), one
+        # after another from one random state, so each draws its own seeds
+        # (omnibus10: every block from the same state drew the same seeds,
+        # so a loaded set's noises were one noise), and the save leaves the
+        # random state as it was.  The builds print the seeds they draw
+        # even inside MB::Sound.with_seed (bin/save_presets.rb saves sets in
+        # one; Recipe::SeedRecording would take them as derived): they are
+        # fresh builds for the document.
+        def building
           st = GraphNode::Recipe.state
           seeded = st.seeded
           st.seeded = 0
           MB::Sound.keeping_random_state do
-            Session.with_context(session: @session) { text }
+            Session.with_context(session: @session) { yield }
           end
         ensure
           st.seeded = seeded if st
         end
 
-        private
+        def piece_text(name)
+          start_text
+          clips # (names the clips the track line uses)
+          body =
+            if (tr = @arrangement.tracks[name])
+              own = track_clip(tr)
+              (own ? @clip_lines[own] : []) + tracks(only: name) + wire_lines(only: name)
+            elsif @session.bus_definitions.key?(name)
+              buses(only: name)
+            elsif @knobs.key?(name)
+              knob_lines(@lit, @knobs[name])
+            elsif @session.mute_groups.key?(name)
+              mute_groups(only: name)
+            end
+          return nil unless body
 
-        def text
+          unless @problems.empty?
+            raise DumpError.new("can't print #{name.inspect} yet: #{@problems.uniq.join('; ')}", problems: @problems.uniq, code: body.join("\n"))
+          end
+          code = body.join("\n")
+          # (the knob lines of the knobs it reads, as the header has them)
+          head = @knobs.reject { |n, _| n == name }.select { |_, k|
+            ref = @knob_nodes[k]
+            code.match?(/(?<![\w:])#{Regexp.escape(ref)}(?![\w])/)
+          }.flat_map { |_, k| knob_lines(@lit, k) }
+          (head + body).join("\n") + "\n"
+        end
+
+        # Sets up what #text and #piece_text share.
+        def start_text
           @problems = []
           @warnings = []
           @lit = GraphNode::Recipe::RubyWriter.new(nil)
@@ -93,7 +138,10 @@ module MB
           # as knob(:"bass/resonance"))
           @knob_nodes = @knobs.each_with_object({}.compare_by_identity) { |(n, k), h| h[k] = n.to_s.match?(/\A[a-z_][A-Za-z0-9_]*\z/) ? n.to_s : "knob(#{n.inspect})" }
           @used = Set.new(@knobs.keys.map(&:to_s))
+        end
 
+        def text
+          start_text
           body = []
           clocks = clock_lines
           body.concat(settings)
@@ -209,7 +257,7 @@ module MB
         # feeds: `bus(:hall, to: :verb) { |sig| ... }` (the chain built once
         # from its block, like the master's), or `bus :drums, to: :master`
         # without a block.
-        def buses
+        def buses(only: nil)
           defs = @session.bus_definitions
           order = []
           visit = ->(n) {
@@ -220,6 +268,7 @@ module MB
           }
           defs.each_key { |n| visit.(n) }
           order.flat_map { |name|
+            next [] if only && name != only
             block, to, _description = defs[name]
             kwargs = {}
             kwargs[:to] = to unless to == :master
@@ -251,9 +300,10 @@ module MB
           opts
         end
 
-        def tracks
+        def tracks(only: nil)
           routes = @session.route_definitions
           @arrangement.tracks.flat_map { |name, tr|
+            next [] if only && name != only
             opts = {}
             opts[:q] = tr.q if tr.q
             opts[:fade] = tr.fade if tr.fade
@@ -302,8 +352,9 @@ module MB
         # saved, so their line is a comment (takes keep what they played).
         # Loading a set wires its tracks again (at each track's launch
         # point: now, while nothing plays).
-        def wire_lines
-          @arrangement.wire_definitions.map { |name, w|
+        def wire_lines(only: nil)
+          @arrangement.wire_definitions.filter_map { |name, w|
+            next if only && name != only
             text = Arrangement::Wire.ruby(w.lineage, clip_text: ->(c) { @clip_names[c] || 'clip' }, lit: @lit)
             if text
               "wire #{name.inspect}, #{text}"
@@ -437,6 +488,8 @@ module MB
           # (unnamed ones a track holds after the track: `drums = L.gen.beat.techno(seed: 5)`)
           list.each { |c| @clip_names[c] = unique(c.respond_to?(:name) && c.name ? c.name.to_s : (@track_clip_owner[c] || 'clip').to_s) }
 
+          # (each clip's lines, for #piece too)
+          @clip_lines = {}.compare_by_identity
           list.flat_map { |c|
             name = @clip_names[c]
             writer = writer_for(c, {})
@@ -444,7 +497,7 @@ module MB
             collect(writer, "clip #{name}")
             expr = expr.dup
             expr[0] = "#{name} = #{expr[0]}"
-            vars + expr
+            @clip_lines[c] = vars + expr
           }
         end
 
@@ -521,8 +574,11 @@ module MB
           lit(v)
         end
 
-        def mute_groups
-          @session.mute_groups.map { |g, names| "mutes #{[g, *names].map(&:inspect).join(', ')}" }
+        def mute_groups(only: nil)
+          @session.mute_groups.filter_map { |g, names|
+            next if only && g != only
+            "mutes #{[g, *names].map(&:inspect).join(', ')}"
+          }
         end
 
         def sections

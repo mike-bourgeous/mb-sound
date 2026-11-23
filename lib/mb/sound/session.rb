@@ -990,7 +990,8 @@ module MB
       # player is shown.
       #
       # Graphs waiting in the change queue to start are listed too, and
-      # queued stops are noted.
+      # queued stops are noted.  The descriptions are PlayerLines (Strings
+      # that know their player's name: `ruby players[:a]` prints its graph).
       def players
         @render_lock.synchronize {
           list = @mutex.synchronize {
@@ -1018,8 +1019,37 @@ module MB
             end
           end
 
-          list
+          list.to_h { |n, d| [n, PlayerLine.new(d, n)] }
         }
+      end
+
+      # A description in #players: a String that knows the +player+'s name
+      # (RecipeMethods#ruby prints that player's graph for it).
+      class PlayerLine < String
+        attr_reader :player
+
+        def initialize(text, player)
+          super(text)
+          @player = player
+        end
+      end
+
+      # The graph player +name+ plays (the current player's, else one
+      # queued to start, else the stopped one #resume would bring back), as
+      # the nodes given to #add, one per channel (the Tee branches the
+      # player reads, unwrapped); nil if there is no such player.  For the
+      # console's `ruby :name` (RecipeMethods#ruby; takes the render lock).
+      def player_graph(name)
+        input = @render_lock.synchronize {
+          @mutex.synchronize {
+            list = @players.each_value.select { |x| x.name == name }
+            (list.find(&:current?) || list.first)&.input ||
+              @changes.reverse_each.find { |c| START_KINDS.include?(c.kind) && c.subject == name && c.graph }&.graph ||
+              @stopped[name]&.input
+          }
+        }
+        return nil unless input.respond_to?(:nodes)
+        input.nodes.map { |n| n.is_a?(GraphNode::Tee::Branch) ? n.owner_tee.original_source : n }
       end
 
       # Each current player's graph by name (for debug_dump; takes the

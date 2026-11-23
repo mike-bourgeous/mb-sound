@@ -17,6 +17,12 @@ module MB
         # than those into the header's descriptive `meta: { ... }`.  Prints what happened; returns the path or nil.
         def save(name, graph, replace:, bump:, tags: nil, about: nil, **opts)
           return nil unless graph_given?(name, graph, replace)
+          given = name
+          if (saves = replaying)
+            saves.tell("save #{label(name)}")
+            return nil if generator?(graph) # (library file statements: L.gen reads the shelves)
+            return replay_keep(saves, name, graph, replace: replace, bump: bump, tags: tags, about: about, **opts)
+          end
           return save_generator(name, graph, replace: replace, bump: bump, tags: tags, about: about, **opts) if generator?(graph)
           meta = (opts.delete(:meta) || {}).dup
           meta[:tags] = check_tags(tags) if tags
@@ -42,16 +48,58 @@ module MB
             opts[:meta] = meta unless meta.empty?
           end
           if existed && !replace
+            Take.note_choice(:save, given, false)
             warn "Not saved: #{name} exists (#{shown(target)}); save! #{label(name)}, ... replaces it, bump: true saves #{label(next_version(name))}"
             return nil
           end
           path = GraphIO.save(name, graph, **opts)
+          # (the name it saved as, for a replay's Saves: see #replay_keep)
+          Take.note_choice(:save, given, name)
           Library.reload!
           committed = Git.commit_save(path, "save #{label(name)}#{' (replaced)' if existed}")
           puts "Saved #{name} to #{shown(path)}#{' (replaced)' if existed}#{' (committed)' if committed}"
           path
         rescue GraphIO::DumpError => e
+          Take.note_choice(:save, given, false)
           warn "Not saved: #{e.message}"
+          nil
+        end
+
+        # The Saves of the take replaying on this thread's Session, or nil
+        # (see Take::Replay::Saves): a replay never writes to the library.
+        def replaying
+          Take::Replay.saves_for(Session.existing)
+        end
+
+        # True (after saying so once per take line) when a take replays,
+        # so +what+ (a library write: collect, promote) is skipped.
+        def replay_skip?(what)
+          saves = replaying or return false
+          saves.tell(what)
+          true
+        end
+
+        # What #save does while a take replays: writes nothing, keeping
+        # +graph+'s document text in the replay's +saves+ under the name the
+        # live save used (recorded in the take line's choices), so a later
+        # `preset(name)` builds what it built live.  Takes saved before
+        # replays skipped saves decide as the save would now (against the
+        # shelves and what the replay kept).  Returns nil.
+        def replay_keep(saves, name, graph, replace:, bump:, tags: nil, about: nil, **opts)
+          as = Take.replay_choice(:save, name)
+          if as.nil?
+            there = saves.document(name) || exists?(GraphIO.target_path(name))
+            as = !there || replace ? name : (bump && next_version(name))
+          end
+          return nil unless as
+          opts.delete(:bundle) # (a file layout: the text is the same)
+          meta = (opts.delete(:meta) || {}).dup
+          meta[:tags] = check_tags(tags) if tags
+          meta[:description] = about.to_s if about
+          opts[:meta] = meta unless meta.empty?
+          saves.keep(as, GraphIO.dump(graph, name: File.basename(GraphIO.target_path(as)).delete_suffix(GraphIO::EXTENSION), **opts))
+          nil
+        rescue GraphIO::DumpError
           nil
         end
 
@@ -108,6 +156,7 @@ module MB
           target = path.(name)
           existed = File.file?(target)
           if existed && !replace
+            Take.note_choice(:save, name, false)
             warn "Not saved: #{name} exists (#{shown(target)}); save! #{label(name)}, ... replaces it, bump: true saves #{label(:"#{name}_v2")}"
             return nil
           end
@@ -137,6 +186,7 @@ module MB
           text = "library #{Library::FORMAT}\n#{head} do\n#{(params + body.lines.map(&:chomp)).map { |l| "  #{l}" }.join("\n")}\nend\n"
           FileUtils.mkdir_p(File.dirname(target))
           File.write(target, text)
+          Take.note_choice(:save, name, name)
           Library.reload!
           committed = Git.commit_save(target, "save #{label(name)}#{' (replaced)' if existed}")
           puts "Saved #{name} to #{shown(target)}#{' (replaced)' if existed}#{' (committed)' if committed}"
@@ -245,6 +295,7 @@ module MB
         # commit was made; false when git is missing or fails (with a
         # warning once).
         def commit(dir, message)
+          return false if Saving.replaying # (a take replay never commits, whatever wrote: Take::Replay::Saves)
           return false unless git?
           dir = File.expand_path(dir)
           FileUtils.mkdir_p(dir)

@@ -1890,7 +1890,9 @@ module MB
     Help.topic :record, 'Recording and takes', group: :keep do
       about <<~TEXT
         The take logs every line and where each change landed (`take.save`
-        replays it exactly; `take.save :tmp, 'a note'` keeps a note in it).  `rec`/`capture` record MIDI into armed tracks
+        replays it exactly; `take.save :tmp, 'a note'` keeps a note in it;
+        a replay never writes to your library: its `save` lines keep the
+        graph in memory for later `preset` lines).  `rec`/`capture` record MIDI into armed tracks
         (loops follow the timeline's phase; `align: :launch` starts from
         what you played first; `cc: true` keeps the mod wheel, other CCs,
         bend, and pressure in the clip, `cc: :split` in a clip of their own,
@@ -1915,7 +1917,9 @@ module MB
     Help.topic :presets, 'Saving graphs and sets', group: :keep do
       about <<~TEXT
         Every graph prints itself back as Ruby (`ruby node`; aliases print
-        as their official names: `saw` as `ramp`); `save` writes a
+        as their official names: `saw` as `ramp`), and `ruby :bass` prints
+        what a name plays: a player's graph, a track's line as `ruby set`
+        has it (a bus's, a knob's, a rack's too); `save` writes a
         graph document (or the whole set) and never replaces one (`save!`
         does; `bump: true` saves `:name_v2`; `tags:` and `about:` describe
         it for `find`), `preset` loads one with new inputs and params.
@@ -2182,7 +2186,8 @@ module MB
       about <<~TEXT
         `now` shows what plays, knobs, scenes, the flow, and queued changes
         with the commands that apply; `help node` explains a graph;
-        `lesson` teaches the newer layers step by step.  When something
+        `lesson` teaches the newer layers step by step; `ruby :bass` prints
+        the chain a player or track plays.  When something
         goes wrong live, `debug_dump` writes the state (players, changes,
         graphs as Ruby, the screen, the take, recent MIDI, threads) to a
         folder to read or send along.  When the sound drops out,

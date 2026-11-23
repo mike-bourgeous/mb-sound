@@ -27,9 +27,66 @@ module MB
       class Replay
         Line = Struct.new(:issued, :lands, :code, :epoch, :choices, :held, keyword_init: true)
 
+        # What a replay keeps instead of writing to the library (the
+        # maintainer, 2026-11-23: "Make replays skip save"): a replay never
+        # writes to the user's library shelves or commits there (save,
+        # save!, collect, promote, promote!, and everything else that goes
+        # through Library::Saving).  Each skipped line prints one dim line;
+        # a graph a skipped save would have written is kept here as its
+        # document text, for the replay's length only, and `preset(name)`
+        # reads it before the shelves, so later lines sound as they did
+        # live without the shelf (see GraphIOMethods#preset).
+        class Saves
+          def initialize
+            @documents = {}
+            @told = {}
+            @line = nil
+          end
+
+          # [index, code] of the take line running (set by Replay#run_line).
+          attr_accessor :line
+
+          # The document text kept for preset +name+ (a Symbol or a path),
+          # or nil.
+          def document(name)
+            @documents[key(name)]
+          end
+
+          # Keeps document +text+ as preset +name+ for the replay.
+          def keep(name, text)
+            @documents[key(name)] = text
+          end
+
+          # Says (once per take line) that the line's library write was
+          # skipped; +what+ describes the call when no take line runs (a
+          # block a line scheduled).
+          def tell(what)
+            index, code = @line
+            return if index && @told[index]
+            @told[index] = true if index
+            shown = code ? code.lines.first.to_s.strip : what
+            puts "\e[2mskipped in replay: #{shown} (a replay does not write to your library)\e[0m"
+          end
+
+          private def key(name)
+            t = name.to_s
+            t.include?('/') || t.end_with?('.rb') ? GraphIO.target_path(t) : t.to_sym
+          end
+        end
+
+        # The Saves of the replay playing in each Session (held by the
+        # Session: a replay whose Session is gone leaves nothing behind).
+        SAVES = Session::PerSession.new(:take_replay_saves)
+
         # The last Replay created (for loading a saved take from code).
         class << self
           attr_accessor :last
+
+          # The Saves of the take replaying in +session+, or nil when no
+          # take replays there (then library writes go ahead).
+          def saves_for(session)
+            session && SAVES[session]
+          end
         end
 
         # The longest a replay of a take without a recorded length (see
@@ -147,6 +204,7 @@ module MB
 
           binding = Take.console_binding
           @base_epoch = session.epoch
+          SAVES[session] = Saves.new # (library writes skipped, saves kept in memory: see Saves)
 
           # MIDI plays from the take, never from live input
           session.replay_midi!(@base_epoch)
@@ -238,6 +296,7 @@ module MB
           frames
         ensure
           MB::Sound.live = live unless live.nil?
+          SAVES.delete(session) if session
           session&.close
         end
 
@@ -267,6 +326,7 @@ module MB
           MB::Sound.wait
         ensure
           session&.end_replay_midi!
+          SAVES.delete(session) if session
           session.exact_lanes = exact if session && !exact.nil?
           MB::Sound.live = live unless live.nil?
         end
@@ -328,6 +388,8 @@ module MB
         end
 
         def run_line(session, binding, line, index)
+          saves = SAVES[session]
+          saves.line = [index, line.code] if saves
           Session.with_context(session: session, time: line.issued, source: :replay) do
             Session.with_perform(session: session, forced: line.lands.dup, now: line.issued, source: :replay) do
               Session.with_context_fields(choices: line.choices) do
@@ -341,6 +403,8 @@ module MB
           end
         rescue => e
           warn "Take line #{index + 1} raised #{e.class}: #{e.message}"
+        ensure
+          saves.line = nil if saves
         end
       end
     end
