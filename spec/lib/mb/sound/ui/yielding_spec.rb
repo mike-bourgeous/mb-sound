@@ -178,6 +178,11 @@ RSpec.describe(MB::Sound::UI::Yielding) do
   # process's default is 100 ms)
   it 'hands the GVL over from the first hold of a thread that joins itself, and to a render thread already waiting when the hook starts' do
     skip 'handover timing is native-only (Valgrind serializes threads)' if SPEC_MEMCHECK
+    # (no collection while it is measured: the busy thread's Arrays started
+    # minor GCs of 14-28 ms in 4 of 30 rounds, each one a late handover of
+    # 14-23 ms that no yielding can shorten; demo-cold-start-1)
+    GC.start
+    GC.disable
     period = 128 / 48000.0
     late = []
     stop = false
@@ -204,6 +209,7 @@ RSpec.describe(MB::Sound::UI::Yielding) do
     expect(late.length).to be > 10
     expect(late.max).to be < 0.005, late.map { |l| (l * 1000).round(2) }.max(5).inspect
   ensure
+    GC.enable
     stop = true
     busy&.join
     render&.join

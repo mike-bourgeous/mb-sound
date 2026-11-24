@@ -195,22 +195,32 @@ module MB
           puts "\e[2m#{note}\e[0m"
         end
 
-        # Compile the tracks' builds before the first scene change needs them
+        # Compile the tracks' builds before the first scene change needs
+        # them.  The warm-up and the first section's builds run on the
+        # calling thread (the console's) while a realtime session's render
+        # thread already writes silence (`demo` opened the output): handing
+        # it the GVL whenever it waits (Internal.yielding_to_render) keeps
+        # them from holding it for whole time slices (demo-cold-start-1: the
+        # render thread waited up to 110 ms for the console thread at a
+        # cold `start`, an underrun before the landing that raised the
+        # adaptive queue).
         raise ArgumentError, "warm_up: must be :auto, true, or false (got #{warm_up.inspect})" unless [:auto, true, false].include?(warm_up)
-        if warm_up == true || (warm_up == :auto && @session.realtime? && @session.idle?)
-          t0 = MB::U.clock_now
-          result = self.warm_up(form: form)
-          sections = @rehearsal if result
-          if result && (!result.empty? || sections)
-            built = result.count { |_, (_, how)| how == :built }
-            skipped = @exercise_skipped.empty? ? '' : "skipped #{@exercise_skipped.join(', ')}; "
-            puts format("\e[2mWarmed up %d track%s%s in %.1f s (%s%sskip with warm_up: false)\e[0m",
-              result.length, result.length == 1 ? '' : 's', sections ? " and #{sections} section#{sections == 1 ? '' : 's'}" : '',
-              MB::U.clock_now - t0, built > 0 ? "#{built} only built, reaching nodes made outside their patch; " : '', skipped)
+        Internal.yielding_to_render(@session) do
+          if warm_up == true || (warm_up == :auto && @session.realtime? && @session.idle?)
+            t0 = MB::U.clock_now
+            result = self.warm_up(form: form)
+            sections = @rehearsal if result
+            if result && (!result.empty? || sections)
+              built = result.count { |_, (_, how)| how == :built }
+              skipped = @exercise_skipped.empty? ? '' : "skipped #{@exercise_skipped.join(', ')}; "
+              puts format("\e[2mWarmed up %d track%s%s in %.1f s (%s%sskip with warm_up: false)\e[0m",
+                result.length, result.length == 1 ? '' : 's', sections ? " and #{sections} section#{sections == 1 ? '' : 's'}" : '',
+                MB::U.clock_now - t0, built > 0 ? "#{built} only built, reaching nodes made outside their patch; " : '', skipped)
+            end
           end
-        end
 
-        launch_form(form, point, seed || MB::Sound.next_seed)
+          launch_form(form, point, seed || MB::Sound.next_seed)
+        end
       end
 
       # What starting +form+ does first, for the console and NAV Space
