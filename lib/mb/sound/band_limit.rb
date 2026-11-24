@@ -873,8 +873,30 @@ module MB
       # and B_2 are integrals of B by the trapezoid rule (the integrals of
       # the linearly interpolated tables), and the moments come from their
       # final values, so every residual settles exactly on zero.
+      #
+      # Built on first use, once a process; the sine table only for sines
+      # (it takes 75-125 ms and 6 MB, and its allocation can start a major
+      # GC; the rest takes about 1 ms).  Tone#prime_render asks for them
+      # where a graph is added (Session#add), so a synced tone's first
+      # buffer doesn't build them on the render thread (demo-cold-start-1:
+      # a track a form's warm-up only builds built the sine table in the
+      # first live buffer of a cold `start`, 124-139 ms, an underrun at
+      # bar 1).
       def self.sync_tables(wave_type)
-        @sync_tables ||= begin
+        if wave_type == :sine
+          @sync_sine_tables ||= begin
+            poly = sync_poly_tables
+            [*poly[0..4], sync_sine_table(poly[3])].freeze
+          end
+        else
+          sync_poly_tables
+        end
+      end
+
+      # The tables of .sync_tables for waves other than sines (the sine
+      # table nil).
+      def self.sync_poly_tables
+        @sync_poly_tables ||= begin
           blep, _ = minblep_tables
           os = SYNC_OVERSAMPLE
           taps = SYNC_TAPS.to_f
@@ -889,14 +911,8 @@ module MB
           r1[-1] = 0.0
           r2[-1] = 0.0
 
-          poly = [blep, r1.freeze, r2.freeze, m1, m2, nil].freeze
-          {
-            poly: poly,
-            sine: [*poly[0..4], sync_sine_table(m1)].freeze,
-          }.freeze
+          [blep, r1.freeze, r2.freeze, m1, m2, nil].freeze
         end
-
-        @sync_tables[wave_type == :sine ? :sine : :poly]
       end
 
       # The residuals of switching on a complex exponential e^(2 pi i g t)

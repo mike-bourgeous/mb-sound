@@ -3003,6 +3003,25 @@ module MB
         raise ArgumentError, 'A synced oscillator cannot also have phase modulation' unless phase_mod == 0 || phase_mod.nil?
       end
 
+      # Builds the tables this tone's first buffer would otherwise build on
+      # the render thread, on the thread adding its graph
+      # (GraphNodeInput#prime from Session#add, also in the form warm-up's
+      # sandboxes): BandLimit.sync_tables for synced, reset-synced, and
+      # clean-table tones (the sine table took 124-139 ms and started a
+      # major GC in the first live buffer of a cold demo `start`, for a
+      # track the warm-up only builds; demo-cold-start-1).  Reads settings
+      # only: the kernel cache (#kernel) is left alone.  Public, so
+      # GraphNodeInput#prime finds it.
+      def prime_render
+        if table_kernel?
+          BandLimit.sync_tables(:sine) if @sync_source || clean_table?
+        elsif @sync_source || reset_sync?
+          BandLimit.sync_tables(@wave_type)
+        end
+        nil
+      end
+      public :prime_render
+
       # Which kernel computes samples: :sync, :blit, :synth (FastSynth
       # band-limited or warped), :phasor, or :naive (FastSound), cached
       # (with the advance, gain, and band-limit fade) until a setting
