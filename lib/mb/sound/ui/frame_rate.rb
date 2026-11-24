@@ -385,9 +385,16 @@ module MB
         # Joins when the render thread is first known or changes (a new
         # Session), on the painter thread before each frame: two ivar reads
         # and a comparison when nothing changed, no allocation.
+        #
+        # The Session to follow is the one the frame attaches to: before the
+        # first frame attached it, the painter's first frame (a cold one,
+        # 10-17 ms of layout and first compiles) ran without yielding, and
+        # :low's 11 ms queue ran dry at a new Session's first play
+        # (fixes-19).
         def yield_to_render
           return unless Yielding.painter
-          t = @attached&.render_thread
+          s = @attached || (respond_to?(:follow_target, true) ? follow_target : nil)
+          t = s&.render_thread
           t = nil unless t&.alive?
           return if t.equal?(@yield_render)
           @yield_render = t

@@ -214,6 +214,33 @@ static void yield_atfork_child(void)
 	kicker_running = 0;
 }
 
+// Brings the hook's two flags up to date from a call that holds the GVL
+// (the table or the priority thread just changed).  The hook learns them
+// only from thread events, and the events before a change say nothing
+// about it: a thread that joins itself (a painter's first frame,
+// Internal.yielding_to_render) was RESUMED before it was a yielder, so its
+// first hold went unkicked for a whole timeslice (10 ms, 5 of 5 runs;
+// fixes-19), and a priority thread that became READY before the hook
+// started (a new Session's render thread wanting its first buffers while
+// the warm-up worker starts) was never seen waiting.  The calling thread
+// holds the GVL, so whether a yielder holds it is known; whether the
+// priority thread waits is not, so it is assumed until that thread's next
+// RESUMED (at worst a yielder hands the GVL over once for nothing).
+static void yield_sync_flags(int priority_changed)
+{
+	if (!LOAD(kicker_running)) {
+		return;
+	}
+	STORE(yielder_holds, yield_is_yielder(rb_thread_current()));
+	VALUE priority = LOAD(yield_priority);
+	if (priority_changed && !NIL_P(priority) && priority != rb_thread_current()) {
+		STORE(priority_waiting, 1);
+	}
+	if (LOAD(priority_waiting) && LOAD(yielder_holds)) {
+		sem_post(&kick_sem);
+	}
+}
+
 static int yield_count(void)
 {
 	int n = 0;
@@ -224,7 +251,8 @@ static int yield_count(void)
 }
 
 // Starts or stops the hook and kicker to match the table (GVL held).
-static void yield_update(void)
+// Returns 1 if it started them.
+static int yield_update(void)
 {
 	int want = !NIL_P(yield_priority) && yield_count() > 0 && !forked_child;
 	if (want && !kicker_running) {
@@ -238,6 +266,7 @@ static void yield_update(void)
 		yield_hook = rb_internal_thread_add_event_hook(yield_event,
 				RUBY_INTERNAL_THREAD_EVENT_READY | RUBY_INTERNAL_THREAD_EVENT_RESUMED | RUBY_INTERNAL_THREAD_EVENT_SUSPENDED |
 				RUBY_INTERNAL_THREAD_EVENT_EXITED, NULL);
+		return 1;
 	} else if (!want && kicker_running) {
 		rb_internal_thread_remove_event_hook(yield_hook);
 		yield_hook = NULL;
@@ -247,6 +276,7 @@ static void yield_update(void)
 		STORE(priority_waiting, 0);
 		STORE(yielder_holds, 0);
 	}
+	return 0;
 }
 
 static void yield_check_thread(VALUE thread)
@@ -265,8 +295,10 @@ static VALUE yield_set_priority(VALUE self, VALUE thread)
 	if (!NIL_P(thread)) {
 		yield_check_thread(thread);
 	}
+	int changed = LOAD(yield_priority) != thread;
 	STORE(yield_priority, thread);
-	yield_update();
+	int started = yield_update();
+	yield_sync_flags(changed || started);
 	return thread;
 }
 
@@ -314,7 +346,7 @@ static VALUE yield_add(VALUE self, VALUE thread)
 	for (int i = 0; i < YIELD_SLOTS; i++) {
 		if (yield_threads[i] == Qnil) {
 			STORE(yield_threads[i], thread);
-			yield_update();
+			yield_sync_flags(yield_update());
 			return Qtrue;
 		}
 	}
@@ -332,7 +364,7 @@ static VALUE yield_remove(VALUE self, VALUE thread)
 		}
 	}
 	if (found) {
-		yield_update();
+		yield_sync_flags(yield_update());
 	}
 	return found ? Qtrue : Qfalse;
 }
