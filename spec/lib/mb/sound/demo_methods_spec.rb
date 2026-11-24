@@ -139,10 +139,30 @@ RSpec.describe(MB::Sound::DemoMethods) do
   describe 'every demo, started as the console starts it' do
     before { allow(MB::Sound::JIT).to receive(:compiling?).and_return(true) } # (the rehearsal runs only with YJIT)
 
+    # Process-wide tables built on first use, cleared before each demo and
+    # put back after it, with the threads that built them: none may be the
+    # render thread (demo-cold-start-1: BandLimit's sync tables, 124-139
+    # ms, were built in tunnel_vision's first live buffer; Tone#prime_render
+    # builds them where a graph is added).
+    def lazy_tables = { MB::Sound::BandLimit => %i[@sync_poly_tables @sync_sine_tables] }
+
+    before do
+      @kept_tables = lazy_tables.flat_map { |mod, ivs| ivs.map { |iv| [mod, iv, mod.instance_variable_get(iv)] } }
+      @kept_tables.each { |mod, iv, _| mod.instance_variable_set(iv, nil) }
+      @table_threads = []
+      bl = MB::Sound::BandLimit
+      allow(bl).to receive(:sync_poly_tables).and_wrap_original { |m|
+        @table_threads << [:sync_poly_tables, Thread.current.name] if bl.instance_variable_get(:@sync_poly_tables).nil?
+        m.call
+      }
+      allow(bl).to receive(:sync_sine_table).and_wrap_original { |m, *a| @table_threads << [:sync_sine_table, Thread.current.name]; m.call(*a) }
+    end
+
     after do
       MB::Sound.live = false
       @live&.close
       MB::Sound.rewind
+      @kept_tables.each { |mod, iv, v| mod.instance_variable_set(iv, v) }
     end
 
     # Lets +session+ (a virtual clock) play +seconds+ in steps of four
@@ -194,6 +214,7 @@ RSpec.describe(MB::Sound::DemoMethods) do
         expect(status.state).to eq(:started)
         expect(@live.arrangement.rehearsal).to be > 0
         expect(@live.players).not_to be_empty
+        expect(@table_threads.select { |_, t| t == @live.render_thread.name }).to eq([])
       end
     end
   end
