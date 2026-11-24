@@ -24,7 +24,7 @@ RSpec.describe(MB::Sound::GraphNode::LoudnessMeter, :aggregate_failures) do
     40.times { m.each { |o| o.sample(4800) } }
     expect(m.short_term).to be_within(0.1).of(-23)
     expect(m.lufs).to be_within(0.1).of(-23)
-    # Short programmes have a wide range: the windows padded with silence
+    # Short programs have a wide range: the windows padded with silence
     # at the start and Tech 3342's 1.5 s of silence after the end count
     expect(m.range).to eq(m.result.range)
     expect(m.result.short_term_max).to be_within(0.1).of(-23)

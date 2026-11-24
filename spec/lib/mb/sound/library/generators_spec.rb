@@ -468,12 +468,12 @@ RSpec.describe MB::Sound::Library::Generators do
     end
 
     it 'list what a generator line gets wrong as problems' do
-      write('gen/bad.rb', "generator :bad, colour: 1 do |seed: 1|\n  seq(C4).loop\nend\n")
+      write('gen/bad.rb', "generator :bad, flavor: 1 do |seed: 1|\n  seq(C4).loop\nend\n")
       write('gen/bad2.rb', "flow :bad2 do |seed: 1|\n  markov(a: {}, seed: seed)\nend\n")
       write('gen/bad3.rb', "generator :bad3 do |seed|\n  seq(C4).loop\nend\n")
-      expect { lib.index.entries }.to output(/colour.*\n.*bars:.*\n.*keywords/m).to_stderr
+      expect { lib.index.entries }.to output(/flavor.*\n.*bars:.*\n.*keywords/m).to_stderr
       text = lib.index.problems.join("\n")
-      expect(text).to include('generator bad: unknown setting colour:', 'flow bad2 needs bars:', 'generator bad3: params are keywords with defaults')
+      expect(text).to include('generator bad: unknown setting flavor:', 'flow bad2 needs bars:', 'generator bad3: params are keywords with defaults')
     end
   end
 

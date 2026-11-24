@@ -344,8 +344,8 @@ module SessionFuzz
     # keeps the song it made before)
     if rng.rand < 0.2
       lines << "knob :tint, 0, range: 0..1"
-      lines << "bus(:colour) { |sig| seq([E2, G2, B2], [C2, E2, G2]).n1.loop.synth(voices: 4) { |v| (sig * 0.01).resonate(:bar, v.freq, decay: 0.3) * v.gate.smooth(4.ms) } }"
-      lines << "at_bar(1) { feed :#{pick(rng, names)}, :colour, :tint }"
+      lines << "bus(:color) { |sig| seq([E2, G2, B2], [C2, E2, G2]).n1.loop.synth(voices: 4) { |v| (sig * 0.01).resonate(:bar, v.freq, decay: 0.3) * v.gate.smooth(4.ms) } }"
+      lines << "at_bar(1) { feed :#{pick(rng, names)}, :color, :tint }"
       lines << "at_bar(#{rng.rand(1..bars)}, beat: #{rng.rand(2..beats)}) { turn :tint, 1 }"
     end
     # (session-2) readers hear their sources pre-fader: a ducked part's

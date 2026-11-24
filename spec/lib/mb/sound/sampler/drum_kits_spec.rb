@@ -93,7 +93,7 @@ RSpec.describe 'SoundFont kits by name and role', :aggregate_failures do
     expect(hit(raw, 60)).to be > 0
   end
 
-  it 'recognises the layout by key set when the name says nothing, and maps a GM bank by its fallbacks' do
+  it 'recognizes the layout by key set when the name says nothing, and maps a GM bank by its fallbacks' do
     SF2Writer.drum_kit(File.join(dir, 'Mystery.sf2'), keys: 35..61, name: 'Kit', velocity_layers: 2)
     kit = MB::Sound.sf2('Mystery', preset: [0, 0])
     expect(kit.drum_map&.layout).to eq(:acoustic_kit)

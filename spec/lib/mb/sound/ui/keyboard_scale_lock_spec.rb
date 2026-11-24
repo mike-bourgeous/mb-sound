@@ -25,7 +25,7 @@ RSpec.describe(MB::Sound::UI::Keyboard::ScaleLock, :aggregate_failures) do
     # z is C3: D3, then each white key the next degree
     expect(play('zxcvbnm,')).to eq([50, 52, 53, 55, 57, 59, 60, 62])
     expect(play('zxcvbnm,').all? { |n| sc.include?(n) }).to eq(true)
-    # Black keys: the note between the scale notes of their neighbours
+    # Black keys: the note between the scale notes of their neighbors
     # (C#: D-E, Eb; D#: E-F and A#: B-C, half steps, silent; F#: G-A, Ab;
     # G#: A-B, Bb)
     expect(play('sdghj')).to eq([51, 56, 58])

@@ -307,7 +307,7 @@ RSpec.describe(MB::Sound::GraphNode::Chorus) do
     end
   end
 
-  describe 'BBD flavour' do
+  describe 'BBD flavor' do
     # The analog all-pole response in dB of +poles+ at +f+ Hz.
     def analog_db(poles, f, scale = 1)
       s = Complex(0, f)
