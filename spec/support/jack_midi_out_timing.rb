@@ -40,6 +40,7 @@ RSpec.shared_context 'JACK MIDI out timing' do
     skip @jack_error if @jack_error
     @gaps = 0
     @plays = 0
+    @gap_notes = []
     ENV['AUDIO_BACKEND'] = 'jack'
     ENV['OUTPUT_DEVICE'] = 'none'
     ENV['MIDI_API'] = 'jack'
@@ -50,7 +51,10 @@ RSpec.shared_context 'JACK MIDI out timing' do
 
   after(:each) do
     if @gaps.to_i > 0
-      RSpec.configuration.reporter.message("#{RSpec.current_example.full_description}: #{@gaps} of #{@plays} plays had a gap in the audio (underruns), their notes checked against their own audio")
+      RSpec.configuration.reporter.message(
+        "#{RSpec.current_example.full_description}: #{@gaps} of #{@plays} plays had a gap in the audio it didn't force " \
+        "(underruns), their notes checked against their own audio:\n  #{@gap_notes.join("\n  ")}"
+      )
     end
     @opened.reverse_each(&:close)
     @synth&.close
@@ -82,16 +86,23 @@ RSpec.shared_context 'JACK MIDI out timing' do
   # left on] (see the file comment); the destination's and the output's
   # :mstats and :astats (underruns counted before the queue drains at the
   # end); the loopback's :lag; :steps, each click's played frame minus its
-  # session frame (one value when the audio flowed without a gap); and the
-  # :phase measured.
+  # session frame (one value when the audio flowed without a gap); :jumps,
+  # each gap seen between two clicks as a Hash (:after and :before, the
+  # clicks' session frames, :frames, how much later the audio went, and
+  # :step, the later click's step); the :phase measured; and with +hold+,
+  # :held (false if the hold timed out) and :held_at (the session frame
+  # starting the held write).
   #
   # +hold+ makes the Session's writes late on purpose, as a busy machine
   # does: :first holds the first write until a JACK cycle has gone by with
   # the ring still empty (the first notes are already queued by then: sends
   # come while a buffer renders), and an Integer k holds the k-th write
   # (from 0) until the output has run out of audio (an underrun, with notes
-  # of that buffer queued before it).
-  def play(clip, size:, bpm:, offset:, frames:, start: 1/16r, phase: nil, hold: nil, conceal: :silence)
+  # of that buffer queued before it).  +unannounced+, an Integer k, also
+  # holds the k-th write until an underrun but leaves it out of :held and
+  # :held_at, as a busy machine makes a gap the check isn't told about
+  # (:unannounced_held says whether it happened).
+  def play(clip, size:, bpm:, offset:, frames:, start: 1/16r, phase: nil, hold: nil, unannounced: nil, conceal: :silence)
     out = open(MB::Sound::DeviceOutput.new(channels: 1, buffer_size: size, latency: 0.15, adaptive: false, capture: 48000 * 4, conceal: conceal))
     capture = open(MB::Sound::MIDI::Input.new) # our own midi_in: JACK frame times
     session = open(MB::Sound::Session.new(master_gain: 1, output: out, transport: MB::Sound::Sequence::Transport.new(bpm: bpm),
@@ -126,6 +137,8 @@ RSpec.shared_context 'JACK MIDI out timing' do
     written = 0
     writes = 0
     held = nil
+    held_at = nil
+    unannounced_held = nil
     write = out.method(:write)
     out.define_singleton_method(:write) do |data|
       n = data[0].length
@@ -134,16 +147,21 @@ RSpec.shared_context 'JACK MIDI out timing' do
         data = data.map(&:dup)
         here.each { |f| data[0][f - written] = 1 }
       end
-      if (hold == :first && writes == 0) || hold == writes
+      if (hold == :first && writes == 0) || hold == writes || unannounced == writes
         deadline = MB::U.clock_now + 2
-        if hold == :first
+        if hold == :first && writes == 0
           c0 = out.jack_clock[:frame_time]
           nil until out.jack_clock[:frame_time] != c0 || MB::U.clock_now > deadline || !sleep(0.0002)
         else
           u0 = out.stats[:underruns]
           nil until out.stats[:underruns] != u0 || MB::U.clock_now > deadline || !sleep(0.001)
         end
-        held = MB::U.clock_now < deadline
+        if unannounced == writes
+          unannounced_held = MB::U.clock_now < deadline
+        else
+          held = MB::U.clock_now < deadline
+          held_at = written
+        end
       end
       written += n
       writes += 1
@@ -181,26 +199,54 @@ RSpec.shared_context 'JACK MIDI out timing' do
     played = out.captured[0]
     found = (0...played.length).select { |k| played[k] > 0.5 }
     expect(found.length).to eq(clicks.length)
-    step_of = clicks.zip(found).to_h { |f, k| [f, k - f] }
+    step_of = clicks.zip(found).to_h { |f, k| [f, k && k - f] }
     steps = step_of.values.uniq
+    # Where the audio jumps later: a gap (underrun) between two clicks
+    jumps = step_of.each_cons(2).filter_map do |(f0, s0), (f1, s1)|
+      { after: f0, before: f1, frames: s1 - s0, step: s1 } if s0 && s1 && s1 != s0
+    end
     clock = out.jack_clock
     left = ->(f) { (clock[:frame_time] + f + step_of[f] - clock[:frames_played]) & 0xffff_ffff }
 
     { got: got.map { |f, b| [delta(lag, f) & 0xffff_ffff, b.bytes] }, sent: sent.map { |f| [f, left.(f)] },
-      mstats: dest.output.stats, astats: astats, lag: lag, steps: steps, phase: phase, held: held }
+      mstats: dest.output.stats, astats: astats, lag: lag, steps: steps, jumps: jumps, phase: phase, held: held, held_at: held_at,
+      unannounced_held: unannounced_held }
   end
 
   # Expects every message of +r+ (see #play) on its own audio's JACK frame
-  # plus +offset_frames+, nothing late or still waiting; a gap in the audio
-  # is counted (see the file comment), or with +gap+ (a forced underrun)
-  # expected.
+  # plus +offset_frames+, nothing late or still waiting.  With +gap+ (a play
+  # whose +hold:+ forced an underrun), expects that gap: the audio jumps
+  # later between the last click before the held write and the first click
+  # in or after it, by the forced gap's size: with silence concealment the
+  # held write's audio starts a JACK period (the output plays from the next
+  # cycle after running dry), with the default concealment the jump is
+  # frames the concealment filled.  Gaps the play didn't force (underruns of
+  # a busy machine, seen in the first buffers of 128-frame plays) never
+  # fail it, since every message is checked
+  # against its own audio (see the file comment): they are counted and
+  # printed after the example.
   def expect_on_time(r, offset_frames, label, gap: false)
-    label = "#{label} (loopback lag #{r[:lag]}, JACK #{MB::Sound::Jack.info&.slice(:skipped_cycles, :repeated_cycles)}, audio steps #{r[:steps].inspect})"
+    jack = MB::Sound::Jack.info
+    label = "#{label} (loopback lag #{r[:lag]}, JACK #{jack&.slice(:skipped_cycles, :repeated_cycles)}, audio steps #{r[:steps].inspect})"
+    extra = r[:jumps]
     if gap
-      expect(r[:steps].length).to eq(2), "#{label}: the audio had no gap"
-    else
-      @plays += 1
-      @gaps += 1 if r[:steps].length > 1
+      forced = r[:jumps].find { |j| j[:after] < r[:held_at] && j[:before] >= r[:held_at] }
+      if forced
+        extra = r[:jumps] - [forced]
+        if r[:astats][:concealed] == 0
+          period = jack[:buffer_size]
+          expect((r[:held_at] + forced[:step]) % period).to eq(0), "#{label}: the audio after the forced gap (#{forced[:frames]} frames) doesn't start a #{period}-frame JACK period"
+        else
+          expect(forced[:frames]).to be_between(1, r[:astats][:concealed]), "#{label}: the forced gap jumped #{forced[:frames]} frames, the concealment filled #{r[:astats][:concealed]}"
+        end
+      else
+        expect(forced).not_to be_nil, "#{label}: no gap in the audio across the held write at session frame #{r[:held_at].inspect}, gaps elsewhere: #{r[:jumps].inspect}"
+      end
+    end
+    @plays += 1
+    unless extra.empty?
+      @gaps += 1
+      @gap_notes << "#{label}: unforced gaps #{extra.map { |j| "#{j[:frames]} frames between session frames #{j[:after]} and #{j[:before]}" }.join(', ')}"
     end
     expect(r[:got].length).to eq(r[:sent].length), label
     deltas = r[:got].zip(r[:sent]).map { |(jack_frame, _bytes), (_frame, audio)| delta(audio, jack_frame) }
