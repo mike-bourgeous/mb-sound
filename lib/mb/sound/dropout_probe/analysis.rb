@@ -212,16 +212,28 @@ module MB
           device_late = late >= [DEVICE_LATE * 1e9, 0.5 * window].max
           base[:device_late_ms] = late / 1e6
 
+          # Away too briefly to have emptied the queue at the device's own
+          # pace: a writer that stops just after a write leaves the queue
+          # holding its limit less that write, so a device playing in real
+          # time runs dry about that long later.  (Half the window, the
+          # test before start-underrun-1, is less than that when the queue
+          # is under three writes: on a 1440-frame queue of 512-frame
+          # writes, a 120 ms GVL hold that began as the writer found room
+          # was away 20.2 of 40.7 ms, and the dropout was blamed on the
+          # device in 5 of 50 runs.)
+          cover = [(limit - ctx.fetch(:buffer).to_i) / rate * 1e9, 0].max
+          brief = away < 0.5 * cover
+
           top, top_ns = parts.max_by { |_, v| v }
           cause, detail =
             if ctx[:first_write] && t - ctx[:first_write] < (ctx[:startup] || STARTUP) * 1e9
               [:startup, format('%.2f s after the first write', (t - ctx[:first_write]) / 1e9)]
-            elsif device_late && (waiting_at_t || away < 0.5 * window || top == :system)
+            elsif device_late && (waiting_at_t || brief || top == :system)
               [:system, format('the device thread itself was stalled %.1f ms, then caught up (the process or the machine stalled; the probe saw %.1f ms)',
                 late / 1e6, episode_ns / 1e6)]
-            elsif waiting_at_t || away < 0.5 * window
-              [:device, format('the writer was waiting for room (away %.1f of %.1f ms); the device asked %d frames with %d queued (limit %d)',
-                away / 1e6, window / 1e6, gap[:frames], gap[:available], limit)]
+            elsif waiting_at_t || brief
+              [:device, format('the writer was waiting for room (away %.1f ms; the queue held %.1f ms after a write); the device asked %d frames with %d queued (limit %d)',
+                away / 1e6, cover / 1e6, gap[:frames], gap[:available], limit)]
             elsif covered
               [:queue_shrink, format('the queue went %d -> %d ms; the next write came %.1f ms after the gap (largest part: %s %.1f ms)',
                 (ctx[:limit_before] / rate * 1000).round, (limit / rate * 1000).round, late_ms, top, top_ns / 1e6)]
