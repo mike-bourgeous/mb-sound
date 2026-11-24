@@ -1825,7 +1825,7 @@ module MB
       about <<~TEXT
         `lock :play` maps live MIDI and the virtual keyboard into the
         session key: the root on every C, black keys passing notes between
-        their neighbours.  `lock :mash` makes every white key the next
+        their neighbors.  `lock :mash` makes every white key the next
         scale degree and silences black keys (mash anything), `lock
         :along` snaps each key to the nearest scale note, `lock :chord`
         plays the current chord's tones (`from:` a clip of chords or
