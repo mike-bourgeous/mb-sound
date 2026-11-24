@@ -132,6 +132,41 @@ RSpec.describe(MB::Sound::DropoutProbe) do
       expect(r[:cause]).to eq(:device)
     end
 
+    # (start-underrun-1: the realtime stacks: example's dropout was blamed
+    # on the device in 5 of 50 quiet runs.)  A 1440-frame queue of
+    # 512-frame writes: the writer found room just as another thread took
+    # the GVL for 100 ms, so it was away only the 19.3 ms the queue held
+    # after its write, under half the 40.7 ms window
+    it 'blames the GVL, not the device, when the writer was held right after it found room on a short queue' do
+      room = 1_000 * ms
+      enter = room - 10 * ms
+      writes = (0...10).map { |k|
+        e = enter - (10 - k) * period * ms
+        { enter: e.round, exit: (e + period * ms - 0.5 * ms).round, wait: ((period - 0.6) * ms).round, room: (e + period * ms - 0.6 * ms).round,
+          back: (e + period * ms - 0.55 * ms).round, pull: (e + period * ms - 0.65 * ms).round,
+          cpu_enter: (k * 0.1 * ms).round, cpu_exit: (k * 0.1 * ms + 0.02 * ms).round, queued: 928, limit: 1440, frames: 512 }
+      }
+      back = room + 100 * ms
+      writes << { enter: enter.round, exit: (back + 0.02 * ms).round, wait: (back - enter).round, room: room.round, back: back.round, pull: (room - 0.05 * ms).round,
+                  cpu_enter: (1.0 * ms).round, cpu_exit: (1.02 * ms).round, queued: 928, limit: 1440, frames: 512 }
+      writes << writes.last.merge(enter: (back + 0.1 * ms).round, exit: (back + 0.2 * ms).round, wait: 0, room: 0, back: 0, pull: 0,
+                                  cpu_enter: (1.1 * ms).round, cpu_exit: (1.12 * ms).round, queued: 0)
+      t = (room + 19.0 * ms).round
+      threads = [{ thread: 'render', holder: 'main', a: (enter + 0.01 * ms).round, b: (room + 0.01 * ms).round, c: back.round }]
+      c = ctx(writes, t, threads: threads, limit_before: 1440)
+      c[:gap] = c[:gap].merge(limit: 1440, frames: 128, available: 32)
+      r = described_class.classify(c)
+      expect(r[:components][:away_ms]).to be < 0.5 * r[:window_ms] # (what the old test blamed on the device)
+      expect(r[:cause]).to eq(:gvl)
+      expect(r[:detail]).to include('held by main')
+
+      # Still waiting for room when it ran dry: the device's
+      writes[-2] = writes[-2].merge(room: t + (5 * ms).round, back: t + (5.05 * ms).round, wait: t + (5.05 * ms).round - enter.round, exit: t + (5.1 * ms).round)
+      c = ctx(writes, t, threads: [], limit_before: 1440)
+      c[:gap] = c[:gap].merge(limit: 1440)
+      expect(described_class.classify(c)[:cause]).to eq(:device)
+    end
+
     it 'blames a queue shrink when the queue before it would have covered the lateness' do
       w = build.(cpu: 60.0, stall: 60.0)
       s = stall_start.(w)
@@ -216,7 +251,12 @@ RSpec.describe(MB::Sound::DropoutProbe) do
       probe = described_class.start(session, json: json, system: false, quiet: true, settle: 0.3, startup: 0, stacks: 0.01)
       expect(probe.inspect).to match(/\A#<MB::Sound::DropoutProbe probe running [\d.]+ s, 0 dropouts -> .*dropouts\.json>\z/)
       sleep 0.3
-      MB::Sound::FastLatency.spin(0.12) # (this thread is Thread.main: the probe watches it as 'main')
+      # (this thread is Thread.main: the probe watches it as 'main').  The
+      # render thread's wait for the GVL starts when the null device makes
+      # room, up to about 20 ms into the spin (its pulls come every 10 ms),
+      # so 150 ms keeps the whole wait over 100 ms (it was 0.12 s: waits of
+      # 101.7-119.6 ms measured)
+      MB::Sound::FastLatency.spin(0.15)
       t = MB::U.clock_now
       sleep 0.01 while probe.dropouts.empty? && MB::U.clock_now - t < 5
       probe.stop

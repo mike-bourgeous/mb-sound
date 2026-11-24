@@ -268,7 +268,7 @@ An installed gem has no checkout: code that writes files uses `Internal.user_dat
 ### [Audio I/O](audio_io.md)
 
 Device I/O goes through bundled miniaudio (`fast_audio`) plus a small JACK backend (one client per process, ports added any time); `OUTPUT_TYPE`/`INPUT_TYPE` pick `device`, `ffmpeg`, or `null`.
-`DeviceOutput` writes a lock-free ring drained on the device thread (Ruby never on the audio thread), with latency profiles (`AUDIO_PROFILE`, `-L`, `latency :low`), resampling to the card's rate, and underrun concealment (`:repeat` by default).
+`DeviceOutput` writes a lock-free ring drained on the device thread (Ruby never on the audio thread), with latency profiles (`AUDIO_PROFILE`, `-L`, `latency :low`), resampling to the card's rate, a start that waits for a full queue, and underrun concealment (`:repeat` by default).
 Rules: never `jack_port_unregister` on an active JACK client; things closed at exit register with `ExitClose`, never their own `at_exit` block; bin/ scripts set `RUBY_THREAD_TIMESLICE=10` in their shebang.
 
 ### [Latency probe (`fast_latency`, `MB::Sound::LatencyProbe`, `bin/latency_probe.rb`)](latency_probe.md)

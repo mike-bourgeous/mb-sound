@@ -256,7 +256,9 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
   end
 
   it 'plays MAIN and CUE channels of a 4-channel output (cue: 2)' do
-    o = device_output(channels: 4, cue: 2, capture: 2000)
+    # (the capture holds the queue's length of silence first: one short
+    # write waits that long for more before playing; see 'the start')
+    o = device_output(channels: 4, cue: 2, capture: 6000)
     expect(o.cue_channels).to eq(2)
     expect(o.device_channels).to eq(4)
     chans = Array.new(4) { Numo::SFloat.new(800).rand(-1, 1) }
@@ -269,7 +271,7 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
   end
 
   it 'plays a mono output on both channels of a stereo device' do
-    o = device_output(channels: 1, capture: 3000)
+    o = device_output(channels: 1, capture: 6000) # (see the 4-channel example)
     expect(o.channels).to eq(1)
     expect(o.device_channels).to eq(2)
 
@@ -385,6 +387,75 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
     expect(played[1]).to eq(expected[1])
   ensure
     session&.close
+  end
+
+  # (start-underrun-1) A new output used to play the first buffer the
+  # moment it was written, so a device period longer than the buffer ran
+  # dry whenever it came before the second write (128-frame writes on
+  # JACK's 256-frame periods: an unforced underrun in a few percent of
+  # starts, nothing stalled), and the first buffers' render costs had no
+  # margin.  Now queued audio waits for the queue to fill (or the end of
+  # the audio, or a queue's length of waiting) before the device takes any.
+  describe 'the start' do
+    # A realtime Session rendering 128-frame buffers into a 256-frame-period
+    # null device, whose output holds the second write until the device
+    # has played two more periods after the first write (a period landing
+    # between the first two writes, as on JACK, or a slow second render):
+    # the underruns by the 40th write, and how many device frames after the
+    # first write its first frame played.
+    def held_start
+      o = device_output(channels: 1, buffer_size: 128, period: 256, latency: 0.05, adaptive: false, conceal: :silence, capture: 24000)
+      session = MB::Sound::Session.new(output: o, transport: MB::Sound::Sequence::Transport.new, master_gain: 1, channels: 1, buffer_size: 128,
+                                       safety_limiter: false, monitor: false)
+      r = {}
+      writes = 0
+      write = o.method(:write)
+      o.define_singleton_method(:write) do |data|
+        r[:at_first] = stats[:frames_played] if writes == 0
+        if writes == 1
+          deadline = MB::U.clock_now + 2
+          nil until stats[:frames_played] >= r[:at_first] + 512 || MB::U.clock_now > deadline || !sleep(0.0005)
+          r[:held] = MB::U.clock_now < deadline
+        end
+        r[:underruns] = stats[:underruns] if writes == 40
+        writes += 1
+        write.call(data)
+      end
+      session.add(0.25.constant, name: :c, fade: 0)
+      wait_until!(poll: 0.005) { r.key?(:underruns) }
+      wait_until!(poll: 0.005) { o.captured[0].to_a.any? { |v| v != 0 } }
+      r.merge(delay: o.captured[0].to_a.index { |v| v != 0 } - r[:at_first], limit: o.queue_limit)
+    ensure
+      session&.close
+    end
+
+    it 'keeps a late second write from running a longer device period dry (10 starts)' do
+      starts = Array.new(10) { held_start }
+      expect(starts.map { |s| s[:held] }).to all(eq(true))
+      expect(starts.map { |s| s[:underruns] }).to all(eq(0))
+      # The first frame waits for the full queue: at least the hold, at
+      # most the queue's length plus two periods
+      expect(starts.map { |s| s[:delay] }).to all(be_between(512, 2400 + 512))
+    end
+
+    it 'starts within the queue length when the writer stops after one buffer' do
+      o = device_output(channels: 1, buffer_size: 128, period: 256, latency: 0.03, adaptive: false, conceal: :silence, capture: 12000)
+      at = o.stats[:frames_played]
+      o.write([Numo::SFloat.zeros(128) + 0.5])
+      wait_until!(poll: 0.005) { o.stats[:queued] == 0 }
+      first = o.captured[0].to_a.index { |v| v != 0 }
+      expect(first - at).to be_between(o.queue_limit - 256, o.queue_limit + 2 * 256)
+    end
+
+    it 'starts at once when the writer marks the end of its audio' do
+      o = device_output(channels: 1, buffer_size: 128, period: 256, latency: 0.05, adaptive: false, conceal: :silence, capture: 12000)
+      at = o.stats[:frames_played]
+      o.write([Numo::SFloat.zeros(100) + 0.5])
+      o.end_stream
+      wait_until!(poll: 0.005) { o.stats[:queued] == 0 }
+      first = o.captured[0].to_a.index { |v| v != 0 }
+      expect(first - at).to be <= 2 * 256
+    end
   end
 
   describe 'environment variables' do
