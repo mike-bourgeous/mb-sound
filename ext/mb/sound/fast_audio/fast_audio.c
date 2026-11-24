@@ -547,6 +547,15 @@ struct playback {
 	_Atomic size_t max_callback; // most frames the device asked for at once
 	int starving; // callback only: the last callback ran out of audio
 
+	// The start (device thread only; see playback_primed): until the
+	// queue first holds queue_limit frames, the writer marks the end of
+	// its audio, or the device has waited queue_limit frames since audio
+	// arrived (primed_wait), queued audio waits and the device plays
+	// silence, so playback starts with a full queue instead of the first
+	// buffer
+	int priming;
+	size_t primed_wait;
+
 	// Underrun concealment (mb_conceal.h; device thread only after open),
 	// its settings from Ruby, and counters copied out for #stats.
 	// quiet_pos is the write position the writer marked as the end of its
@@ -603,7 +612,8 @@ struct playback {
 	// ring frames went in its port buffers, as runs of frames (one per
 	// JACK_CHUNK pull that took any: offset in the cycle, ring position,
 	// count), and whether the ring's queued frames could still wait after
-	// that cycle (concealment landing on them after a gap).  serial names
+	// that cycle (concealment landing on them after a gap, or a new
+	// playback waiting for its start: playback_primed).  serial names
 	// this playback to the MIDI records queued for its ring.
 	uint32_t serial;
 	int cycle_runs;
@@ -959,6 +969,24 @@ static void playback_copy(struct playback *p, float *out, size_t pos, size_t cou
 	}
 }
 
+// The start (start-underrun-1): true once a new playback may take queued
+// audio, with +available+ frames queued (+quiet+: the writer marked their
+// end).  Until then the device plays silence and takes nothing, as before
+// the first write.  It starts when the queue first holds queue_limit
+// frames (the writer fills it to that, and keeps it there from then on),
+// when the writer marks the end of its audio (#end_stream after a sound
+// shorter than the queue), or once the device has waited queue_limit
+// frames since audio arrived (a slow first render starts no later than a
+// sound written behind a full queue plays).  Taking the first buffer at
+// once ran dry whenever a device period was longer than the writes and
+// came before the second one (128-frame writes on JACK's 256-frame
+// periods: an underrun in 2-7% of starts with nothing stalled), and left
+// the first buffers' render costs no margin.  Device thread only.
+static int playback_primed(struct playback *p, size_t available, int quiet)
+{
+	return available > 0 && (available >= p->queue_limit || quiet || p->primed_wait >= p->queue_limit);
+}
+
 // Takes +frames+ interleaved frames from the ring into +out+ (silence where
 // it runs out), for miniaudio's device thread or JACK's.  Realtime safe: no
 // Ruby, no allocation, no blocking locks.  Returns the ring frames taken;
@@ -972,6 +1000,18 @@ static size_t playback_pull(struct playback *p, float *out, size_t frames, size_
 	size_t wp = atomic_load_explicit(&p->write_pos, memory_order_acquire);
 	size_t available = wp - rp;
 	int quiet = atomic_load_explicit(&p->quiet_pos, memory_order_relaxed) == wp;
+	if (p->priming) {
+		if (playback_primed(p, available, quiet)) {
+			p->priming = 0;
+		} else {
+			// Queued audio waits for the start (see playback_primed)
+			if (available > 0) {
+				p->primed_wait += frames;
+			}
+			available = 0;
+			wp = rp;
+		}
+	}
 	// (while concealing, frames wait in the ring until the grains have
 	// landed on them; see mb_conceal_take)
 	size_t count = mb_conceal_take(&p->conceal, available, frames);
@@ -1127,6 +1167,16 @@ static void playback_jack_process(struct mb_jack_unit *unit, uint32_t nframes)
 
 	if (!repeat) {
 		p->cycle_holding = p->conceal.mode == MB_CONCEAL_REPEAT && p->conceal.active;
+		if (p->priming) {
+			// Queued frames still wait for the start unless the next
+			// cycle's pull is sure to start (see playback_primed: the
+			// queue and the wait only grow until then)
+			size_t queued = atomic_load_explicit(&p->write_pos, memory_order_acquire) -
+				atomic_load_explicit(&p->read_pos, memory_order_relaxed);
+			if (queued == 0 || (queued < p->queue_limit && p->primed_wait < p->queue_limit)) {
+				p->cycle_holding = 1;
+			}
+		}
 
 		// Publish where the next cycle starts (see #jack_clock); the
 		// reader retries while the sequence is odd or changed
@@ -1525,6 +1575,7 @@ static VALUE playback_initialize(int argc, VALUE *argv, VALUE self)
 	p->queue_limit = queue;
 	p->max_queue = max_queue;
 	p->starving = 1; // silence before the first write isn't an underrun
+	p->priming = 1; // (see playback_primed)
 	conceal_settings_from(conceal, &p->conceal_settings);
 
 	if (capture > 0) {
@@ -1782,7 +1833,11 @@ static VALUE playback_write_frames(struct playback *p, VALUE channels, struct pb
  *
  * Queues one NArray per input channel (all the same length) for playback,
  * waiting without the GVL while the queue is full.  Raises IOError if the
- * output is closed, or FastAudio::Error if the device stopped.
+ * output is closed, or FastAudio::Error if the device stopped.  A new
+ * playback starts playing what was written once the queue first holds
+ * #queue_limit frames, #end_stream marks the end, or the device has
+ * waited #queue_limit frames since the first write (whichever comes
+ * first), so the first buffers have the whole queue's margin.
  */
 static VALUE playback_write(VALUE self, VALUE channels)
 {
@@ -1900,8 +1955,10 @@ static VALUE playback_jack_ports(VALUE self)
  * (frames already played map to where they played while the ring kept
  * up), the same time base as a JACK MIDI input event at that frame.  A
  * cycle that ran out of audio (before the first write, or an underrun)
- * leaves the next queued frame at the next cycle's start.  nil for
- * miniaudio devices, before the first cycle, and once closed.
+ * leaves the next queued frame at the next cycle's start.  While a new
+ * playback's first frames wait for its start (see #write), cycles play
+ * silence and the map is only a prediction.  nil for miniaudio
+ * devices, before the first cycle, and once closed.
  */
 static VALUE playback_jack_clock(VALUE self)
 {
@@ -3462,7 +3519,8 @@ static void midi_in_process(struct mb_jack_unit *unit, uint32_t nframes)
 // frame is pulled: once the frame is queued it leaves at the next cycle's
 // start plus its distance from the read position (the frames before it
 // are queued too, so no cycle can run short before it; not while
-// concealment is active, since a landing can hold queued frames back).  A
+// concealment is active, since a landing can hold queued frames back, nor
+// while the playback waits for its start: see playback_primed).  A
 // record whose playback closed, or that names another one, leaves now.
 static int midi_ring_frame(void *ctx, const struct mb_midi_timed_record *r, uint32_t now, uint32_t nframes, uint32_t *frame)
 {
