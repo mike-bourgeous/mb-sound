@@ -19,19 +19,25 @@ RSpec.describe(MB::Sound::Arrangement, '#play_form on a running realtime session
     skip 'thread handovers are native-only (Valgrind serializes threads)' if defined?(SPEC_MEMCHECK) && SPEC_MEMCHECK
     skip 'needs fast_ui (UI::Yielding)' unless MB::Sound::UI::Yielding.available?
 
-    out = MB::Sound::DeviceOutput.new(channels: 2, backends: [:null], profile: :low, adaptive: false)
+    # (silence for an underrun: repeat concealment holds queued frames
+    # while it lands, and the writer then waits for room however the GVL
+    # goes)
+    GC.start
+    out = MB::Sound::DeviceOutput.new(channels: 2, backends: [:null], profile: :low, adaptive: false, conceal: false)
     session = MB::Sound::Session.new(output: out, realtime: true, transport: MB::Sound::Sequence::Transport.new(bpm: 120))
     set = session.arrangement
     builds = 0
     spin = ->(seconds) { t = MB::U.clock_now; n = 0; n += 1 while MB::U.clock_now - t < seconds; n }
     set.track(:busy) { |c| builds += 1; spin.(0.03); c.tone.sine.at(-30.db) }
     set.scene(:one, busy: MB::Sound.seq(MB::Sound::C3).n4.loop)
+    # (a master chain, as a demo's set has: the render thread then keeps
+    # writing while nothing plays; an idle session with none stops writing)
+    session.master { |sig| sig * 1.0 }
     session.ensure_running
     wait_until!('the render thread writing', timeout: 10) { out.stats[:frames_written] > 4 * session.buffer_size }
 
     out.trace_start
     out.trace_drain
-    GC.start
     GC.disable
     # (the warm-up's own GC.start holds the GVL whoever yields: another
     # matter, left out here)
