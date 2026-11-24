@@ -29,12 +29,12 @@ RSpec.describe('MIDI out on JACK (late writes)', :aggregate_failures) do
   # they went early by the gap: 1777 frames here).  The notes are far
   # enough apart that the concealment's history before the gap holds no
   # click.  The forced gap is checked where the held write is and by its
-  # size; another underrun of a busy machine (the output refilling from
-  # empty after the forced one is the likely moment) is counted, not failed
-  # on, since each note is still checked against its own audio
-  # (jack-late-guard-1: a 128-frame unforced gap at 128-frame buffers failed
-  # a loaded suite as "the audio had no gap"; 1 of 30 runs with 6 busy
-  # loops on two CPUs, its notes all exact).
+  # size; another underrun of a busy machine is counted, not failed on,
+  # since each note is still checked against its own audio
+  # (jack-late-guard-1: an unforced gap of 128 or 256 frames between the
+  # first two notes, at 128-frame buffers, failed a loaded suite as "the
+  # audio had no gap"; seen in 7 of 180 runs, quiet and loaded, every note
+  # exact).
   [:silence, nil].each do |conceal|
     it "sends notes queued before an underrun with their audio (concealment #{conceal.inspect})" do
       clip = MB::Sound.seq(MB::Sound::C3, nil, nil, nil, MB::Sound::E3).n32

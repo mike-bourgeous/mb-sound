@@ -221,8 +221,8 @@ RSpec.shared_context 'JACK MIDI out timing' do
   # held write's audio starts a JACK period (the output plays from the next
   # cycle after running dry), with the default concealment the jump is
   # frames the concealment filled.  Gaps the play didn't force (underruns of
-  # a busy machine; one more often follows the forced one, as the output's
-  # queue refills from empty) never fail it, since every message is checked
+  # a busy machine, seen in the first buffers of 128-frame plays) never
+  # fail it, since every message is checked
   # against its own audio (see the file comment): they are counted and
   # printed after the example.
   def expect_on_time(r, offset_frames, label, gap: false)
