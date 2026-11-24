@@ -255,7 +255,9 @@ RSpec.describe('MB::Sound::FastAudio', :aggregate_failures) do
     end
 
     it 'counts each time the audio runs out, not every silent callback' do
-      pb = playback
+      # (a queue shorter than the sleeps: the first short write waits up to
+      # the queue's length for the start, see device_output_spec "the start")
+      pb = playback(queue: 1024)
       expect(pb.stats[:underruns]).to eq(0)
       sleep 0.03 # silence before the first write isn't an underrun
       expect(pb.stats[:underruns]).to eq(0)
