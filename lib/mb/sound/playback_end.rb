@@ -102,6 +102,12 @@ module MB
         @tail_frame = nil
         @seen_frame = @start_frame
         @seen_at = clock.call
+        # (the first look, while the sound just started is queued or
+        # playing: a sound that started and ended before the waiter's
+        # first #check, a 10 ms `play` while the console's scope band set
+        # itself up, was never seen busy and waited START_SECONDS of
+        # rendered audio, 8 s; fixes-19)
+        check
       end
 
       # Observes the Session and returns the state.
