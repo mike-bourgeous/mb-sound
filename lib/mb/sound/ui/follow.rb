@@ -11,11 +11,16 @@ module MB
 
         private
 
+        # The Session #attach follows (nil with a recorded source).
+        def follow_target
+          @source ? nil : (@session || Session.existing)
+        end
+
         # Follows Session.existing (or the given Session): attaches the feed.
         def attach
           return if @source
 
-          s = @session || Session.existing
+          s = follow_target
           return if s.equal?(@attached)
 
           detach

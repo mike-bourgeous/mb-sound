@@ -109,6 +109,7 @@ require_relative 'support/kernel_helpers'
 require_relative 'support/env_restore' # (OUTPUT_TYPE and friends put back after every example)
 require_relative 'support/transport_guard'
 require_relative 'support/session_guard'
+require_relative 'support/pry_config_guard' # (examples leaving Pry.config's printer, commands, or hooks changed)
 require_relative 'support/spawn_guard' # (process starts while a Session plays)
 # The process starter, as bin/sound.rb launches it: library code starts its
 # processes (ffmpeg, ffprobe, git, refine's worker) through it, so specs that

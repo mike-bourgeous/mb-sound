@@ -167,6 +167,32 @@ RSpec.describe(MB::Sound::DropoutProbe) do
       expect(described_class.classify(c)[:cause]).to eq(:device)
     end
 
+    # (fixes-19: after `latency :low` the probe watched the old Session's
+    # render thread, so the new one's 10 ms waits for the GVL after room
+    # had no thread log and read as "not running (system)")
+    it 'blames the GVL from the write trace when the thread log has no wait (the render thread not watched)' do
+      step = 256 / 48.0 # (:low: 256-frame writes, a 512-frame queue)
+      writes = []
+      e = 900 * ms
+      12.times do |k|
+        room = e + (step - 0.15) * ms
+        back = room + (k == 11 ? 10 : 0.05) * ms # (the last one waits 10 ms for the GVL after room)
+        writes << { enter: e.round, exit: (back + 0.02 * ms).round, wait: (back - e).round, room: room.round, back: back.round, pull: (room - 0.02 * ms).round,
+                    cpu_enter: (k * 0.1 * ms).round, cpu_exit: (k * 0.1 * ms + 0.02 * ms).round, queued: 512, limit: 512, frames: 256 }
+        e = back + 0.1 * ms
+      end
+      room = writes.last[:room]
+      writes << writes.last.merge(enter: e.round, exit: (e + 0.1 * ms).round, wait: 0, room: 0, back: 0, pull: 0,
+                                  cpu_enter: (1.3 * ms).round, cpu_exit: (1.32 * ms).round, queued: 256)
+      t = (room + step * ms).round
+      c = ctx(writes, t, threads: [], limit_before: 512, buffer: 256)
+      c[:gap] = c[:gap].merge(limit: 512, frames: 128, available: 0)
+      r = described_class.classify(c)
+      expect(r[:cause]).to eq(:gvl)
+      expect(r[:detail]).to include('unwatched')
+      expect(r[:components][:system_ms]).to be < 1
+    end
+
     it 'blames a queue shrink when the queue before it would have covered the lateness' do
       w = build.(cpu: 60.0, stall: 60.0)
       s = stall_start.(w)
@@ -206,6 +232,29 @@ RSpec.describe(MB::Sound::DropoutProbe) do
 
   # A realtime Session on miniaudio's null device (the trace needs a
   # DeviceOutput), with a stall injected on the render thread
+  # (fixes-19: after `latency :low` a new output's start dropout read as
+  # "the queue went 50 -> 11 ms" (the old output's queue), and the new
+  # render thread was watched up to a second late)
+  it 'starts over with the limits of a new output and watches a new render thread at the next poll' do
+    a = MB::Sound::NullOutput.new(channels: 2, sleep: :virtual, buffer_size: 256)
+    session = MB::Sound::Session.new(output: a, realtime: false)
+    probe = described_class.new(session, system: false, quiet: true)
+    probe.send(:attach_output)
+    probe.instance_variable_get(:@limit_history) << [1, 2400]
+    session.instance_variable_set(:@output, MB::Sound::NullOutput.new(channels: 2, sleep: :virtual, buffer_size: 256))
+    probe.send(:attach_output)
+    expect(probe.instance_variable_get(:@limit_history)).to eq([])
+    expect(probe.send(:render_moved?)).to eq(false) # (no render thread)
+    render = Thread.new { sleep }
+    allow(session).to receive(:render_thread).and_return(render)
+    expect(probe.send(:render_moved?)).to eq(true)
+    probe.instance_variable_set(:@slots, [['render', render]])
+    expect(probe.send(:render_moved?)).to eq(false)
+  ensure
+    render&.kill&.join
+    session&.close
+  end
+
   it 'traces a live Session, finds an injected render stall, and writes its log' do
     output = MB::Sound::DeviceOutput.new(channels: 1, backends: [:null], latency: 0.03, buffer_size: 512, adaptive: false)
     session = MB::Sound::Session.new(output: output)

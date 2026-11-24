@@ -97,6 +97,27 @@ RSpec.describe(MB::Sound::UI::Yielding) do
       input&.kill&.join
     end
 
+    # (fixes-19: the screen attaches its Session in its first frame, so the
+    # first frame, a cold one, ran without yielding)
+    it 'follows the Session the first frame will attach, before it attached it' do
+      render = Thread.new { sleep }
+      session = Struct.new(:render_thread).new(render)
+      painter = Class.new {
+        include MB::Sound::UI::FrameRate
+        include MB::Sound::UI::Follow
+        def initialize(session)
+          @session = session
+          @source = @attached = @reader = @yield_render = nil
+        end
+      }.new(session)
+      painter.send(:yield_to_render)
+      expect(gy.yielders).to eq([Thread.current])
+      expect(gy.priority).to equal(render)
+    ensure
+      painter&.send(:stop_yielding)
+      render&.kill&.join
+    end
+
     it 'does nothing with Yielding.painter false' do
       render = Thread.new { sleep }
       screen.attached = Struct.new(:render_thread).new(render)
@@ -148,6 +169,44 @@ RSpec.describe(MB::Sound::UI::Yielding) do
     expect(gy.yielders).to eq([])
   ensure
     described_class.on = was
+  end
+
+  # (fixes-19) A thread that joins itself (a painter's first frame,
+  # Internal.yielding_to_render) was RESUMED before it was a yielder, so the
+  # hook didn't know it held the GVL and its first hold ran a whole
+  # timeslice: 10.1-10.2 ms in 5 of 5 runs at RUBY_THREAD_TIMESLICE=10 (this
+  # process's default is 100 ms)
+  it 'hands the GVL over from the first hold of a thread that joins itself, and to a render thread already waiting when the hook starts' do
+    skip 'handover timing is native-only (Valgrind serializes threads)' if SPEC_MEMCHECK
+    period = 128 / 48000.0
+    late = []
+    stop = false
+    render = Thread.new do
+      until stop
+        t = MB::U.clock_now
+        sleep period
+        late << MB::U.clock_now - t - period
+      end
+    end
+    sleep 0.02
+    busy = Thread.new do
+      described_class.join(Thread.current, render: render)
+      t = MB::U.clock_now
+      a = (1..500).to_a
+      a.map { |v| v * 2 } while MB::U.clock_now - t < 0.08
+    ensure
+      described_class.leave
+    end
+    late.clear
+    busy.join
+    stop = true
+    render.join
+    expect(late.length).to be > 10
+    expect(late.max).to be < 0.005, late.map { |l| (l * 1000).round(2) }.max(5).inspect
+  ensure
+    stop = true
+    busy&.join
+    render&.join
   end
 
   # A stand-in render thread waking every 128 frames at 48 kHz (375 times a

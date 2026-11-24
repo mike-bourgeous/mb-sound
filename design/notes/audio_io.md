@@ -8,7 +8,7 @@ Rules: never `jack_port_unregister` on an active JACK client; things closed at e
 
 ## Quick reference
 
-- Pick the backend with `OUTPUT_TYPE` / `INPUT_TYPE` (`device`, `ffmpeg`, `null`; the container uses `null`); latency with `AUDIO_PROFILE`, a script's `-L`, or console `latency :low`.  A new output plays nothing until its queue first fills (or `end_stream`, or a queue's length of waiting; `playback_primed`, "The start" below).
+- Pick the backend with `OUTPUT_TYPE` / `INPUT_TYPE` (`device`, `ffmpeg`, `null`; the container uses `null`); latency with `AUDIO_PROFILE`, a script's `-L`, or console `latency :low`.  A new output plays nothing until its queue first fills (or `end_stream`, or a queue's length of waiting; `playback_primed`, "The start" below), and threads that yield hand the GVL to a new Session's render thread from its first buffer ("A new Session's first play").
 - Check a machine with `bin/audio_check.rb` and `bin/midi_check.rb`; stalls with `bin/latency_probe.rb`, and where live underruns come from with `bin/dropout_probe.rb` or the console's `dropouts` (`DeviceOutput#trace_start`; latency_probe.md, Dropout probe).
 - The live console prints a line when a sound card opens (backend, device, rate, buffer, period, the pull size) and warns once when the sound server pulls more than the buffer; console `latency` with no argument shows the same plus the queue and underruns (`MB::Sound::DeviceReport`; "Device report" below).
 - JACK: `spec/lib/mb/sound/jack_spec.rb` needs `jackd2` (skips without it); never `jack_port_unregister` on an active client.
@@ -115,6 +115,38 @@ Each such underrun also counted as a dropout while writing, so the adaptive queu
 Now `playback_pull` keeps queued audio waiting (it plays silence and takes nothing, as before the first write) until the queue first holds `queue_limit` frames (the writer fills it to that and keeps it there), the writer marks the end (`end_stream`, a sound shorter than the queue), or the device has waited `queue_limit` frames since audio arrived (`playback_primed`; `priming`, `primed_wait`, device thread only).  So the first frame plays at most a queue's length after the first write, never later than a sound written behind a full queue plays, and after that nothing changes (the steady state, underrun counting, concealment).  JACK cycles mark queued frames as possibly held while the start may still wait (`cycle_holding`), so timed MIDI with a negative offset waits for its frame's pull instead of leaving early; zero and positive offsets wait for the pull anyway (exact).  While a playback waits, `#jack_clock`'s map (LiveSource's input placement) is a prediction, as before the first write.
 
 Measured after (the same harnesses): 0 early underruns in 600 realtime-Session starts on dummy JACK (64-1024 frames), 0/100 `process_buffer` starts, 0/600 on the null device, 0/20 and 0/20 for the bass line cold and warm, and no queue raises.  The first sound (from `Session#add` to the frame leaving JACK, by the JACK clock): unchanged within the 5.3 ms period for a light graph (medians 1.7-6.5 ms before and after, all four profiles); for the bass line, 10.7 ms later after the first write (median, at most 16 ms: the time to render the queue), against 0 before.  Guard: device_output_spec "the start" (a realtime Session on a 256-frame-period null device whose second write waits for two periods: 10/10 starts underran before, 0 after; a lone short write plays within the queue's length; `end_stream` starts at once).  Short writes in specs now play a queue's length after they are written: captures need room for that silence.
+
+## A new Session's first play (fixes-19, 2026-11-24)
+
+A merge train saw an underrun right after `latency :low` in 4 of 4 console runs (dummy JACK and miniaudio's null device): the queue was full when playback started, then the writer waited 13-22 ms "for room" while the device pulled every 5.3 ms, and the 11 ms queue ran dry.  Nothing waits on the queue itself: the device's pull signals the writer (`playback_pull`, a trylock and a signal), and the trace's `room` comes 0.01-0.3 ms after the pull.  The time is the writer getting the GVL back after it found room (`back - room`, 6-12 ms, one timeslice of another thread), at a new Session's first buffers:
+- the first graph's warm-up worker (a sandbox render on its own thread) yields only to the render thread `UI::Yielding` follows, and a new Session's thread was followed only once a painter's frame saw it (the old Session's close let go of its own), so the worker ran whole timeslices;
+- the scope band's painter followed only after its first frame had attached the Session, and that frame is cold (10-17 ms);
+- a thread that joins the yielders itself (the painter, `Internal.yielding_to_render`) was never kicked during its first hold (`gvl_yield.c`);
+- the console thread itself drew and summed up the band while `play` waited (3-6 ms holds).
+Fixes: `Session#start_thread` follows its render thread, the warm-up worker and scheduler name it when they join, the painter follows the Session it will attach, the hook knows a self-joined thread holds the GVL, and `play` waits inside `Internal.yielding_to_render` (terminal_ui.md, "Yielding from the first buffer").  `latency :low` itself only opens the output; the first `play` after it starts the render thread, so that play is where it happened.
+
+Measured in fresh consoles on a pty (scratch harness: the write trace plus GVLProbe and its stack sampler on the threads alive 2 ms after the render thread starts), one `latency :low` and a 0.3 s sine each, trunk 7e5628ed1 against the branch, alternating, load 3-15:
+
+| first play after the switch | trunk | branch |
+|---|---|---|
+| dummy JACK (256-frame periods), with an underrun | 11/30 | 0/30 |
+| miniaudio null, with an underrun | 15/30 | 0/30 |
+| JACK, GVL after room, median of each run's longest | 10.2 ms | 2.2 ms |
+| null, same | 9.4 ms | 1.7 ms |
+| a second switch in the same console: JACK / null underruns | 1/30, 2/30 | 0/15, 3/15 |
+
+The branch's three null second-switch underruns had no GVL wait (its longest under 0.2 ms): the writer was waiting for room while the null device pulled late (its timer thread: 814 of 3077 pulls more than twice the period apart in one train run, up to 10.3 ms).  JACK had none.
+
+Steady state on `:low` (branch, `AUDIO_ADAPTIVE=0`, 60 s each, idle then a four-part set of light synths):
+
+| | idle | the set |
+|---|---|---|
+| JACK, 256-frame writes (512-frame queue) | 0 | 0 |
+| JACK, 128-frame writes (512-frame queue: the JACK period) | 0 | 0 |
+| null, 256 (512) | 0 | 2 |
+| null, 128 (256-frame queue, 5.3 ms) | 2328 | 3390 |
+
+So `:low`'s queue holds on JACK's dummy driver here; the null device's late timer pulls need more than 5.3 ms: the set on it by queue depth, underruns a minute: 256 frames 3390-3565, 512 frames 0-2 (256- and 128-frame writes), 768 and 1024 frames 0.  `:low` with `AUDIO_BUFFER=128` gets the 256-frame queue there (twice the write).  Guard: `spec/lib/mb/sound/session/warming_yield_spec.rb` (four realtime Sessions on the null device at `:low`, first graphs warmed in the background, GC off while measured: the writer's GVL after room under 5 ms; 10-20 ms with 3 underruns before, in 5 of 5 runs); `live_threads_spec` also fails while yielders follow another thread.
 
 ## Monitor trim (help-1, 2026-10-13)
 

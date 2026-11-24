@@ -1020,6 +1020,13 @@ RSpec.describe MB::Sound::Help do
       end
 
       it "routes Pry's show-doc to the help page when Pry finds nothing, and says help .name when help knows the name" do
+        # (the console's setup on stand-ins for Pry's command set and hooks,
+        # and the printer put back: left wrapped, it cut later examples'
+        # results at 30 lines; spec/support/pry_config_guard.rb)
+        config = Pry.config
+        allow(config).to receive(:commands).and_return(Pry::CommandSet.new.import(Pry::Commands))
+        allow(config).to receive(:hooks).and_return(Pry::Hooks.new)
+        old_print = config.print
         MB::Sound::Help.install_pry!
         out = StringIO.new
         pry = Pry.new(output: out, target: MB::Sound.module_eval('binding'), color: false, pager: false)
@@ -1036,6 +1043,8 @@ RSpec.describe MB::Sound::Help do
         pry.eval('show-doc MB::Sound::Decibels#to_f') # (Pry's own, unchanged)
         expect(out.string).to include('From:')
         expect(out.string).not_to include("mb-sound's help")
+      ensure
+        config.print = old_print if old_print
       end
 
       it 'leads the words people use for starting over with clear_set (ux-friction-3)' do

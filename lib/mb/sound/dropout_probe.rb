@@ -450,11 +450,25 @@ module MB
         @buffer = (@session.buffer_size * @rate / (out.respond_to?(:sample_rate) ? out.sample_rate : @rate)).round
         @prev_write = nil
         @limit = nil
+        # (another output's queue: its limits aren't this one's shrinks;
+        # the :low switch's start dropouts read as "the queue went 50 ->
+        # 11 ms", fixes-19)
+        @limit_history.clear
         if @traced
           out.trace_start
           @underruns0 = out.underruns
           @written_before = out.frames_written
         end
+      end
+
+      # True when the session's render thread isn't the one watched (a new
+      # Session's, after `latency :low`): watched at the next poll, not up
+      # to a second later.
+      def render_moved?
+        r = @session.render_thread
+        return false unless r&.alive?
+        first = @slots.first
+        !(first && first[0] == 'render' && first[1].equal?(r))
       end
 
       # (Re)watches the threads in WATCH that exist, draining the log first
@@ -507,7 +521,7 @@ module MB
           drain_log
           drain_stacks if @stacks_on
           sample(now)
-          if now - @last_watch > 1_000_000_000
+          if now - @last_watch > 1_000_000_000 || render_moved?
             @last_watch = now
             watch_threads
           end

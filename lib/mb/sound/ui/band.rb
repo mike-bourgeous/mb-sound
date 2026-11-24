@@ -43,6 +43,17 @@ module MB
         # Slowest refreshes kept for #stats.
         SLOWEST = 5
 
+        # Seconds #cursor_row waits for the terminal's cursor report (as
+        # Reline waits for its own at each prompt).
+        CURSOR_TIMEOUT = 0.5
+
+        @cursor_unanswered = false
+        class << self
+          # True once a cursor report never came (a terminal or pty that
+          # doesn't answer ESC[6n): later bands don't ask again.
+          attr_accessor :cursor_unanswered
+        end
+
         attr_reader :layout, :position, :mode, :look, :rows, :cols, :height, :placed, :feed
 
         # The size decision (UI::Density), the layout as shown at its level
@@ -526,10 +537,31 @@ module MB
         # thread that started the band asks (the console's, between lines):
         # a cursor report asked for from the painter would race Reline's
         # reads of stdin (ux-1 r3 item 2).
-        def cursor_row
+        #
+        # Waits at most CURSOR_TIMEOUT for the report, and keys typed
+        # meanwhile go back to the input for the prompt.  IO#cursor waited
+        # for it forever: where the terminal doesn't answer (a pty driver,
+        # some multiplexers), a foreground `play` never returned, and the
+        # next line typed was read as the report and lost (fixes-19).
+        def cursor_row(input = $stdin)
           return nil unless Thread.current.equal?(@starter)
-          return nil unless @io.respond_to?(:tty?) && @io.tty? && $stdin.tty?
-          IO.console&.cursor&.first&.+(1)
+          return nil unless @io.respond_to?(:tty?) && @io.tty? && input.tty?
+          return nil if Band.cursor_unanswered
+          match = nil
+          buf = +''
+          input.raw do |raw|
+            @io.write("\e[6n")
+            @io.flush
+            deadline = MB::U.clock_now + CURSOR_TIMEOUT
+            while (left = deadline - MB::U.clock_now) > 0 && raw.wait_readable(left)
+              buf << raw.readpartial(1024)
+              break if (match = buf.match(/\e\[(\d+);(\d+)R/))
+            end
+          end
+          rest = match ? match.pre_match + match.post_match : buf
+          rest.bytes.reverse_each { |b| input.ungetbyte(b) } # (typed keys, for the prompt)
+          Band.cursor_unanswered = true unless match
+          match && match[1].to_i
         rescue StandardError
           nil
         end

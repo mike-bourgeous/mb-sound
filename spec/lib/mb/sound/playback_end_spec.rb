@@ -70,6 +70,20 @@ RSpec.describe(MB::Sound::PlaybackEnd, :aggregate_failures) do
     expect { play_within(module_path) }.to output(/Playing/).to_stderr
   end
 
+  # (fixes-19: in the console a 10 ms `play` started and ended while the
+  # scope band set itself up, before the waiter's first #check, so the
+  # playback was never seen busy and waited START_SECONDS, 8 s)
+  it 'ends a sound that started and ended before the first check, without waiting START_SECONDS' do
+    s = MB::Sound::Session.default
+    MB::Sound.bg(:play, 440.hz.sine.at(-20.db).until(0.01), fade: 0)
+    ending = described_class.new(s, busy: -> { s.playing_after_queue?(:play) })
+    MB::Sound::Internal.wait_audio(s, 0.01) while s.playing_after_queue?(:play) # (the sound plays and ends, nobody checking)
+    MB::Sound::Internal.wait_audio(s, 0.3)
+    expect(ending.over?).to eq(true)
+    expect(ending.state).to eq(:ended)
+    expect(s.frames_rendered).to be < described_class::START_SECONDS * s.sample_rate / 2
+  end
+
   it 'ends with a warning when the render thread stops with an error' do
     s = MB::Sound::Session.default
     graph = 220.hz.sine

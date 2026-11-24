@@ -171,6 +171,17 @@ module MB
             majors += 1 if g[:major]
             longest_gc = [longest_gc, g[:b] - g[:a]].max
           end
+          # The writer's own record of getting the GVL back after it found
+          # room ([room, back]: running, waiting only for the lock), for
+          # waits the thread log missed: a render thread not watched yet
+          # (a new Session's, after `latency :low`) was "not running
+          # (system)" while it waited 6-12 ms for the GVL (fixes-19)
+          back = writes.sum { |w| w[:room].to_i > 0 && w[:back].to_i > w[:room] ? overlap(w[:room], w[:back], lo, hi) : 0 }
+          if back > gvl
+            gvl_by['unwatched (the write trace: the GVL after room)'] += back - gvl
+            gvl_whole_by ||= 'unwatched (the write trace: the GVL after room)'
+            gvl = back
+          end
           gc_other_in_gvl = [gc_other, gvl].min
           gc = gc_render + gc_other_in_gvl
 

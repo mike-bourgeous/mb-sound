@@ -224,4 +224,50 @@ RSpec.describe(MB::Sound::UI::Band, :aggregate_failures) do
     expect([screen.row, screen.col]).to eq([17, 7])
     expect(lines[18..21].join.strip).to eq('')
   end
+
+  # (fixes-19: IO#cursor waited for the report forever, so where nothing
+  # answers ESC[6n a foreground `play` never returned and the next typed
+  # line was read as the report)
+  describe '#cursor_row' do
+    def band_on(tty)
+      described_class.allocate.tap { |b|
+        b.instance_variable_set(:@starter, Thread.current)
+        b.instance_variable_set(:@io, tty)
+      }
+    end
+
+    around do |example|
+      was = described_class.cursor_unanswered
+      described_class.cursor_unanswered = false
+      example.run
+    ensure
+      described_class.cursor_unanswered = was
+    end
+
+    it 'gives up after CURSOR_TIMEOUT when the terminal never answers, keeps keys typed meanwhile, and asks no more' do
+      require 'pty'
+      PTY.open do |master, tty|
+        master.write('p 42') # (typed ahead: the prompt's)
+        t = MB::U.clock_now
+        expect(band_on(tty).send(:cursor_row, tty)).to be_nil
+        expect(MB::U.clock_now - t).to be_between(described_class::CURSOR_TIMEOUT * 0.9, described_class::CURSOR_TIMEOUT + 1.5)
+        expect(tty.read_nonblock(100)).to eq('p 42')
+        expect(master.read_nonblock(100)).to include("\e[6n")
+        expect(described_class.cursor_unanswered).to eq(true)
+        t = MB::U.clock_now
+        expect(band_on(tty).send(:cursor_row, tty)).to be_nil
+        expect(MB::U.clock_now - t).to be < 0.1
+      end
+    end
+
+    it 'reads the row from the report, keys typed around it going back to the input' do
+      require 'pty'
+      PTY.open do |master, tty|
+        master.write("x\e[12;5Ry")
+        expect(band_on(tty).send(:cursor_row, tty)).to eq(12)
+        expect(tty.read_nonblock(100)).to eq('xy')
+        expect(described_class.cursor_unanswered).to eq(false)
+      end
+    end
+  end
 end
