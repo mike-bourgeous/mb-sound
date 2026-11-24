@@ -51,6 +51,12 @@ RSpec.describe('live threads with a screen up', :aggregate_failures) do
     t0 = MB::U.clock_now
     while MB::U.clock_now - t0 < seconds
       yielders = gy.yielders
+      # (yielders that follow another thread, or none, yield to nobody:
+      # a new Session's render thread was followed only once a painter's
+      # frame saw it; fixes-19)
+      if !yielders.empty? && @session.render_thread&.alive? && !gy.priority.equal?(@session.render_thread)
+        found['(GVLYield.priority is not the render thread)'] ||= gy.priority.inspect
+      end
       now = {}.compare_by_identity
       (Thread.list - base - [@pump]).each do |t|
         next if t.equal?(@session.render_thread) || yielders.include?(t) || ALLOWED_LIVE_THREADS.key?(t.name.to_s)

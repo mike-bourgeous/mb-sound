@@ -2540,9 +2540,19 @@ module MB
         rescue => e
           @render_error = e
           warn "Background session stopped with an error: #{e.class}: #{e.message}"
+        ensure
+          MB::Sound::UI::Yielding.unfollow(Thread.current) if defined?(MB::Sound::UI::Yielding)
         end
         @thread.name = 'MB::Sound::Session'
         @thread.priority = RENDER_THREAD_PRIORITY
+        # Yielders (graph warm-ups, the scheduler, painters, previews) hand
+        # the GVL to this thread from its first buffer.  They followed it
+        # only once a painter's frame saw it, so a new Session's first
+        # play (after `latency :low`, `use_output`, live MIDI's switch)
+        # had its warm-up worker run whole 10 ms timeslices against the
+        # render thread: the writer found room and then waited 6-12 ms for
+        # the GVL, and :low's 11 ms queue ran dry (fixes-19).
+        MB::Sound::UI::Yielding.follow(@thread) if defined?(MB::Sound::UI::Yielding)
 
         # Generator cycles are computed ahead on the scheduler thread
         # while this session renders (Scheduler#background starts that
