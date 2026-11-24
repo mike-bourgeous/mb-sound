@@ -70,5 +70,7 @@ RSpec.describe('MIDI out on JACK (late writes)', :aggregate_failures) do
       close_opened
     end
     expect(@gap_notes.length).to eq(2)
+    expect(@gap_notes).to all(match(/unforced gaps \d+ frames between session frames/))
+    @gaps = 0 # (forced here: nothing to report after the example)
   end
 end
