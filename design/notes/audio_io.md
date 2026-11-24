@@ -8,8 +8,7 @@ Rules: never `jack_port_unregister` on an active JACK client; things closed at e
 
 ## Quick reference
 
-- Pick the backend with `OUTPUT_TYPE` / `INPUT_TYPE` (`device`, `ffmpeg`, `null`; the container uses `null`); latency with `AUDIO_PROFILE`, a script's `-L`, or console `latency :low`.
-- A new output plays nothing until its queue first fills (or `end_stream`, or a queue's length of waiting): `playback_primed` in `fast_audio.c`; "The start" below.
+- Pick the backend with `OUTPUT_TYPE` / `INPUT_TYPE` (`device`, `ffmpeg`, `null`; the container uses `null`); latency with `AUDIO_PROFILE`, a script's `-L`, or console `latency :low`.  A new output plays nothing until its queue first fills (or `end_stream`, or a queue's length of waiting; `playback_primed`, "The start" below).
 - Check a machine with `bin/audio_check.rb` and `bin/midi_check.rb`; stalls with `bin/latency_probe.rb`, and where live underruns come from with `bin/dropout_probe.rb` or the console's `dropouts` (`DeviceOutput#trace_start`; latency_probe.md, Dropout probe).
 - The live console prints a line when a sound card opens (backend, device, rate, buffer, period, the pull size) and warns once when the sound server pulls more than the buffer; console `latency` with no argument shows the same plus the queue and underruns (`MB::Sound::DeviceReport`; "Device report" below).
 - JACK: `spec/lib/mb/sound/jack_spec.rb` needs `jackd2` (skips without it); never `jack_port_unregister` on an active client.
