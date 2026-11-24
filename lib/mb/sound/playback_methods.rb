@@ -1761,7 +1761,13 @@ module MB
       def wait_for_player(ending, plot:, graphical:, spectrum:, header:)
         session = Session.current
         if plot
-          visualize(graphical: graphical, spectrum: spectrum, stop: -> { ending.over? }, header: header)
+          # (the scope's setup, frames, and stats run Ruby on this thread
+          # while the sound plays: it hands the GVL to the render thread
+          # whenever that wakes, as the painter does; the end of a play
+          # held it 3-6 ms on :low's 11 ms queue, fixes-19)
+          Internal.yielding_to_render(session) {
+            visualize(graphical: graphical, spectrum: spectrum, stop: -> { ending.over? }, header: header)
+          }
         else
           Internal.wait_audio(session, 0.01) until ending.over?
         end
