@@ -144,7 +144,7 @@ module MB
         # Black keys (and :fit's unused ones), +black+:
         # - :passing: the pitch strictly between the scale notes of the white
         #   keys on either side (a gap of 2: the middle; 3 or more: just
-        #   below the upper note, the blue-note feel); half-step neighbours
+        #   below the upper note, the blue-note feel); half-step neighbors
         #   have none (silent); cents scales get the midpoint.
         # - :silent: nothing.
         # - :lower: the scale note of the white key below.

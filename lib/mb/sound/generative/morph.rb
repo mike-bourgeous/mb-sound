@@ -78,7 +78,7 @@ module MB
 
         class << self
           # The Side for +clip+ (a looping Clip: a generator's, or a fixed
-          # loop), labelled +label+ in errors; raises Refused for clips
+          # loop), labeled +label+ in errors; raises Refused for clips
           # that can't be a side.
           def side(clip, label)
             raise Refused, "#{label} is not a clip: a morph blends two generators (L.gen)" unless clip.is_a?(Sequence::Clip)

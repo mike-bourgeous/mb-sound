@@ -5,7 +5,7 @@ module MB
     # metadata to every mb-sound type that maps from a converter so that
     # understood but ignored fields get consumed").  Importers (the ACID
     # .acd converter, trackers, MIDI files, SoundFonts) read more from a
-    # foreign file than mb-sound turns into sound: a track's colour and
+    # foreign file than mb-sound turns into sound: a track's color and
     # height, a bus's own name, a plug-in's preset name, where the object
     # sat in the file.  They carry those here instead of dropping them.
     #

@@ -319,7 +319,7 @@ module MB
         # (each white key the next degree from the root on middle C; best
         # for mashing and exotic scales) or :fit (the root on every C; 8-12
         # note scales take black keys too); +black+ :passing (the note
-        # between the neighbouring degrees: the middle of a whole step, just
+        # between the neighboring degrees: the middle of a whole step, just
         # below the upper note of wider gaps, silent for half steps, the
         # cents midpoint in cents scales), :silent, or :lower.
         #

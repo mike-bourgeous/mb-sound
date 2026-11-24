@@ -334,7 +334,7 @@ module MB
         # with no cycle forced far back), every cycle's level set to the
         # slice's own envelope (#envelope of +guide+, the channels' mix)
         # read at the stretched time.  A cycle that repeats an earlier,
-        # louder part is turned down to where the decay has got to, so
+        # louder part is turned down to where the decay has gotten to, so
         # nothing sounds like a second hit.  (Before stretch-fixes-1 the
         # fill was the plain cyclic stretch of everything after the
         # attack: a kick's body played at its old time and then again, in

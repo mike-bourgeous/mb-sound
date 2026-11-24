@@ -37,7 +37,7 @@ module MB
       # #differentiate): how fast it changes, per second by default (a ramp
       # rising 1 per second gives 1; a full-scale sine at f Hz peaks at
       # 2 pi f), or per sample with `per: :sample` (the plain difference of
-      # neighbouring samples, a 6 dB per octave tilt rising to 2 at the
+      # neighboring samples, a 6 dB per octave tilt rising to 2 at the
       # Nyquist frequency).
       #
       # The default backward difference (x[n] - x[n - 1]) is causal: the

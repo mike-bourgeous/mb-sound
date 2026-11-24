@@ -70,7 +70,7 @@ module MB
         # pole by cutoff / BBD_CUTOFF.
         BBD_CUTOFF = 5420
 
-        # The BBD flavour's hiss level in dBFS per channel (white noise
+        # The BBD flavor's hiss level in dBFS per channel (white noise
         # through the post filter).  An estimate: no measurement of the
         # Juno's chorus noise floor was found (2026-10-08).  The MN3009
         # datasheet gives S/N 88 dB typical (noise 0.2 mVrms max), and a
@@ -314,7 +314,7 @@ module MB
         #          dry gain = dry * (1 - mix), wet gain = wet * mix (linear,
         #          so mix 0.5 is the Juno's balance at -6 dB).  Default
         #          nil: dry and wet as given.
-        # +:bbd+ - true adds the bucket-brigade flavour: the Juno-60's
+        # +:bbd+ - true adds the bucket-brigade flavor: the Juno-60's
         #          fifth-order lowpasses before and after the delay
         #          (Chorus::BBD_PRE_POLES; wet path -3 dB at 5.4 kHz) and hiss
         #          (Chorus::BBD_HISS dBFS).  Off by default (clean).

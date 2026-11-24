@@ -48,7 +48,7 @@ module MB
         # answer) or, without one, +env+ (KONSOLE_VERSION); nil when unknown
         # or behind tmux/screen (they repaint on their own terms).  Only
         # Konsole's rule is read from its source; other terminals are
-        # modelled in the bench by name (UIBench) but not detected.
+        # modeled in the bench by name (UIBench) but not detected.
         def self.detect(xtversion: nil, env: ENV)
           return nil if env['TMUX'] || env['STY']
           ver =

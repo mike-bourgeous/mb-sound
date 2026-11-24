@@ -842,7 +842,7 @@ module MB
           (name || CLASS_LABELS[short] || snake(short)).to_s.freeze
         end
 
-        # What +node+ (labelled +label+) is for (see ROLES), or nil.
+        # What +node+ (labeled +label+) is for (see ROLES), or nil.
         def role_of(node, label = nil)
           return 'fx' if FX_LABELS.include?(label)
           node.class.ancestors.each do |a|

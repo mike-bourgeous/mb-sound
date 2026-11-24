@@ -1169,7 +1169,7 @@ module MB
         # What a send with mode +m+ (its mode knob's values for the span: 0
         # post-fader, 1 pre-fader, 2 pre-mute) hears over the player's
         # frames [+offset+, +offset+ + +frames+): +ramp+, +pre+,
-        # +pre_mute+, or a blend of neighbouring tap points while it glides.
+        # +pre_mute+, or a blend of neighboring tap points while it glides.
         def send_factor(m, ramp, pre, pre_mute, offset, frames)
           if m.is_a?(Numeric)
             return ramp if m <= 0

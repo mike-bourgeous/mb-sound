@@ -35,7 +35,7 @@ MB::Sound.effect_script(
   dry: [1.0, 'Dry (input) level'],
   wet: [1.0, 'Wet (chorused) level'],
   mix: [nil, Float, 'Dry/wet crossfade, 0 (dry) to 1 (wet), times --dry and --wet'],
-  bbd: [false, 'Add the bucket-brigade flavour (lowpassed wet, hiss)'],
+  bbd: [false, 'Add the bucket-brigade flavor (lowpassed wet, hiss)'],
   cutoff: [nil, Float, 'BBD lowpass cutoff in Hz (turns the filters on)'],
   hiss: [nil, Float, 'Hiss level in dBFS (turns hiss on)'],
 ) { |input, p|

@@ -9,7 +9,7 @@ module MB
       # key), and each kit maps the roles to the keys it has:
       #
       # - a GM drum bank plays GM roles on their own keys,
-      # - a kit with a LAYOUTS entry (recognised by its preset or file name,
+      # - a kit with a LAYOUTS entry (recognized by its preset or file name,
       #   or by its key set) plays the keys the layout gives, and never the
       #   GM role on a key the layout uses for something else (the
       #   acoustic SoundFont kits' key 50 is a crash choke, not GM's high
@@ -59,7 +59,7 @@ module MB
         LAYOUTS = {
           # The acoustic SoundFont kits of avldrums.lv2-soundfont (Black
           # Pearl, Red Zeppelin, Blonde Bop): a four-piece kit with rack
-          # and floor toms (centre and rim), hats closed, pedal, semi-open,
+          # and floor toms (center and rim), hats closed, pedal, semi-open,
           # and swish, three crashes with chokes, a ride with bell, shank,
           # and choke
           acoustic_kit: {
@@ -91,7 +91,7 @@ module MB
         }.freeze
 
         # Keys of one-key regions that make a SoundFont preset outside bank
-        # 128 a kit Roles may recognise by its key set (a melodic preset
+        # 128 a kit Roles may recognize by its key set (a melodic preset
         # spans keys with few regions).
         KIT_KEYS = 10
 

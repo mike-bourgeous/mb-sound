@@ -133,7 +133,7 @@ module MB
       # (indices into +beat_frames+) become 6/8 bars of 3 quarter-note
       # beats (two eighths, 4/3 of a grid beat, apart).  A downbeat on a
       # beat between eighths (every other grid beat) moves to the
-      # neighbour, the earlier or later one as their downbeat
+      # neighbor, the earlier or later one as their downbeat
       # observations (+obs+) say.
       def self.compound_bars(beat_frames, db, obs, fps, offset)
         n = beat_frames.length

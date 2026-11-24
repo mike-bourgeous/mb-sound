@@ -120,7 +120,7 @@ module MB
       TARGETS = {
         ebu_r128: Target.new(
           key: :ebu_r128, name: 'EBU R 128', lufs: -23.0, true_peak: -1.0, tolerance: 0.5,
-          notes: 'Broadcast programme loudness; +/-1.0 LU where the target is not practically achievable (e.g. live).  True peak is the production maximum.',
+          notes: 'Broadcast program loudness; +/-1.0 LU where the target is not practically achievable (e.g. live).  True peak is the production maximum.',
           source: 'EBU R 128-2023 (V5, November 2023), recommends h) and m); https://tech.ebu.ch/docs/r/r128.pdf, read 2026-10-07',
           verified: true
         ),

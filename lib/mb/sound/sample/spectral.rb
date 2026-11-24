@@ -178,7 +178,7 @@ module MB
           raise ArgumentError, 'The stretched loop must be at least one sample long' unless out_len >= 1
 
           # The time map of the middle of three passes (the passes before
-          # and after are its neighbours across the wrap)
+          # and after are its neighbors across the wrap)
           on3 = onsets && !onsets.empty? ? (0...3).flat_map { |k| onsets.map { |o| o + k * len } } : nil
           map3, resets3 = time_map(3 * len, ratio, on3, n, hs, span)
           centers = []
@@ -374,7 +374,7 @@ module MB
             # vectors (its coherence, sinc(randomize)), summed with the
             # windows for Sums#finish
             @coherence = @randomize > 0 ? Math.sin(Math::PI * @randomize) / (Math::PI * @randomize) : 1.0
-            # (for #noisiness: each bin's neighbourhood, and how much
+            # (for #noisiness: each bin's neighborhood, and how much
             # quieter frames with unrelated phases add up than frames in
             # step: a frame with random phases spreads its power over the
             # whole window, so overlapped and normalized it comes out at
@@ -606,7 +606,7 @@ module MB
         # The phase vocoder following a loop live: #pull gives the next
         # output samples for the loop positions asked (a phase per
         # sample, as a tempo-following player counts them), each frame
-        # read from the loop wherever the positions have got to, so the
+        # read from the loop wherever the positions have gotten to, so the
         # stretch follows any tempo, and tempo changes, as one endless
         # stream: no pass has an end, and nothing is restretched.  At a
         # steady tempo the frames are Spectral.looped's (the same time
@@ -762,7 +762,7 @@ module MB
         TONE_ABOVE = 16.0
 
         # The peak each bin of +mag+ belongs to (peaks are bins above
-        # their two neighbours on each side; regions split midway between
+        # their two neighbors on each side; regions split midway between
         # peaks, as #lock has them), or nil without peaks.
         def regions(mag)
           nb = mag.length
@@ -919,7 +919,7 @@ module MB
         end
 
         # The best shift of every sample within +half+ of +best+, then
-        # the top of a parabola through it and its neighbours (so shifts
+        # the top of a parabola through it and its neighbors (so shifts
         # are not rounded to samples).
         def shape_refine(w, dev, om, reach, best, half)
           taus = Numo::DFloat.new(2 * half + 1).seq(best - half)
@@ -1105,7 +1105,7 @@ module MB
             kept << o
           end
 
-          # Spans [pre, post] per onset, shrunk to fit between neighbours
+          # Spans [pre, post] per onset, shrunk to fit between neighbors
           spans = kept.map { [pre, post] }
           kept.each_with_index do |o, i|
             spans[i][0] = [spans[i][0], o, (o * r).floor].min if i == 0

@@ -27,7 +27,7 @@ module MB
         param :bits, 12, range: 1..24, description: 'Bits'
 
         # Akai S950: 12 bits, variable rate (31.25 kHz here, a jungle
-        # favourite for longer breaks), a filtered output
+        # favorite for longer breaks), a filtered output
         preset :s950, rate: 31_250, bits: 12, input_filter: true, filter: 13_000, read: :drop, tags: %i[gritty jungle],
           about: 'Akai S950: 12 bits at 31.25 kHz, a filtered output, read drop-sample'
         # E-mu SP-1200: 12 bits at 26.04 kHz, no anti-alias filter on the

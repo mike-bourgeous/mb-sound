@@ -15,7 +15,7 @@ module MB
         #   root on middle C; black keys silent.
         # - :play (also :degrees) - degrees fitted to the octave (the
         #   scale's root on every C), black keys passing notes between their
-        #   neighbours (silent between half steps).
+        #   neighbors (silent between half steps).
         # - :along (also :snap) - every key plays the scale note nearest its
         #   own pitch (ties go down), keeping the layout.
         #
