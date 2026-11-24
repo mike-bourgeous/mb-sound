@@ -895,7 +895,7 @@ module MB
       # of each cycle and the second half over the rest: pulse width
       # modulation for every shape.  A square becomes a pulse (see #pulse)
       # high for +width+ of each cycle, a triangle a skewed triangle rising
-      # for +width+ of each cycle (towards a falling saw near 0 and a rising
+      # for +width+ of each cycle (toward a falling saw near 0 and a rising
       # one near 1), a ramp a saw with a kink, and a sine an asymmetric sine
       # (like Casio's phase distortion).  +width+ is a number from 0 to 1
       # (0.5 is no change) or a graph node, read every sample (clamped to
@@ -1430,7 +1430,7 @@ module MB
       #
       # +amount+ is in cycles of phase modulation per unit of output (a
       # number or a node, read every sample; a Phase such as `1.5.radians`
-      # converts; nil removes feedback).  A sine brightens towards a saw
+      # converts; nil removes feedback).  A sine brightens toward a saw
       # (measured at 125 Hz, H2/H3 relative to the fundamental; a saw is
       # -6.0/-9.5 dB; radians in parentheses):
       #

@@ -377,7 +377,7 @@ module MB
           # (the specification's default modulators; a triangle LFO per
           # voice).
           #
-          # A drum kit preset (bank 128, or a kit Drums::Roles recognises by
+          # A drum kit preset (bank 128, or a kit Drums::Roles recognizes by
           # its name or keys) plays drum roles (drum-gen-1): its keys are
           # moved by the kit's Drums::Roles::Map, so a generator's
           # half-open hat or high tom plays what this kit has for it

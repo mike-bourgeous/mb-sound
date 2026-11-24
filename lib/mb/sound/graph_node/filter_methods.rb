@@ -672,7 +672,7 @@ module MB
         # The slope of this signal (GraphNode::Derivative): how fast it
         # changes, per second (+per+ :second, the default: a full-scale sine
         # at f Hz peaks at 2 pi f) or per sample (+per+ :sample: the
-        # difference of neighbouring samples, a 6 dB per octave tilt).
+        # difference of neighboring samples, a 6 dB per octave tilt).
         # +mode+ :backward (default, x[n] - x[n - 1], half a sample late) or
         # :central ((x[n] - x[n - 2]) / 2, one sample late, nothing at the
         # Nyquist frequency).  Integrating it gives this signal back

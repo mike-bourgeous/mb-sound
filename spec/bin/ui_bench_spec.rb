@@ -32,7 +32,7 @@ end
 # Tunnel Vision on ui :wall at a 122 fps target with small buffers; the
 # bench models a sound card's queue so a late buffer shows as a dropout.
 RSpec.describe('bin/ui_bench.rb, the dropout scenario') do
-  it 'plays a demo with no screen through a modelled device queue and reports its lag and underruns' do
+  it 'plays a demo with no screen through a modeled device queue and reports its lag and underruns' do
     json = tmp_path('bench.json')
     text = `OUTPUT_TYPE=null timeout 180 bin/ui_bench.rb -S none --demo tunnel_vision --buffer 256 --queue-ms 43 --device-period 1024 -s 1.5 --warm 0.5 --holders -j #{json} 2>&1`
     expect($?).to be_success, text

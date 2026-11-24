@@ -73,7 +73,7 @@ RSpec.describe(MB::Sound::BarStats::Timing, :aggregate_failures) do
   # fill; in B the fill's hits sit where floor puts them instead of round
   # (a conversion's own rounding), so lag 0 correlates a little worse than
   # a repeat four hits away (0.74 against 0.77 before WAVE_TIE).
-  it "keeps a periodic stutter fill's lag at 0, not a neighbouring repeat" do
+  it "keeps a periodic stutter fill's lag at 0, not a neighboring repeat" do
     spb = 60 / 140.0
     n = ((6 * 4 * spb + 1) * rate).round
     cr = Random.new(5)

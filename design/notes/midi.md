@@ -86,7 +86,7 @@ Transforms work in event time, so a moving parameter answers "what is your value
 ## Proposals left open (maintainer, 2026-10-17)
 
 - Probabilistic blend between scales for keyboards (a note picks scale A or B by a knob, deterministic per note-on with counter-based dice keyed by the note); good for generators already (`Weights#blend`).
-- Per-degree staggered morph between any two scales (shared degrees stay; differing degrees switch at staggered thresholds with hysteresis), and ordering any set of scales by minimal pitch-set changes (a path where neighbours differ by few notes); `Knob#between(a, b)` calling a value's own `#blend`.
+- Per-degree staggered morph between any two scales (shared degrees stay; differing degrees switch at staggered thresholds with hysteresis), and ordering any set of scales by minimal pitch-set changes (a path where neighbors differ by few notes); `Knob#between(a, b)` calling a value's own `#blend`.
 
 ## Params (param-1, 2026-10-24)
 

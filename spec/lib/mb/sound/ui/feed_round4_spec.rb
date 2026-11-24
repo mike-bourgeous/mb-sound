@@ -107,7 +107,7 @@ RSpec.describe('UI round 4 feed') do
   end
 
   describe 'held notes' do
-    it 'lists the notes held on the input and on labelled added sources' do
+    it 'lists the notes held on the input and on labeled added sources' do
       s = new_session
       s.add(0.constant, name: :clock, on: :now)
       feed = MB::Sound::UI::Feed.new

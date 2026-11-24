@@ -67,7 +67,7 @@ module MB::Sound
 
     def now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
-    # The sink: reads +master+ until EOF or +stop_at+, modelling a terminal
+    # The sink: reads +master+ until EOF or +stop_at+, modeling a terminal
     # (see the file's header), and writes its findings as JSON to +out+.
     # Runs in a forked process.
     def sink(master, rows, cols, cfg, keys, out, t0)
@@ -682,7 +682,7 @@ module MB::Sound
       UI.warm_up_console
       UI::Yielding.on = false if p.no_yield
       if p.queue_ms
-        # (a modelled sound card's queue: dropouts counted as on a device)
+        # (a modeled sound card's queue: dropouts counted as on a device)
         bs = p.buffer || 800
         out = UIBench::DeviceModel.new(channels: 2, buffer_size: bs, queue: (p.queue_ms * 48.0).round, period: p.device_period || bs)
         Session.use_output(out)

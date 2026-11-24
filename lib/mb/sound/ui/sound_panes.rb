@@ -2018,7 +2018,7 @@ module MB
 
           # Keys the design plans but this build doesn't have yet.
           PLANNED = [
-            ['*', 'favourite'],
+            ['*', 'favorite'],
           ].freeze
 
           # The library picker's keys in one line (NAV l goes in; its own

@@ -30,6 +30,7 @@ module QuickSelection
 
   ALWAYS = %w[
     spec/spec_hygiene_spec.rb
+    spec/us_spelling_spec.rb
     spec/warning_guard_spec.rb
     spec/quick_selection_spec.rb
     spec/lib/mb/sound/buffer_size_invariance_spec.rb

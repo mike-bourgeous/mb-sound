@@ -212,8 +212,8 @@ RSpec.describe('session fuzzing') do
       :buffer_size, ['bpm 120'], [
         'knob :tint, 0, range: 0..1',
         'bg :t1, 0.2.constant, on: :now',
-        'bus(:colour) { |sig| sig * 0.5 }',
-        'at_bar(1) { feed :t1, :colour, :tint }',
+        'bus(:color) { |sig| sig * 0.5 }',
+        'at_bar(1) { feed :t1, :color, :tint }',
         'at_bar(1, beat: 3) { turn :tint, 1 }',
       ], 1,
     ],

@@ -520,8 +520,8 @@ RSpec.describe(MB::Sound::Session::Buses) do
           MB::Sound.knob(:tint, 0, range: 0..1)
           n = MB::Sound
           chords = n.seq([n::E2, n::G2, n::B2], [n::C2, n::E2, n::G2], [n::A1, n::C2, n::E2], [n::B1, n::D2, n::F2]).n1.loop
-          MB::Sound.bus(:colour) { |sig| chords.synth(voices: 5) { |v, _| (sig * 0.004).resonate([[1, 1, 1], [2, 0.45, 0.7]], v.freq, decay: 0.3) * v.gate.smooth(4.ms) } }
-          MB::Sound.track(:growl, send: { colour: :tint }) { |clip| clip.notes.hz.saw * clip.notes.gate * 0.5 }
+          MB::Sound.bus(:color) { |sig| chords.synth(voices: 5) { |v, _| (sig * 0.004).resonate([[1, 1, 1], [2, 0.45, 0.7]], v.freq, decay: 0.3) * v.gate.smooth(4.ms) } }
+          MB::Sound.track(:growl, send: { color: :tint }) { |clip| clip.notes.hz.saw * clip.notes.gate * 0.5 }
           MB::Sound.scene(:a, growl: n.seq(n::E2, n::G2, n::B2, n::D3).n8.loop)
           MB::Sound.go(:a, on: :now)
           MB::Sound.at_bar(2) { MB::Sound.turn(:tint, 1) }

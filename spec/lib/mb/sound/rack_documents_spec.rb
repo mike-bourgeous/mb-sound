@@ -139,7 +139,7 @@ RSpec.describe('rack documents') do
     it "refuses slot lines that don't match the body's slots, or outside rack documents" do
       text = io.dump(s.arack(:t2) { |sig| sig.slot(:color) { |c| c * 0.5 } })
       expect { io.load(text.sub("slot :color, :audio\n", '')) }.to raise_error(io::LoadError, /don't match the slots the rack makes \(color; slot :color, :audio\)/)
-      expect { io.load(text.sub('slot :color, :audio', 'slot :colour, :audio')) }.to raise_error(io::LoadError, /don't match/)
+      expect { io.load(text.sub('slot :color, :audio', 'slot :colors, :audio')) }.to raise_error(io::LoadError, /don't match/)
       expect { io.load(text.sub('slot :color, :audio', 'slot :color, :sound')) }.to raise_error(io::LoadError, /slot takes a name and the type/)
       expect { io.load("graph #{io::FORMAT}\nslot :x, :audio\n1.constant") }.to raise_error(io::LoadError, /slot lines belong to rack documents/)
       # (format 12 and older: no slot lines)

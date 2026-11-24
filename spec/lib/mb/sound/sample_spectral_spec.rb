@@ -193,7 +193,7 @@ RSpec.describe(MB::Sound::Sample::Spectral, :aggregate_failures) do
     let(:plain) { MB::Sound::Sample[Numo::SFloat.cast(held)] }
 
     # [the step from the last sample back to the first, the largest step
-    # between neighbours inside]
+    # between neighbors inside]
     def wrap_step(d)
       d = Numo::DFloat.cast(d)
       [(d[0] - d[-1]).abs, (d[1..] - d[0...-1]).abs.max]
