@@ -35,13 +35,36 @@ RSpec.describe('MB::Sound::FastAudio::JackMIDIOutput timed messages', :aggregate
   end
 
   # The loopback's own delay in frames (a message written in one cycle and
-  # read back by the same client: the dummy server's 256-frame period, or 0)
-  def loop_delay(out, inp)
+  # read back by the same client: the dummy server's 256-frame period, or
+  # 0); with +frame+, also the frame the message was sent at (it went out
+  # in the cycle holding that frame, before this returns)
+  def loop_delay(out, inp, frame: false)
     base = (fa.jack_frame_time + 4096) & 0xffff_ffff
     out.write_at(base, 0xb0, 1, 1)
     got = read_until(inp, 1)
     expect(got.length).to eq(1)
-    delta(base, got[0][0])
+    frame ? [delta(base, got[0][0]), base] : delta(base, got[0][0])
+  end
+
+  # Writes a message for 10000 frames before jack_frame_time (JACK's
+  # estimate of now) and checks how it went out: at the start of a cycle,
+  # counted late, with the lateness the C code reports equal to where it
+  # arrived, and at least as late as the gap from its frame to +seen+ (a
+  # frame of a cycle that ran before the write; see #loop_delay) less a
+  # period.  Everything compared comes from the cycles themselves, not
+  # from the estimate: a slow process (4 Valgrind processes) found the
+  # estimate up to 755 frames past the cycle that sent the message, and
+  # the bound from it (10000 less a period) failed at 9245 (fixes-19).
+  def check_late(out, inp, lag, seen)
+    past = (fa.jack_frame_time - 10_000) & 0xffff_ffff
+    out.write_at(past, 0x90, 60, 1)
+    got = read_until(inp, 1)
+    expect(got.length).to eq(1)
+    late = delta(past, (got[0][0] - lag) & 0xffff_ffff)
+    expect(out.stats[:timed_late]).to eq(1)
+    expect(out.stats[:timed_max_late]).to eq(late) # (sent at offset 0 of the cycle the C code calls now)
+    expect(late).to be > delta(past, seen) - 256
+    late
   end
 
   it 'sends each message on its frame, sorted, whatever order it was queued in' do
@@ -67,15 +90,19 @@ RSpec.describe('MB::Sound::FastAudio::JackMIDIOutput timed messages', :aggregate
 
   it 'sends late messages at the start of the next cycle and counts them' do
     out, inp = loopback
-    lag = loop_delay(out, inp)
-    past = (fa.jack_frame_time - 10_000) & 0xffff_ffff
-    out.write_at(past, 0x90, 60, 1)
-    got = read_until(inp, 1)
-    # (jack_frame_time is the server's estimate of now, up to a period past
-    # the start of the cycle the message goes out in; memcheck found 9977)
-    expect(delta(past, got[0][0]) - lag).to be >= 10_000 - 256
-    expect(out.stats[:timed_late]).to eq(1)
-    expect(out.stats[:timed_max_late]).to be >= 10_000 - 256
+    lag, seen = loop_delay(out, inp, frame: true)
+    expect(check_late(out, inp, lag, seen)).to be > 9000 # (about 10000 at any normal speed)
+  end
+
+  it 'reports late messages by the cycles, also while the client runs late' do
+    out, inp = loopback
+    lag, seen = loop_delay(out, inp, frame: true)
+    # (every callback starts 12 ms late, more than two 5.3 ms periods: the
+    # estimate of now runs ahead of the cycles, as in a slow process)
+    fa.jack_stall(12_000, 1)
+    check_late(out, inp, lag, seen)
+  ensure
+    fa.jack_stall(0, 1)
   end
 
   it 'takes one- and two-byte messages and refuses SysEx' do
